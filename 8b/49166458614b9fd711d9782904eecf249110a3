@@ -1,0 +1,22 @@
+demos/GaussIntSum/GaussIntSum/GaussSum.lean
+  h_4cc74772b10fd4 1-2,7,16-27
+demos/RootTwoIrrational/RootTwoIrrational/Divisibility.lean
+  h_4cc74772b10fd4 1-2,7,11-12,15-16
+demos/RootTwoIrrational/RootTwoIrrational/EuclidLemma.lean
+  h_4cc74772b10fd4 1,12-14
+demos/RootTwoIrrational/RootTwoIrrational/IrrationalSqrtTwo.lean
+  h_4cc74772b10fd4 1,8-10,17-55
+tests/test_imports.py
+  h_4cc74772b10fd4 44,46,48,50,52,54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8b49166458614b9fd711d9782904eecf249110a3",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
