@@ -1,0 +1,20 @@
+.github/workflows/ci.yml
+  h_4cc74772b10fd4 30,32-54
+.github/workflows/demo.yml
+  h_4cc74772b10fd4 1-60
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 161-168,375,574
+tests/test_cli_errors.py
+  h_4cc74772b10fd4 1-158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ebd9f9924702df37f6ac826c8c1651181cc9bfbf",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
