@@ -115,13 +115,15 @@ Checking a single model in isolation requires reconstructing its required contex
 
 ## 6. CLI Command Architecture
 
-The `axbt` CLI supports three primary commands mirroring a progressive developer workflow. Command-line mechanics (argument parsing, subcommands, options like `--select`/`--sorry`, help output, exit codes) are implemented with the [**`click`**](https://click.palletsprojects.com/) Python library:
+The `axbt` CLI supports a progressive developer workflow. Command-line mechanics (argument parsing, subcommands, options like `--select`/`--sorry`, help output, exit codes) are implemented with the [**`click`**](https://click.palletsprojects.com/) Python library:
 
 | Command | Description | Performance & Purpose |
 | --- | --- | --- |
 | **`axbt compile`** | Scans every configured module directory, checks MD5 hashes, updates the DAG, outputs `.axbt/manifest.json`, and (re)generates cached standalone payloads for all declared `targets`. Two run modes: `--incremental` (default) only re-extracts declarations for modified files; `--full-refresh` ignores the previous manifest and re-extracts everything. | **Fast:** Only re-extracts declarations for modified files (incremental mode). |
 | **`axbt check`** | Runs `compile` first (unless `--no-compile` is passed, which takes the existing manifest at face value), assembles the standalone payload for the selection (inlining dependencies, stubbing only where `--sorry` requests it) and submits it for a rapid typecheck via Axle. The same run modes apply to the precursor; the check step always re-submits its selection. | **Fast & Lightweight:** Optimized for daily modeling and rapid proof iteration; the precursor compile is incremental (a clean tree makes no API calls). |
 | **`axbt verify`** | Runs `compile` first (same run modes as `check`), then kernel-level verification: for each selection the payload's theorem proofs are stripped into a formal statement (the API's `theorem2sorry` transform, preserving imports and local definitions), and the real content is checked against it via `verify_proof`. Declaration-level selections focus on their own declaration (the payload's other theorems are `permitted_sorries`); selections carrying a `sorry` fail locally without an API call. | **Slow & Strict:** Intended for final validation, release gates, and CI/CD pipelines. |
+| **`axbt list`** | Prints the parsed declaration tree (kinds, file-accurate positions, `sorry` markers) in topological order — dependencies first — offline and read-only, with `--select` filtering. | **Instant:** Inspection and orientation; no API calls. |
+| **`axbt debug`** | Developer diagnostic: verifies `AXLE_API_KEY` is set and accepted by the API (masked echo, reachability with latency, resolved environment), and prints the project's configuration and `.axbt/` cache state. Exits 1 when the key fails. | **Diagnostic:** First stop when the environment or cache seems off. |
 
 ### Selection (`--select`) and stubbing (`--sorry`)
 
