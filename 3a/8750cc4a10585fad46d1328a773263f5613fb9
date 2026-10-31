@@ -1,0 +1,16 @@
+src/axle_build_tool/config.py
+  h_4cc74772b10fd4 1-293
+src/axle_build_tool/scanner.py
+  h_4cc74772b10fd4 1-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3a8750cc4a10585fad46d1328a773263f5613fb9",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
