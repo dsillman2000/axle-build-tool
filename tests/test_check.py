@@ -701,8 +701,37 @@ class TestSorry:
         assert result.exit_code == 1
         assert "never stubbed" in result.output
 
-    def test_stale_manifest_warns_with_the_compile_prescription(
+    def test_sorry_warnings_collapse_into_one_line(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The stubs' own sorry-warnings are report noise: collapsed
+        into one line; warnings from outside the stubbed subtree stay."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        fake_axle.check_result = make_response(
+            CheckResponse,
+            okay=True,
+            lean_messages=Messages(
+                [],
+                [
+                    "-:1:1-1:20: warning: declaration uses `sorry`",
+                    "-:2:1-2:20: warning: declaration uses `sorry`",
+                    "-:4:1: warning: something real",
+                ],
+                [],
+            ),
+        )
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.C", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "upstream stubbed: 2 declarations (sorry warnings hidden)" in result.output
+        # The real warning is kept, attributed to its file.
+        assert "    M/B.lean:2:1: warning: something real" in result.output
+        assert "declaration uses" not in result.output
+
+    def test_stale_manifest_warns_with_the_compile_prescription(        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
         """A `--no-compile` run against a file edited since compiling
         warns that stubs could not be applied — never silently."""

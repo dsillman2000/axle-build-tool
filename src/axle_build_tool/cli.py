@@ -390,6 +390,48 @@ def _validate_stub_closure(
 _MESSAGE_POSITION = re.compile(r"^-:(\d+):(\d+)(?:-(\d+):(\d+))?(?=:)")
 
 
+#: Lean's sorry warning text (backticks in current Lean, quotes seen in
+#: older versions).
+_SORRY_WARNING = re.compile(r"declaration uses [`']sorry[`']")
+
+
+def _split_stub_warnings(
+    messages: list[str],
+    payload: Payload,
+    stub_map: dict[str, frozenset[str] | None] | None,
+) -> tuple[list[str], int]:
+    """Split Lean messages into (kept, collapsed-count).
+
+    In a `--sorry` run, the stubbed declarations' own `declaration uses
+    'sorry'` warnings are report noise — the stubs are ours by
+    construction. Warnings raised inside a stubbed node's payload
+    section are collapsed into a count; everything else (including
+    sorries outside the stubbed subtrees) is kept.
+    """
+    if not stub_map:
+        return messages, 0
+    stubbed_sections = [
+        payload.sections[name] for name in stub_map if name in payload.sections
+    ]
+    kept: list[str] = []
+    collapsed = 0
+    for message in messages:
+        position = _MESSAGE_POSITION.match(message)
+        in_stubbed_section = (
+            position is not None
+            and _SORRY_WARNING.search(message) is not None
+            and any(
+                start <= int(position.group(1)) <= end
+                for start, end in stubbed_sections
+            )
+        )
+        if in_stubbed_section:
+            collapsed += 1
+        else:
+            kept.append(message)
+    return kept, collapsed
+
+
 def _rewrite_message_position(
     message: str, payload: Payload, paths: dict[str, str]
 ) -> str:
@@ -562,12 +604,22 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             failed += 1
             status = click.style("FAIL", fg="red")
         click.echo(f"{label:<{width}}  {status}")
-        messages = [
-            *response.lean_messages.errors,
-            *response.lean_messages.warnings,
-        ]
-        for message in messages:
+        kept, collapsed = _split_stub_warnings(
+            [
+                *response.lean_messages.errors,
+                *response.lean_messages.warnings,
+            ],
+            payload,
+            stub_map,
+        )
+        for message in kept:
             click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
+        if collapsed:
+            click.secho(
+                f"    upstream stubbed: {collapsed} declaration"
+                f"{'s' if collapsed != 1 else ''} (sorry warnings hidden)",
+                dim=True,
+            )
         if (
             not response.okay
             and not response.lean_messages.errors
@@ -1116,12 +1168,22 @@ def verify(
             click.echo(f"{label:<{width}}  {click.style('FAIL', fg='red')}")
             if vacuous:
                 click.echo("    the negation is also provable; the statement is vacuous")
-        messages = [
-            *response.lean_messages.errors,
-            *response.lean_messages.warnings,
-        ]
-        for message in messages:
+        kept, collapsed = _split_stub_warnings(
+            [
+                *response.lean_messages.errors,
+                *response.lean_messages.warnings,
+            ],
+            payload,
+            stub_map,
+        )
+        for message in kept:
             click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
+        if collapsed:
+            click.secho(
+                f"    upstream stubbed: {collapsed} declaration"
+                f"{'s' if collapsed != 1 else ''} (sorry warnings hidden)",
+                dim=True,
+            )
         if (
             not response.okay
             and not response.lean_messages.errors

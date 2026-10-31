@@ -749,3 +749,24 @@ class TestSorry:
 
         assert result.exit_code == 1
         assert "never stubbed" in result.output
+
+    def test_sorry_warnings_collapse_into_one_line(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        fake_axle.verify_result = make_response(
+            VerifyProofResponse,
+            okay=True,
+            negation=None,
+            lean_messages=Messages(
+                [], ["-:1:1-1:20: warning: declaration uses `sorry`"], []
+            ),
+        )
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.B", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "upstream stubbed: 1 declaration (sorry warnings hidden)" in result.output
+        assert "declaration uses" not in result.output
