@@ -1,0 +1,22 @@
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 26,108-109,111-112,118
+src/axle_build_tool/extraction.py
+  h_4cc74772b10fd4 219,229,231-233,238
+src/axle_build_tool/manifest.py
+  h_4cc74772b10fd4 48-52,242-244,246
+tests/test_compile.py
+  h_4cc74772b10fd4 21,464,471-473,475,482-484
+tests/test_manifest.py
+  h_4cc74772b10fd4 181,205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bb6df0221bb9694d76e00b306b44c93ce3bbaa05",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
