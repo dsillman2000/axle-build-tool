@@ -31,3 +31,6 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# ZCode workspace config
+.zcode/
