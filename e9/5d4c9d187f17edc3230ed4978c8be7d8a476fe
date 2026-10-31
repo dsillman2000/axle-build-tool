@@ -1,0 +1,24 @@
+.github/workflows/ci.yml
+  h_4cc74772b10fd4 1-31
+tests/conftest.py
+  h_4cc74772b10fd4 1-19
+tests/test_cli.py
+  h_4cc74772b10fd4 1-89
+tests/test_config.py
+  h_4cc74772b10fd4 1-173
+tests/test_demos.py
+  h_4cc74772b10fd4 1-93
+tests/test_scanner.py
+  h_4cc74772b10fd4 1-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e95d4c9d187f17edc3230ed4978c8be7d8a476fe",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
