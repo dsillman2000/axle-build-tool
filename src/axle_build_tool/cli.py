@@ -13,6 +13,7 @@ import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ from axle_build_tool.manifest import (
     load_manifest,
     save_manifest,
     topological_order,
+    verification_signature,
 )
 from axle_build_tool.payloads import (
     Payload,
@@ -338,6 +340,31 @@ def _refine_stub_map(
             )
         refined[name] = remaining
     return refined
+
+
+def _resolve_permitted_sorries(
+    selectors: tuple[str, ...] | list[str],
+    config: ProjectConfig,
+    manifest: Manifest,
+) -> frozenset[str]:
+    """Resolve `--permitted-sorries` selectors into declaration names.
+
+    A declaration-level selector excuses that declaration; a file- or
+    module-level selector excuses every verifiable declaration in it.
+    The names are the full extracted names (the API reports and matches
+    qualified names — observed live).
+    """
+    permitted: set[str] = set()
+    for selector in selectors:
+        selection = resolve_selection(selector, config, manifest)
+        for node in selection.payload_nodes(manifest):
+            if selection.declaration is not None:
+                permitted |= {selection.declaration}
+            else:
+                permitted |= {
+                    d.name for d in node.declarations if d.kind in _VERIFY_KINDS
+                }
+    return frozenset(permitted)
 
 
 def _validate_stub_closure(
@@ -690,8 +717,13 @@ def debug() -> None:
 class _VerifyScope:
     """What of a selection `axbt verify` will (or won't) verify."""
 
-    #: `theorem2sorry` names (None = every theorem in the payload).
-    names: list[str] | None
+    #: Declarations to verify in this run — also the `theorem2sorry`
+    #: names focusing the formal statement. Empty = nothing to submit
+    #: (everything cached or excused).
+    to_verify: list[str]
+    #: Declarations with a still-valid cached verification — excused
+    #: from the sweep and skipped by the submission.
+    cached: list[str] = field(default_factory=list)
     #: Other verifiable declarations in the payload whose incompleteness
     #: (a `sorry`, or a proof relying on axioms) the API should excuse —
     #: used to keep declaration-level selections focused on their own
@@ -709,6 +741,9 @@ def _verify_scope(
     payload: Payload,
     manifest: Manifest,
     stub_map: dict[str, frozenset[str] | None] | None = None,
+    user_permitted: frozenset[str] = frozenset(),
+    force: bool = False,
+    sig_of=None,
 ) -> _VerifyScope:
     by_name = manifest.by_name()
     closure = [by_name[node_name] for node_name in payload.sections]
@@ -729,6 +764,15 @@ def _verify_scope(
             }
         else:
             stubbed_names |= names
+    excused = stubbed_names | set(user_permitted)
+
+    def cache_valid(declaration: ExtractedDecl, node_name: str) -> bool:
+        if force:
+            return False
+        return (
+            declaration.verified_sig is not None
+            and declaration.verified_sig == sig_of(node_name)
+        )
 
     if selection.declaration is not None:
         node = by_name[selection.node_name]
@@ -737,38 +781,65 @@ def _verify_scope(
         )
         if declaration.kind not in _VERIFY_KINDS:
             return _VerifyScope(
-                names=None,
+                to_verify=[],
                 skip_reason=(
                     f"'{declaration.name}' is a {declaration.kind}; verify checks "
                     "theorems/lemmas only — use axbt check for definitions"
                 ),
             )
+        if declaration.name in user_permitted:
+            return _VerifyScope(
+                to_verify=[],
+                skip_reason=(
+                    f"'{declaration.name}' is excused (--permitted-sorries); "
+                    "nothing to verify"
+                ),
+            )
         if declaration.is_sorry:
-            return _VerifyScope(names=None, sorried=[declaration.name])
+            return _VerifyScope(to_verify=[], sorried=[declaration.name])
+        if cache_valid(declaration, selection.node_name):
+            return _VerifyScope(
+                to_verify=[], cached=[declaration.name], permitted=sorted(excused) or None
+            )
         # The API sweeps the whole submitted content for incomplete
-        # proofs; excuse the payload's other theorems and every stubbed
-        # declaration so the selection is judged only on its own proof.
-        permitted = {
-            d.name for d in verifiable if d.name != declaration.name
-        } | stubbed_names
+        # proofs; excuse the payload's other theorems and every stubbed,
+        # cached, or user-permitted declaration so the selection is
+        # judged only on its own proof.
+        permitted = (
+            {d.name for d in verifiable if d.name != declaration.name}
+            | stubbed_names
+            | set(user_permitted)
+        )
         return _VerifyScope(
-            names=[declaration.name],
+            to_verify=[declaration.name],
             permitted=sorted(permitted) or None,
         )
+
     # File/module-level: the formal statement covers every verifiable
     # declaration in the payload (the full dependency closure).
     if not verifiable:
         return _VerifyScope(
-            names=None, skip_reason="no theorems to verify (definitions only)"
+            to_verify=[], skip_reason="no theorems to verify (definitions only)"
         )
+    cached = [
+        d.name
+        for node in closure
+        for d in node.declarations
+        if d.kind in _VERIFY_KINDS and cache_valid(d, node.name)
+    ]
+    permitted = stubbed_names | set(user_permitted) | set(cached)
+    to_verify = [d.name for d in verifiable if d.name not in permitted]
+    sorried = [
+        d.name
+        for d in verifiable
+        if d.is_sorry and d.name not in excused and d.name in to_verify
+    ]
+    if sorried:
+        return _VerifyScope(to_verify=[], sorried=sorried)
     return _VerifyScope(
-        names=None,
-        permitted=sorted(stubbed_names) or None,
-        sorried=[
-            d.name
-            for d in verifiable
-            if d.is_sorry and d.name not in stubbed_names
-        ],
+        to_verify=to_verify,
+        cached=cached,
+        permitted=sorted(permitted) or None,
     )
 
 
@@ -804,6 +875,22 @@ def _verify_scope(
     ),
 )
 @click.option(
+    "--permitted-sorries",
+    "permitted_sorries",
+    multiple=True,
+    help=(
+        "Excuse the named incomplete declarations (selector grammar; "
+        "repeatable) instead of failing on them. Excused declarations "
+        "are never recorded as verified."
+    ),
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Re-verify even when a cached verification is still valid.",
+)
+@click.option(
     "--select",
     "select",
     default=None,
@@ -813,7 +900,14 @@ def _verify_scope(
         "theorem/lemma — definitions have no proof to verify."
     ),
 )
-def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: str | None) -> None:
+def verify(
+    no_compile: bool,
+    incremental: bool,
+    sorry: tuple[str, ...],
+    permitted_sorries: tuple[str, ...],
+    force: bool,
+    select: str | None,
+) -> None:
     """Verify proofs at kernel level via the Axle API.
 
     The rigorous counterpart to `axbt check`: for every selection, the
@@ -823,6 +917,12 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
     real content is checked against it kernel-level. Selection and run
     modes match `axbt check`, and selections carrying a `sorry` fail
     without an API call.
+
+    Successful verifications are recorded per declaration in the
+    manifest, keyed on the declaration's file-closure content, the
+    environment, and the global options; a later verify skips
+    selections whose declarations are all still validly cached, unless
+    --force re-runs them.
     """
     project_root = Path.cwd()
     try:
@@ -831,6 +931,46 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
         )
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        user_permitted = _resolve_permitted_sorries(
+            permitted_sorries, config, manifest
+        )
+    except (ConfigError, ManifestError, SelectionError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not plan:
+        click.echo("No targets configured in axbt_project.yml; nothing to verify.")
+        return
+
+    paths = {node.name: node.path for node in manifest.nodes}
+    by_name = manifest.by_name()
+    node_of_decl = {
+        d.name: node.name for node in manifest.nodes for d in node.declarations
+    }
+    service = make_axle_service(config.axle)
+
+    async def prepare() -> str:
+        async with service:
+            await service.validate_environment()
+            return await service.resolve_environment()
+
+    try:
+        environment = asyncio.run(prepare())
+    except AxleServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    sig_cache: dict[str, str] = {}
+
+    def sig_of(node_name: str) -> str:
+        if node_name not in sig_cache:
+            sig_cache[node_name] = verification_signature(
+                by_name[node_name],
+                manifest,
+                environment,
+                config.axle.global_options,
+            )
+        return sig_cache[node_name]
+
+    try:
         items: list[tuple[str, Selection, Payload, _VerifyScope]] = []
         for label, selection in plan:
             refined = _refine_stub_map(stub_map, selection, label, manifest)
@@ -841,32 +981,45 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
                 stubbed=refined or None,
             )
             _validate_stub_closure(refined, label, payload)
+            # User-permitted declarations must belong to this payload.
+            closure_decls = {
+                d.name
+                for node_name in payload.sections
+                for d in by_name[node_name].declarations
+            }
+            missing = user_permitted - closure_decls
+            if missing:
+                raise SelectionError(
+                    "--permitted-sorries: "
+                    f"{', '.join(sorted(missing))} not part of {label!r}'s payload."
+                )
             items.append(
                 (
                     label,
                     selection,
                     payload,
-                    _verify_scope(selection, payload, manifest, refined),
+                    _verify_scope(
+                        selection,
+                        payload,
+                        manifest,
+                        refined,
+                        user_permitted=user_permitted,
+                        force=force,
+                        sig_of=sig_of,
+                    ),
                 )
             )
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if not items:
-        click.echo("No targets configured in axbt_project.yml; nothing to verify.")
-        return
-
     submittable = [
         (label, selection, payload, scope)
         for label, selection, payload, scope in items
-        if scope.skip_reason is None and not scope.sorried
+        if scope.skip_reason is None and not scope.sorried and scope.to_verify
     ]
-    paths = {node.name: node.path for node in manifest.nodes}
-    service = make_axle_service(config.axle)
 
     async def submit_all() -> list[Any]:
         async with service:
-            await service.validate_environment()
             semaphore = asyncio.Semaphore(service.max_concurrency)
 
             async def submit(
@@ -874,14 +1027,15 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
             ) -> Any:
                 label, selection, payload, scope = item
                 async with semaphore:
-                    # The formal statement is the payload with theorem
-                    # proofs stripped: self-contained (imports and local
-                    # definitions inline), so it elaborates standalone.
+                    # The formal statement is the payload with exactly
+                    # the to-verify theorems' proofs stripped; cached,
+                    # permitted, and stubbed declarations stay as they
+                    # are (and are excused from the sweep).
                     spec = await service.theorem2sorry(
                         payload.content,
                         context=label,
                         theorems_only=True,
-                        names=scope.names,
+                        names=scope.to_verify,
                     )
                     return await service.verify_proof(
                         spec.content,
@@ -892,10 +1046,13 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
 
             return list(await asyncio.gather(*(submit(item) for item in submittable)))
 
-    try:
-        responses = asyncio.run(submit_all())
-    except AxleServiceError as exc:
-        raise click.ClickException(str(exc)) from exc
+    if submittable:
+        try:
+            responses = asyncio.run(submit_all())
+        except AxleServiceError as exc:
+            raise click.ClickException(str(exc)) from exc
+    else:
+        responses = []
 
     if stub_map:
         try:
@@ -908,11 +1065,14 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
 
+    # Record successful verifications per declaration.
+    stamps: dict[str, tuple[str, datetime]] = {}
+    responses_iter = iter(responses)
     failed = 0
     skipped = 0
+    cached_count = 0
     #: Pad labels so the status column aligns across the report.
     width = max(len(label) for label, _, _, _ in items)
-    results = iter(responses)
     for label, _, payload, scope in items:
         if scope.skip_reason is not None:
             skipped += 1
@@ -928,12 +1088,21 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
                     "verify requires complete proofs"
                 )
             continue
-        response = next(results)
+        if not scope.to_verify:
+            cached_count += 1
+            note = "cached" if scope.cached else "nothing to submit"
+            click.echo(f"{label:<{width}}  {click.style('OK', fg='green')} ({note})")
+            continue
+        response = next(responses_iter)
         # A provable negation means the statement is vacuous — the
         # outcome is reported only when the API ran the negation check.
         vacuous = response.negation is not None and response.negation.okay
         if response.okay and not vacuous:
-            click.echo(f"{label:<{width}}  {click.style('OK', fg='green')}")
+            now = datetime.now(timezone.utc)
+            for name in scope.to_verify:
+                stamps[name] = (sig_of(node_of_decl[name]), now)
+            cached_note = f", {len(scope.cached)} cached" if scope.cached else ""
+            click.echo(f"{label:<{width}}  {click.style('OK', fg='green')}{cached_note}")
         else:
             failed += 1
             click.echo(f"{label:<{width}}  {click.style('FAIL', fg='red')}")
@@ -953,9 +1122,34 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
             click.echo(
                 f"    failed declarations: {', '.join(response.failed_declarations)}"
             )
+
+    if stamps:
+        stamped = set(stamps)
+        nodes = []
+        for node in manifest.nodes:
+            node_stamps = {n for n in stamped if node_of_decl.get(n) == node.name}
+            if not node_stamps:
+                nodes.append(node)
+                continue
+            sig, now = next(stamps[n] for n in node_stamps)
+            declarations = [
+                d.model_copy(update={"verified_sig": sig, "verified_at": now})
+                if d.name in node_stamps
+                else d
+                for d in node.declarations
+            ]
+            nodes.append(node.model_copy(update={"declarations": declarations}))
+        manifest = manifest.model_copy(update={"nodes": nodes})
+        try:
+            save_manifest(manifest, project_root)
+        except OSError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.secho(f"Recorded {len(stamps)} verification(s) in the manifest", dim=True)
+
     total = len(items)
     ok = total - failed - skipped
     skipped_note = f", {skipped} skipped" if skipped else ""
+    cached_note = f" ({cached_count} cached)" if cached_count else ""
     if failed:
         click.secho(
             f"Verified {total} selection(s): {failed} failed, {ok} OK{skipped_note}",
@@ -963,7 +1157,7 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
         )
         raise click.exceptions.Exit(1)
     click.secho(
-        f"Verified {total} selection(s): all OK{skipped_note}", fg="green"
+        f"Verified {total} selection(s): all OK{skipped_note}{cached_note}", fg="green"
     )
 
 
