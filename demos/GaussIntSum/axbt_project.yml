@@ -8,6 +8,6 @@ modules:
       - GaussSum.gauss_sum_identity
 
 axle:
-  environment: "lean-v4.35.0"
+  environment: "lean-4.35.0"
   timeout_seconds: 120
   global_options: {}
