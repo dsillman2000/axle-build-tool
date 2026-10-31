@@ -75,6 +75,32 @@ def _span_head_matches(line: str, kind: str) -> bool:
     return stripped.startswith(kind) or stripped.startswith("/-")
 
 
+#: The declaration keywords a signature can start (after modifiers).
+_KIND_TOKENS = frozenset(
+    {"theorem", "lemma", "example", "def", "abbrev", "structure", "class", "inductive", "instance"}
+)
+
+
+def bare_name(declaration: ExtractedDecl) -> str:
+    """The declaration's name as written in its file.
+
+    Extraction records the Lean-qualified name (`Scoped.variable_holds`
+    for a declaration inside `namespace Scoped`), while the signature is
+    the in-file text — so the name token after the kind keyword is the
+    bare name. Anonymous declarations (e.g. nameless `instance`s) have
+    none; they fall back to the last segment of the qualified name.
+    """
+    statement = _statement_of(declaration.signature)
+    tokens = statement.replace(":", " : ").split()
+    for index, token in enumerate(tokens):
+        if token in _KIND_TOKENS and index + 1 < len(tokens):
+            candidate = tokens[index + 1]
+            if not candidate.startswith((":", "(", "[", "{", "`")):
+                return candidate
+            break
+    return declaration.name.rsplit(".", 1)[-1]
+
+
 def stubbed_source(
     node: ManifestNode,
     source: str,

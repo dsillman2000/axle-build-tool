@@ -52,8 +52,8 @@ TWO_FILES = {"M/A.lean": "def t1 := 1\n", "M/B.lean": "import A\ndef t2 := t1\n"
 # (A's single line is inlined first, then a blank separator). Positions
 # are one-based payload coordinates, as the API reports them.
 TWO_FILE_DOCS = {
-    "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)},
-    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3)},
+    "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2")},
 }
 
 
@@ -114,7 +114,7 @@ class TestTargetsDefault:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -164,7 +164,10 @@ class TestSelection:
         assert calls[0]["names"] is None
         assert "def t1 := 1" in calls[0]["content"]
         assert "def t2 := t1" in calls[0]["content"]
-        assert status_line(result.output, "M") == "M OK"
+        # The module selection expands to per-declaration lines.
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        assert "Checked 1 selection(s): all OK" in result.output
 
 
 class TestFailureReporting:
@@ -179,7 +182,13 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def broken := x": {
-                "broken": make_document("broken", kind="def", line_pos=4, end_line_pos=4)
+                "broken": make_document(
+                    "broken",
+                    kind="def",
+                    line_pos=4,
+                    end_line_pos=4,
+                    signature="def broken",
+                )
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -198,7 +207,7 @@ class TestFailureReporting:
         result = runner.invoke(main, ["check", "--select", "M.A"])
 
         assert result.exit_code == 1
-        assert status_line(result.output, "M.A") == "M.A FAIL"
+        assert status_line(result.output, "M.A.broken") == "M.A.broken FAIL"
         # Positions are attributed back to the real source file...
         assert "    M/A.lean:3:15: error: unknown identifier 'x'" in result.output
         # ...while positions with no source counterpart are left alone.
@@ -212,7 +221,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -225,7 +234,7 @@ class TestFailureReporting:
         result = runner.invoke(main, ["check", "--select", "M.A"])
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.A") == "M.A OK"
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert "    M/A.lean:1:4: warning: unused variable" in result.output
 
     def test_failure_without_lean_messages_reports_failed_declarations(
@@ -235,7 +244,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -327,7 +336,7 @@ class TestCompilePrecursor:
         # B's re-extraction now reports both defs (one-based payload
         # coordinates; B's section starts at payload line 3).
         fake_axle._extract_documents_by_marker["def t3 := t2"] = {
-            "t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3),
+            "t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2"),
             "t3": make_document("t3", kind="def", line_pos=4, end_line_pos=4),
         }
 

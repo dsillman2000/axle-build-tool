@@ -50,7 +50,7 @@ from axle_build_tool.payloads import (
     write_compiled_payloads,
 )
 from axle_build_tool.scanner import ScanError, scan_module
-from axle_build_tool.stubbing import STUBBABLE_KINDS
+from axle_build_tool.stubbing import STUBBABLE_KINDS, bare_name
 from axle_build_tool.selection import Selection, SelectionError, resolve_selection
 
 _PLACEHOLDER_SOURCE = """\
@@ -533,6 +533,56 @@ def _split_stub_warnings(
     return kept, collapsed
 
 
+def _decl_verdict(node: ManifestNode, decl: ExtractedDecl, response: Any, payload: Payload) -> str:
+    """The per-declaration verdict for a multi-declaration selection.
+
+    The submission is one API call for the whole selection, so the
+    split is derived from the response: the declaration's own entry in
+    `failed_declarations`, or a Lean error whose payload position maps
+    (through the line map) into the declaration's file span.
+    """
+    if response.okay:
+        return click.style("OK", fg="green")
+    if decl.name in response.failed_declarations:
+        return click.style("FAIL", fg="red")
+    start, _end = payload.sections[node.name]
+    line_map = payload.line_map[node.name]
+    #: The payload lines whose source counterpart lies inside the
+    #: declaration's file span (the message positions are payload lines).
+    span = {
+        start + offset
+        for offset in range(len(line_map))
+        if decl.line_pos <= line_map[offset] <= decl.end_line_pos
+    }
+    for error in response.lean_messages.errors:
+        position = _MESSAGE_POSITION.match(error)
+        if position is not None and int(position.group(1)) in span:
+            return click.style("FAIL", fg="red")
+    return click.style("OK", fg="green")
+
+
+def _printed_lines(
+    label: str, selection: Selection, manifest: Manifest
+) -> list[tuple[str, ManifestNode | None, ExtractedDecl | None]]:
+    """The report lines a selection expands to.
+
+    Declaration-level selections print their selector as a single line
+    (the whole selection is one declaration). File/module-level
+    selections expand into one line per declaration — the same
+    granularity the default targets path reports at. Labels are
+    canonical (`module.file-stem.bare-name`), so namespaced
+    declarations don't repeat their namespace.
+    """
+    if selection.declaration is not None:
+        return [(label, None, None)]
+    expanded = [
+        (f"{node.name}.{bare_name(decl)}", node, decl)
+        for node in selection.payload_nodes(manifest)
+        for decl in node.declarations
+    ]
+    return expanded or [(label, None, None)]
+
+
 def _rewrite_message_position(
     message: str, payload: Payload, paths: dict[str, str]
 ) -> str:
@@ -712,21 +762,36 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
     failed = 0
     skipped = 0
     responses_iter = iter(responses)
-    #: Pad labels so the status column aligns across the report.
-    width = max(len(label) for label, _, _, _, _ in checks)
-    for label, _, payload, refined, granted in checks:
+    #: Pad labels so the status column aligns across the report. The
+    #: labels include every expanded declaration line.
+    width = max(
+        len(printed)
+        for label, selection, _, _, granted in checks
+        for printed, _, _ in (
+            _printed_lines(label, selection, manifest)
+            if granted is None
+            else [(label, None, None)]
+        )
+    )
+    for label, selection, payload, refined, granted in checks:
         if granted is not None:
             skipped += 1
             click.echo(f"{label:<{width}}  {click.style('SKIP', dim=True)}")
             click.secho(f"    {granted}", dim=True)
             continue
         response = next(responses_iter)
-        if response.okay:
-            status = click.style("OK", fg="green")
-        else:
+        if not response.okay:
             failed += 1
-            status = click.style("FAIL", fg="red")
-        click.echo(f"{label:<{width}}  {status}")
+        for printed, node, decl in _printed_lines(label, selection, manifest):
+            if node is None:
+                status = (
+                    click.style("OK", fg="green")
+                    if response.okay
+                    else click.style("FAIL", fg="red")
+                )
+            else:
+                status = _decl_verdict(node, decl, response, payload)
+            click.echo(f"{printed:<{width}}  {status}")
         kept, _ = _split_stub_warnings(
             [
                 *response.lean_messages.errors,
