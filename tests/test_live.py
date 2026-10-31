@@ -148,7 +148,7 @@ class TestLiveEnvironments:
         async def probe() -> str:
             service = AxleService(AxleConfig())  # environment=None
             async with service:
-                return await service._effective_environment()
+                return await service.resolve_environment()
 
         resolved = asyncio.run(probe())
         assert resolved.startswith("lean-"), resolved

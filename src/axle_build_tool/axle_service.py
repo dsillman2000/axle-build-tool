@@ -127,13 +127,13 @@ class AxleService:
         """Max concurrent in-flight requests (from the client; default 4)."""
         return int(getattr(self.client, "max_concurrency", 4))
 
-    async def _effective_environment(self) -> str:
+    async def resolve_environment(self) -> str:
         """Resolve the environment for an API call.
 
         An explicitly configured `axle.environment` is used verbatim.
         Otherwise (the default) axbt pings the Axle API's environments
         endpoint and picks the latest Lean version it offers, via the
-        SDK's `get_latest_environment`. The resolved value is cached for
+        SDK's `get_latest_environment`; the resolved value is cached for
         the lifetime of the service. If the Axle API is unreachable, the
         ultimate fallback is `FALLBACK_ENVIRONMENT` so a best-effort
         attempt can still be made; any other detection error propagates.
@@ -204,7 +204,7 @@ class AxleService:
         try:
             return await self.client.check(
                 content=content,
-                environment=await self._effective_environment(),
+                environment=await self.resolve_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 **kwargs,
@@ -227,7 +227,7 @@ class AxleService:
             return await self.client.verify_proof(
                 formal_statement=formal_statement,
                 content=content,
-                environment=await self._effective_environment(),
+                environment=await self.resolve_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 **kwargs,
@@ -251,7 +251,7 @@ class AxleService:
         try:
             return await self.client.theorem2sorry(
                 content=content,
-                environment=await self._effective_environment(),
+                environment=await self.resolve_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 ignore_imports=False,
@@ -275,7 +275,7 @@ class AxleService:
         try:
             return await self.client.extract_decls(
                 content=content,
-                environment=await self._effective_environment(),
+                environment=await self.resolve_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 ignore_imports=False,
