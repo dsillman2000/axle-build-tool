@@ -1,0 +1,13 @@
+project:
+  name: "GaussIntSum"
+  version: "0.1.0"
+
+modules:
+  GaussIntSum:
+    targets:
+      - GaussSum.gauss_sum_identity
+
+axle:
+  environment: "lean-v4.35.0"
+  timeout_seconds: 120
+  global_options: {}

@@ -1,0 +1,17 @@
+project:
+  name: "RootTwoIrrational"
+  version: "0.1.0"
+
+modules:
+  RootTwoIrrational:
+    dir: "RootTwoIrrational"
+    targets:
+      - Divisibility.prime_gt_one
+      - Divisibility.prime_dvd_square
+      - EuclidLemma.euclid_lemma
+
+axle:
+  environment: "lean-v4.35.0"
+  timeout_seconds: 120
+  global_options:
+    maxHeartbeats: 100000

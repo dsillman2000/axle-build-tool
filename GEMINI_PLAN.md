@@ -55,7 +55,7 @@ The `axle` section configures how `axbt` talks to the Axle (Axiom Lean Engine) A
 Notes on configuration behavior:
 
 * **Cache directory:** `.axbt/` is the default and only cache location. It is **not** a configurable setting and cannot be overridden.
-* **Connectivity:** `axbt` always executes against the remote Axle API configuration; there is no `endpoint` setting. Unit tests use mocks in place of the real API.
+* **Connectivity:** `axbt` always executes against the remote Axle API configuration; there is no `endpoint` setting. Unit tests use mocks in place of the real API. All HTTP communication with the Axle API uses the [`httpx`](https://www.python-httpx.org/) library.
 
 Authentication is handled via the **`AXLE_API_KEY`** environment variable, which is the default API key used for all `axbt` executions against the Axle API.
 
@@ -174,6 +174,6 @@ Both demos serve as executable acceptance tests for the tool:
 
 1. **Phase 1 (Core CLI & Config):** Implement `axbt_project.yml` parsing (via `PyYAML`), directory initialization (`axbt init`), and file-system scanning, using the `click` library for command-line mechanics.
 2. **Phase 2 (Parser & DAG):** Integrate standard Lean import parsing, MD5 caching, and `manifest.json` generation.
-3. **Phase 3 (Axle Integration):** Connect `axbt compile` and `axbt check` to the Axle SDK/CLI endpoints for declaration extraction and lightweight checking.
+3. **Phase 3 (Axle Integration):** Connect `axbt compile` and `axbt check` to the Axle SDK/CLI endpoints for declaration extraction and lightweight checking, using `httpx` as the HTTP client for all Axle API networking.
 4. **Phase 4 (Isolation Engine):** Build the automated stubbing mechanism to handle namespaces, sections, and upstream `sorry` injection for isolated model execution.
 5. **Phase 5 (Demo Projects):** Create the `demos/RootTwoIrrational` and `demos/GaussIntSum` projects and wire them into the integration test suite as end-to-end acceptance fixtures.
