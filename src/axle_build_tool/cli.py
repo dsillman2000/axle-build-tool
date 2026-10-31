@@ -298,24 +298,59 @@ def _build_stub_map(
     return stub_map
 
 
-def _validate_stub_scope(
+def _refine_stub_map(
     stub_map: dict[str, frozenset[str] | None],
     selection: Selection,
     label: str,
-    payload: Payload,
     manifest: Manifest,
-) -> None:
-    """Every `--sorry` target must be a dependency of the selection —
-    and never the selection itself (which is never stubbed)."""
+) -> dict[str, frozenset[str] | None]:
+    """Validate `--sorry` scoping for one selection and refine it.
+
+    A `--sorry` naming the selection's **own node** is allowed for
+    declaration-level selections: every stubbable declaration of that
+    node is stubbed *except the selected one* ("stub my siblings, judge
+    me"). Naming only the selected declaration leaves nothing to stub
+    and is rejected. For file/module-level selections the node *is*
+    the selection, so it stays rejected outright.
+    """
     if not stub_map:
-        return
-    closure = set(payload.sections)
+        return stub_map
     own = {node.name for node in selection.payload_nodes(manifest)}
-    for name in stub_map:
-        if name in own:
+    refined: dict[str, frozenset[str] | None] = {}
+    for name, names in stub_map.items():
+        if name not in own:
+            refined[name] = names
+            continue
+        if selection.declaration is None:
             raise SelectionError(
                 f"--sorry {name!r}: the selection {label!r} is never stubbed."
             )
+        node = manifest.by_name()[name]
+        if names is None:
+            remaining = frozenset(
+                d.name for d in node.declarations if d.kind in STUBBABLE_KINDS
+            ) - {selection.declaration}
+        else:
+            remaining = names - {selection.declaration}
+        if not remaining:
+            raise SelectionError(
+                f"--sorry {name!r}: the selection {label!r} is never stubbed."
+            )
+        refined[name] = remaining
+    return refined
+
+
+def _validate_stub_closure(
+    stub_map: dict[str, frozenset[str] | None],
+    label: str,
+    payload: Payload,
+) -> None:
+    """Every `--sorry` target must be inside the selection's payload —
+    i.e. an actual dependency of the selection."""
+    if not stub_map:
+        return
+    closure = set(payload.sections)
+    for name in stub_map:
         if name not in closure:
             raise SelectionError(
                 f"--sorry {name!r}: not a dependency of {label!r}; stubbing "
@@ -432,13 +467,14 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         checks = []
         for label, selection in plan:
+            refined = _refine_stub_map(stub_map, selection, label, manifest)
             payload = build_payload(
                 selection.payload_nodes(manifest),
                 manifest,
                 project_root,
-                stubbed=stub_map or None,
+                stubbed=refined or None,
             )
-            _validate_stub_scope(stub_map, selection, label, payload, manifest)
+            _validate_stub_closure(refined, label, payload)
             checks.append((label, selection, payload))
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -797,19 +833,20 @@ def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: 
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         items: list[tuple[str, Selection, Payload, _VerifyScope]] = []
         for label, selection in plan:
+            refined = _refine_stub_map(stub_map, selection, label, manifest)
             payload = build_payload(
                 selection.payload_nodes(manifest),
                 manifest,
                 project_root,
-                stubbed=stub_map or None,
+                stubbed=refined or None,
             )
-            _validate_stub_scope(stub_map, selection, label, payload, manifest)
+            _validate_stub_closure(refined, label, payload)
             items.append(
                 (
                     label,
                     selection,
                     payload,
-                    _verify_scope(selection, payload, manifest, stub_map),
+                    _verify_scope(selection, payload, manifest, refined),
                 )
             )
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:

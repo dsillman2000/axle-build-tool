@@ -663,6 +663,44 @@ class TestSorry:
         assert "never stubbed" in result.output
         assert check_calls(fake_axle) == []
 
+    def test_sorry_on_own_file_stubs_siblings_for_declaration_selections(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """`--select M.A.base_holds --sorry M.A`: stub my siblings, judge
+        me — the selected declaration keeps its real body."""
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.A.base_holds", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base : Nat := sorry" in content  # sibling stubbed
+        assert "theorem base_holds : base = 1 := rfl" in content  # selection real
+
+    def test_sorry_naming_only_the_selected_declaration_is_rejected(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.A.base_holds", "--sorry", "M.A.base_holds"]
+        )
+
+        assert result.exit_code == 1
+        assert "never stubbed" in result.output
+
+    def test_sorry_on_own_module_is_rejected_for_module_selections(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M", "--sorry", "M.A"])
+
+        assert result.exit_code == 1
+        assert "never stubbed" in result.output
+
 
 class TestRitual:
     def test_compile_then_check_ritual(
