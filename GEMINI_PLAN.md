@@ -35,7 +35,7 @@ modules:
       - EuclidLemma.euclid_lemma
 
 axle:
-  environment: "lean-v4.35.0" # Lean environment for the Axle API
+  environment: "lean-4.35.0" # Lean environment for the Axle API
   timeout_seconds: 120 # Per-request timeout for Axle API calls
   global_options: # Lean global options passed through to Axle
     maxHeartbeats: 100000
@@ -48,7 +48,7 @@ axle:
 
 The `axle` section configures how `axbt` talks to the Axle (Axiom Lean Engine) API:
 
-* **`environment`:** The Lean environment (toolchain version) Axle should run code in, e.g. `lean-v4.35.0`.
+* **`environment`:** The Lean environment (toolchain version) Axle should run code in, e.g. `lean-4.35.0`.
 * **`timeout_seconds`:** Maximum wall-clock time in seconds allowed for a single Axle request before it is cancelled.
 * **`global_options`:** A dict of Lean global options applied to every submission (e.g. `maxHeartbeats`), forwarded verbatim to the API.
 
