@@ -853,3 +853,106 @@ class TestRitual:
         # The payload inlines the dependency.
         assert "def t1 := 1" in calls[0]["content"]
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+
+
+class TestShare:
+    """`--share` mints one share link per submission, on stdout only."""
+
+    def test_share_prints_a_link_per_submission(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert (
+            result.output.count("share: https://axle.test/check#r=fake-req-") == 1
+        )
+        assert "Share link(s) minted: 1" in result.output
+
+        # Without the flag: no share lines at all.
+        plain = runner.invoke(main, ["check", "--select", "M.A"])
+        assert "share:" not in plain.output
+
+    def test_share_failed_check_still_mints(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A failed check is exactly what you want to share."""
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.check_result = make_response(CheckResponse, okay=False)
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 1
+        assert "share: https://axle.test/check#r=fake-req-" in result.output
+        assert "Share link(s) minted: 1" in result.output
+
+    def test_share_failure_warns_but_leaves_the_exit_code(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.share_status = 404
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert "share: unavailable (" in result.output
+        assert "Share link(s) minted" not in result.output
+
+    def test_share_network_failure_warns_too(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        import aiohttp
+
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.share_status = aiohttp.ClientConnectionError("connection refused")
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert "share: unavailable (" in result.output
+
+    def test_share_skipped_selections_get_no_link(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.A", "--sorry", "M.A", "--share"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "SKIP" in result.output
+        assert "share:" not in result.output
+
+    def test_share_does_not_modify_the_manifest(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        before = manifest_path(root).read_bytes()
+
+        # --no-compile isolates the check phase: a precursor compile
+        # always refreshes generated_at.
+        result = runner.invoke(main, ["check", "--no-compile", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert manifest_path(root).read_bytes() == before
