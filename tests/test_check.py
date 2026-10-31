@@ -9,6 +9,7 @@ from axle.types import CheckResponse, Messages
 from click.testing import CliRunner
 
 from axle_build_tool import main
+from axle_build_tool.manifest import load_manifest, manifest_path
 from conftest import make_document, make_response
 
 runner = CliRunner()
@@ -278,16 +279,103 @@ class TestPlanErrors:
         assert result.exit_code == 1
         assert "Unknown module 'Nope'" in result.output
 
-    def test_check_without_manifest_fails_with_compile_hint(
+    def test_no_compile_without_manifest_fails_with_compile_hint(
         self, make_project, tmp_path: Path, monkeypatch
     ) -> None:
         root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": "def t1 := 1\n"})
         monkeypatch.chdir(root)
 
-        result = runner.invoke(main, ["check"])
+        result = runner.invoke(main, ["check", "--no-compile"])
 
         assert result.exit_code != 0
         assert "compile" in result.output
+
+
+class TestCompilePrecursor:
+    """`check` compiles by default so the manifest is never stale."""
+
+    def test_check_compiles_first_when_the_manifest_is_missing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        assert manifest_path(root).is_file()
+        # Extraction happened as part of the precursor compile, then the
+        # per-target checks ran.
+        assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 2
+        assert len(check_calls(fake_axle)) == 2
+        assert "M.B.t2: okay" in result.output
+
+    def test_check_recompiles_changed_sources_by_default(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        # A new declaration the manifest knows nothing about: the default
+        # check recompiles (re-extracting the changed file) and succeeds.
+        (root / "M/B.lean").write_text(
+            "import A\ndef t2 := t1\ndef t3 := t2\n", encoding="utf-8"
+        )
+        # B's re-extraction now reports both defs (one-based payload
+        # coordinates; B's section starts at payload line 3).
+        fake_axle._extract_documents_by_marker["def t3 := t2"] = {
+            "t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3),
+            "t3": make_document("t3", kind="def", line_pos=4, end_line_pos=4),
+        }
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 1
+        assert "M.B.t2: okay" in result.output
+        extracted = load_manifest(root).by_name()["M.B"].declarations
+        assert [d.name for d in extracted] == ["t2", "t3"]
+
+    def test_no_compile_takes_the_manifest_at_face_value(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        # The source changes after compiling; --no-compile must not
+        # re-extract (the manifest is taken at face value).
+        (root / "M/B.lean").write_text(
+            "import A\ndef t2 := t1\ndef t3 := t2\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(main, ["check", "--no-compile"])
+
+        assert result.exit_code == 0, result.output
+        assert not [m for m, _ in fake_axle.calls if m == "extract_decls"]
+        assert len(check_calls(fake_axle)) == 2
+
+    def test_clean_compile_makes_no_api_calls_even_when_pinned(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """An incremental compile of a clean tree stays fully offline —
+        even environment validation is skipped (nothing to submit)."""
+        root = make_project(tmp_path, pinned_config("lean-4.35.0"), TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert fake_axle.calls == []
 
 
 class TestEnvironmentValidation:

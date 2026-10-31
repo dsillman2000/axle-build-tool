@@ -216,6 +216,9 @@ class TestLiveDemoCheck:
         # Corrupt the *targeted declaration itself*: check submits the
         # current sources with `names=[declaration]` focusing, so errors
         # outside the named declarations are (correctly) not reported.
+        # `--no-compile` is required to reach check's own failure path:
+        # the default precursor compile would fail first (a corrupted
+        # source cannot be extracted cleanly either).
         divisibility = root / "RootTwoIrrational" / "Divisibility.lean"
         source = divisibility.read_text(encoding="utf-8")
         assert "hp.one_lt" in source
@@ -223,10 +226,29 @@ class TestLiveDemoCheck:
             source.replace("hp.one_lt", "hp.nonexistent_property"),
             encoding="utf-8",
         )
-        result = runner.invoke(main, ["check"])
+        result = runner.invoke(main, ["check", "--no-compile"])
         assert result.exit_code == 1, result.output
         assert "FAILED" in result.output
         # The Lean error is attributed back to the user's file.
+        assert "Divisibility.lean" in result.output
+
+    def test_check_recompiles_a_corrupted_source_by_default(self, in_demo) -> None:
+        """The default precursor compile fails fast with file context."""
+        root = in_demo("RootTwoIrrational")
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        divisibility = root / "RootTwoIrrational" / "Divisibility.lean"
+        source = divisibility.read_text(encoding="utf-8")
+        divisibility.write_text(
+            source.replace("hp.one_lt", "hp.nonexistent_property"),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 1, result.output
+        # The failure is the precursor's extraction, reported against the
+        # user's file — not an unchecked stale selection.
+        assert "Failed to extract declarations" in result.output
         assert "Divisibility.lean" in result.output
 
 

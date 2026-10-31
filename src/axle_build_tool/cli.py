@@ -21,6 +21,7 @@ from axle_build_tool.config import (
     CONFIG_FILENAME,
     AxleConfig,
     ConfigError,
+    ProjectConfig,
     load_config,
     scaffold_config,
 )
@@ -109,11 +110,19 @@ def make_axle_service(config: AxleConfig) -> AxleService:
     return AxleService(config)
 
 
-@main.command()
-def compile() -> None:
-    """Scan modules, extract declarations via Axle, and write .axbt/manifest.json."""
-    project_root = Path.cwd()
+def _run_compile(project_root: Path) -> tuple[ProjectConfig, Manifest]:
+    """Compile the project in place; shared by `compile` and `check`.
 
+    Scans modules, updates the manifest (MD5 change detection with
+    carry-over of clean nodes), extracts pending declarations via Axle,
+    persists payloads, and writes `.axbt/manifest.json`. Prints the
+    usual compile summary. Returns the loaded config and the fresh
+    manifest.
+
+    Fully incremental: a project whose files are all clean makes no API
+    calls at all (including environment validation — there is nothing
+    to submit it would guard).
+    """
     try:
         config = load_config(project_root)
         try:
@@ -132,7 +141,8 @@ def compile() -> None:
 
         async def extract() -> Manifest:
             async with service:
-                await service.validate_environment()
+                if carried < len(manifest.nodes):
+                    await service.validate_environment()
                 return await apply_extraction(service, manifest, project_root)
 
         manifest = asyncio.run(extract())
@@ -157,6 +167,13 @@ def compile() -> None:
             click.echo(f"  Note: module '{module_name}' has no .lean files")
     click.echo(f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}")
     click.echo(f"Wrote {written}")
+    return config, manifest
+
+
+@main.command()
+def compile() -> None:
+    """Scan modules, extract declarations via Axle, and write .axbt/manifest.json."""
+    _run_compile(Path.cwd())
 
 
 #: Leading position of a Lean diagnostic message, e.g. `-:28:8-28:24: error: …`
@@ -198,6 +215,13 @@ def _rewrite_message_position(
 
 @main.command()
 @click.option(
+    "--no-compile",
+    "no_compile",
+    is_flag=True,
+    default=False,
+    help="Use the existing manifest at face value instead of recompiling first.",
+)
+@click.option(
     "--select",
     "select",
     default=None,
@@ -208,8 +232,15 @@ def _rewrite_message_position(
         "file or module to check definitions."
     ),
 )
-def check(select: str | None) -> None:
+def check(no_compile: bool, select: str | None) -> None:
     """Typecheck targets or a selection via the Axle API.
+
+    By default, check runs `axbt compile` first — scanning modules,
+    detecting changes, and re-extracting whatever moved — so the
+    manifest (and the selection metadata built from it) is never stale.
+    The precursor is fully incremental: when every file is already
+    clean it makes no API calls. Pass --no-compile to skip it and take
+    the existing manifest at face value.
 
     Without --select, checks every configured `targets` entry of every
     module (one Axle `check` call per target). Submissions are standalone
@@ -223,14 +254,21 @@ def check(select: str | None) -> None:
     definitions must be checked via file- or module-level selections.
     """
     project_root = Path.cwd()
+    if no_compile:
+        try:
+            config = load_config(project_root)
+            manifest = load_manifest(project_root)
+            if manifest.version != MANIFEST_VERSION:
+                raise ManifestError(
+                    f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
+                    f"axbt version; run `axbt compile` first."
+                )
+        except (ConfigError, ManifestError) as exc:
+            raise click.ClickException(str(exc)) from exc
+    else:
+        config, manifest = _run_compile(project_root)
+
     try:
-        config = load_config(project_root)
-        manifest = load_manifest(project_root)
-        if manifest.version != MANIFEST_VERSION:
-            raise ManifestError(
-                f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
-                f"axbt version; run `axbt compile` first."
-            )
         if select is not None:
             plan: list[tuple[str, Selection]] = [
                 (select, resolve_selection(select, config, manifest))
@@ -257,7 +295,7 @@ def check(select: str | None) -> None:
             )
             for label, selection in plan
         ]
-    except (ConfigError, ManifestError, SelectionError) as exc:
+    except SelectionError as exc:
         raise click.ClickException(str(exc)) from exc
 
     if not checks:

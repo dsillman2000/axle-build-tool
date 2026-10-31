@@ -120,7 +120,7 @@ The `axbt` CLI supports three primary commands mirroring a progressive developer
 | Command | Description | Performance & Purpose |
 | --- | --- | --- |
 | **`axbt compile`** | Scans every configured module directory, checks MD5 hashes, updates the DAG, outputs `.axbt/manifest.json`, and (re)generates cached standalone payloads for all declared `targets`. | **Fast:** Only re-extracts declarations for modified files. |
-| **`axbt check`** | Assembles the standalone payload for the selection (inlining dependencies, stubbing only where `--sorry` requests it) and submits it for a rapid typecheck via Axle. | **Fast & Lightweight:** Optimized for daily modeling and rapid proof iteration. |
+| **`axbt check`** | Runs `compile` first (unless `--no-compile` is passed, which takes the existing manifest at face value), assembles the standalone payload for the selection (inlining dependencies, stubbing only where `--sorry` requests it) and submits it for a rapid typecheck via Axle. | **Fast & Lightweight:** Optimized for daily modeling and rapid proof iteration; the precursor compile is incremental (a clean tree makes no API calls). |
 | **`axbt verify`** | Executes rigorous kernel-level proof verification or equality checking via Axle (same selection mechanics as `check`). | **Slow & Strict:** Intended for final validation, release gates, and CI/CD pipelines. |
 
 ### Selection (`--select`) and stubbing (`--sorry`)
