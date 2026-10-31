@@ -102,7 +102,9 @@ def with_declarations(manifest, names_by_node: dict[str, list[str]]):
     )
 
 
-def make_extract_response(documents: dict[str, Document]) -> ExtractDeclsResponse:
+def make_extract_response(
+    documents: dict[str, Document], info: dict[str, Any] | None = None
+) -> ExtractDeclsResponse:
     """Build an `ExtractDeclsResponse` carrying the given documents."""
     return ExtractDeclsResponse(
         content="",
@@ -110,7 +112,7 @@ def make_extract_response(documents: dict[str, Document]) -> ExtractDeclsRespons
         tool_messages=Messages([], [], []),
         documents=documents,
         timings={},
-        info=None,
+        info=info,
     )
 
 
@@ -188,6 +190,8 @@ class FakeAxleClient:
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
         self._extract_lean_errors = list(extract_lean_errors or [])
+        self._request_counter = 0
+        self.request_ids: list[str] = []
 
     async def get_latest_environment(self, **kwargs: Any) -> dict[str, Any] | None:
         self.calls.append(("get_latest_environment", kwargs))
@@ -221,7 +225,12 @@ class FakeAxleClient:
             if position > best_position:
                 best_position = position
                 documents = marker_documents
-        response = make_extract_response(documents)
+        self._request_counter += 1
+        request_id = f"fake-req-{self._request_counter:04d}"
+        self.request_ids.append(request_id)
+        response = make_extract_response(
+            documents, info={"request_id": request_id, "environment": "lean-4.35.0"}
+        )
         response.lean_messages.errors.extend(self._extract_lean_errors)
         return response
 

@@ -120,7 +120,12 @@ async def _extract_node(
         if (declaration := _decl_from_document(document, payload, node.name)) is not None
     ]
     return (
-        node.model_copy(update={"declarations": declarations}),
+        node.model_copy(
+            update={
+                "declarations": declarations,
+                "request_id": (response.info or {}).get("request_id"),
+            }
+        ),
         None,
     )
 

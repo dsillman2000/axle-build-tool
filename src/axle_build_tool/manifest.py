@@ -63,6 +63,9 @@ class ManifestNode(BaseModel):
     md5: str
     status: Literal["new", "clean", "changed"]
     declarations: list[ExtractedDecl] = Field(default_factory=list)
+    #: Axle request id that produced this node's extraction data. Carried
+    #: over unchanged with the data itself; `None` for pending nodes.
+    request_id: str | None = None
     last_checked: datetime | None = None
 
 
@@ -255,6 +258,7 @@ def build_manifest(
                 md5=facts.md5,
                 status=_status(name, facts.md5, previous_nodes),
                 declarations=list(prior.declarations) if carry else [],
+                request_id=prior.request_id if carry else None,
                 last_checked=now,
             )
         )
