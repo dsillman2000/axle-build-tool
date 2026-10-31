@@ -27,5 +27,28 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run tests
+      - name: Run tests (offline; live suite deselected)
         run: uv run pytest
+
+  live:
+    # Merge pipeline into main: exercise axbt against the real Axle API
+    # with the live-marked suite (ad-hoc projects; no demo dependence).
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    env:
+      AXLE_API_KEY: ${{ secrets.AXLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run live tests
+        run: uv run pytest -m live

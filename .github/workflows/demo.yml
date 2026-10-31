@@ -1,0 +1,60 @@
+name: Demos
+
+# Integration gate for the demo projects: each demo is compiled,
+# checked, and kernel-verified against the real Axle API in its own
+# stage. Demos are integration-only fixtures — the offline unit suite
+# never touches them — so this workflow is what keeps them healthy.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "demos/**"
+      - ".github/workflows/demo.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "demos/**"
+      - ".github/workflows/demo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    # One independent stage per demo; one failing demo does not cancel
+    # the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        demo: [RootTwoIrrational, GaussIntSum]
+    name: demo ${{ matrix.demo }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: demos-${{ matrix.demo }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      AXLE_API_KEY: ${{ secrets.AXLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Compile, check, and verify ${{ matrix.demo }}
+        working-directory: demos/${{ matrix.demo }}
+        run: |
+          uv run --project ../.. axbt compile
+          uv run --project ../.. axbt check
+          uv run --project ../.. axbt verify
+
+      - name: List the parsed declaration tree
+        working-directory: demos/${{ matrix.demo }}
+        run: uv run --project ../.. axbt list

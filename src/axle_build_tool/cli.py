@@ -158,7 +158,14 @@ def _run_compile(
         manifest = asyncio.run(extract())
         payload_paths = write_compiled_payloads(manifest, project_root)
         written = save_manifest(manifest, project_root)
-    except (ConfigError, ScanError, ManifestError, AxleServiceError, ExtractionError) as exc:
+    except (
+        ConfigError,
+        ScanError,
+        ManifestError,
+        AxleServiceError,
+        ExtractionError,
+        OSError,
+    ) as exc:
         raise click.ClickException(str(exc)) from exc
 
     counts = Counter(node.status for node in manifest.nodes)
@@ -365,7 +372,7 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
             )
             for label, selection in plan
         ]
-    except (ConfigError, ManifestError, SelectionError) as exc:
+    except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     if not checks:
@@ -564,7 +571,7 @@ def verify(no_compile: bool, incremental: bool, select: str | None) -> None:
             items.append(
                 (label, selection, payload, _verify_scope(selection, payload, manifest))
             )
-    except (ConfigError, ManifestError, SelectionError) as exc:
+    except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     if not items:
