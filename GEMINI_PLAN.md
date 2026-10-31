@@ -146,18 +146,18 @@ axbt check --select RootTwoIrrational.EuclidLemma --sorry RootTwoIrrational.Divi
 
 ---
 
-## 7. Demo Projects (`demos/`)
+## 7. Demo Projects (`demos/small/`)
 
-To validate end-to-end behavior, the repository will include **exactly two** small, self-contained demo projects in a top-level `demos/` directory. Each demo is a complete, runnable `axbt` project (own `axbt_project.yml`, module source directory, and generated `.axbt/` output) and doubles as a regression fixture asserting that axbt's features work as expected.
+To validate end-to-end behavior, the repository includes small, self-contained demo projects under `demos/small/` (future demos that are large by contrast will live in sibling directories, e.g. `demos/large/`). Each demo is a complete, runnable `axbt` project (own `axbt_project.yml`, module source directory, and generated `.axbt/` output) and doubles as a regression fixture asserting that axbt's features work as expected.
 
-### 7.1 `demos/RootTwoIrrational`
+### 7.1 `demos/small/RootTwoIrrational`
 
 A project proving that `√2` is not rational (irrationality of the square root of two).
 
 * **Module structure:** `Divisibility.lean` (helper lemmas such as `prime_gt_one` and `prime_dvd_square`) and `EuclidLemma.lean` (`euclid_lemma`), with the main irrationality theorem importing them — deliberately multi-file to exercise the import-DAG. Configured via the `modules`/`targets` example in §2.
 * **Features exercised:** `axbt init` scaffolding, import parsing, all three `--select` granularities, `--sorry` stubbing, and the `axbt check` / `axbt verify` success paths.
 
-### 7.2 `demos/GaussIntSum`
+### 7.2 `demos/small/GaussIntSum`
 
 A project proving the Gauss summation identity: `1 + 2 + ⋯ + n = n * (n + 1) / 2` for the first `n` positive integers.
 
@@ -180,4 +180,4 @@ Both demos serve as executable acceptance tests for the tool:
 2. **Phase 2 (Parser & DAG):** Integrate standard Lean import parsing, MD5 caching, and `manifest.json` generation.
 3. **Phase 3 (Axle Integration):** Connect `axbt compile` and `axbt check` to the Axle SDK/CLI endpoints for declaration extraction and lightweight checking, using the official [`axiom-axle`](https://pypi.org/project/axiom-axle/) Python SDK (not a raw HTTP client such as `httpx`) for all Axle API interactions.
 4. **Phase 4 (Isolation Engine):** Build the automated stubbing mechanism to handle namespaces, sections, and upstream `sorry` injection for isolated model execution.
-5. **Phase 5 (Demo Projects):** Create the `demos/RootTwoIrrational` and `demos/GaussIntSum` projects and wire them into the integration test suite as end-to-end acceptance fixtures.
+5. **Phase 5 (Demo Projects):** Create the `demos/small/RootTwoIrrational` and `demos/small/GaussIntSum` projects and wire them into the integration test suite as end-to-end acceptance fixtures.

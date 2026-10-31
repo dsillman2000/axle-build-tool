@@ -19,11 +19,13 @@ permissions:
 jobs:
   demo:
     # One independent stage per demo; one failing demo does not cancel
-    # the others.
+    # the others. The matrix carries the path under demos/ — the small
+    # demos live in demos/small/, future large demos will sit beside
+    # them (e.g. demos/large/...) — so extending this list is trivial.
     strategy:
       fail-fast: false
       matrix:
-        demo: [RootTwoIrrational, GaussIntSum]
+        demo: [small/RootTwoIrrational, small/GaussIntSum]
     name: demo ${{ matrix.demo }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
