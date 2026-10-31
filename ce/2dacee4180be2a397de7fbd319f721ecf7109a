@@ -1,0 +1,16 @@
+src/axle_build_tool/selection.py
+  h_4cc74772b10fd4 1-140
+tests/test_selection.py
+  h_4cc74772b10fd4 1-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ce2dacee4180be2a397de7fbd319f721ecf7109a",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
