@@ -1,0 +1,16 @@
+pyproject.toml
+  h_4cc74772b10fd4 4,10-13,16-17,23-27
+uv.lock
+  h_4cc74772b10fd4 1-132
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "708c1299ecdfb413fcbb426d32405b7fccdef85d",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
