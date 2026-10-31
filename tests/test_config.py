@@ -76,7 +76,7 @@ class TestAxleConfig:
         write_config(tmp_path, "modules:\n  Foo: {}\n")
         config = load_config(tmp_path)
         assert config.axle == AxleConfig()
-        assert config.axle.environment == "lean-v4.35.0"
+        assert config.axle.environment == "lean-4.35.0"
         assert config.axle.timeout_seconds == 120
         assert config.axle.global_options == {}
 
@@ -122,6 +122,38 @@ class TestAxleConfig:
     def test_environment_must_be_a_string(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules:\n  Foo: {}\naxle:\n  environment: 4.35\n")
         with pytest.raises(ConfigError, match=r"axle -> environment"):
+            load_config(tmp_path)
+
+    def test_global_options_accept_scalar_values(self, tmp_path: Path) -> None:
+        write_config(
+            tmp_path,
+            "modules:\n  Foo: {}\n"
+            "axle:\n"
+            "  global_options:\n"
+            "    maxHeartbeats: 100000\n"
+            "    linter.all: true\n"
+            "    pp.unicode.fun: false\n"
+            "    quotedName: __rhithm__\n",
+        )
+        config = load_config(tmp_path)
+        assert config.axle.global_options == {
+            "maxHeartbeats": 100000,
+            "linter.all": True,
+            "pp.unicode.fun": False,
+            "quotedName": "__rhithm__",
+        }
+
+    def test_global_options_values_must_be_scalars(self, tmp_path: Path) -> None:
+        write_config(
+            tmp_path,
+            "modules:\n  Foo: {}\naxle:\n  global_options:\n    maxHeartbeats: [1, 2]\n",
+        )
+        with pytest.raises(ConfigError, match=r"global_options"):
+            load_config(tmp_path)
+
+    def test_global_options_must_be_a_mapping(self, tmp_path: Path) -> None:
+        write_config(tmp_path, "modules:\n  Foo: {}\naxle:\n  global_options: [1]\n")
+        with pytest.raises(ConfigError, match=r"global_options.*(mapping|dictionary)"):
             load_config(tmp_path)
 
 

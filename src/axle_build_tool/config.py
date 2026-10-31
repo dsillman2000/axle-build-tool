@@ -24,7 +24,7 @@ CONFIG_FILENAME = "axbt_project.yml"
 #: The one and only cache directory. Not configurable, by design.
 CACHE_DIRNAME = ".axbt"
 
-DEFAULT_ENVIRONMENT = "lean-v4.35.0"
+DEFAULT_ENVIRONMENT = "lean-4.35.0"
 DEFAULT_TIMEOUT_SECONDS = 120
 
 #: Top-level keys left over from the old config shape that most plausibly
@@ -43,7 +43,8 @@ class AxleConfig(BaseModel):
 
     environment: str = DEFAULT_ENVIRONMENT
     timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, strict=True)
-    global_options: dict[str, Any] = Field(default_factory=dict)
+    #: Lean global options forwarded verbatim to the Axle API.
+    global_options: dict[str, bool | int | str] = Field(default_factory=dict)
 
 
 class ModuleConfig(BaseModel):
