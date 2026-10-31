@@ -15,99 +15,16 @@ from axle.exceptions import (
     LeanResourceExceeded,
     LeanTimeout,
 )
-from axle.types import (
-    CheckResponse,
-    ExtractDeclsResponse,
-    Messages,
-    VerifyProofResponse,
-)
 
 from axle_build_tool.axle_service import AxleService, AxleServiceError, describe_axle_error
 from axle_build_tool.config import AxleConfig, FALLBACK_ENVIRONMENT
+from conftest import FakeAxleClient
 
 CONFIG = AxleConfig(
     environment="lean-4.35.0",
     timeout_seconds=30,
     global_options={"maxHeartbeats": 100000},
 )
-
-
-def make_response(cls: type, **overrides: Any):
-    defaults: dict[str, Any] = dict(
-        okay=True,
-        content="",
-        lean_messages=Messages([], [], []),
-        tool_messages=Messages([], [], []),
-        failed_declarations=[],
-        timings={},
-        info=None,
-    )
-    defaults.update(overrides)
-    return cls(**defaults)
-
-
-class FakeAxleClient:
-    """Records call kwargs; returns canned results or raises a canned error.
-
-    `error` is raised by the operations; `ping_error` by the
-    environment auto-detection endpoint; `latest` is what
-    `get_latest_environment` returns when no error is set.
-    """
-
-    def __init__(
-        self,
-        error: Exception | None = None,
-        ping_error: Exception | None = None,
-        latest: dict[str, Any] | None = None,
-    ) -> None:
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-        self.closed = False
-        self._error = error
-        self._ping_error = ping_error
-        self._latest = latest
-        self.check_result = make_response(CheckResponse)
-        self.verify_result = make_response(VerifyProofResponse, negation=None)
-        self.extract_result = ExtractDeclsResponse(
-            content="",
-            lean_messages=Messages([], [], []),
-            tool_messages=Messages([], [], []),
-            documents={},
-            timings={},
-            info=None,
-        )
-
-    async def get_latest_environment(self, **kwargs: Any) -> dict[str, Any] | None:
-        self.calls.append(("get_latest_environment", kwargs))
-        if self._ping_error:
-            raise self._ping_error
-        return self._latest
-
-    async def check(self, **kwargs: Any) -> CheckResponse:
-        self.calls.append(("check", kwargs))
-        if self._error:
-            raise self._error
-        return self.check_result
-
-    async def verify_proof(self, **kwargs: Any) -> VerifyProofResponse:
-        self.calls.append(("verify_proof", kwargs))
-        if self._error:
-            raise self._error
-        return self.verify_result
-
-    async def extract_decls(self, **kwargs: Any) -> ExtractDeclsResponse:
-        self.calls.append(("extract_decls", kwargs))
-        if self._error:
-            raise self._error
-        return self.extract_result
-
-    async def environments(self, **kwargs: Any) -> list[dict[str, Any]]:
-        self.calls.append(("environments", kwargs))
-        if self._error:
-            raise self._error
-        return [{"name": "lean-4.35.0"}]
-
-    async def close(self) -> None:
-        self.closed = True
 
 
 def make_service(error: Exception | None = None) -> tuple[AxleService, FakeAxleClient]:
@@ -153,6 +70,9 @@ class TestConfigPlumbing:
         assert kwargs["environment"] == "lean-4.35.0"
         assert kwargs["timeout_seconds"] == 30
         assert kwargs["global_options"] == {"maxHeartbeats": 100000}
+        # Payloads own their import lines: the API must not replace them
+        # with its default header (that would shift line positions).
+        assert kwargs["ignore_imports"] is False
 
     def test_extra_kwargs_are_forwarded(self) -> None:
         service, fake = make_service()

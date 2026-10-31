@@ -21,7 +21,7 @@ from axle_build_tool.imports import parse_imports
 from axle_build_tool.scanner import scan_module
 
 MANIFEST_FILENAME = "manifest.json"
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 
 
 class ManifestError(Exception):
@@ -29,8 +29,28 @@ class ManifestError(Exception):
     files cannot be assembled into an acyclic dependency graph."""
 
 
+class ExtractedDecl(BaseModel):
+    """Per-declaration metadata extracted from a node by the Axle API."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    kind: str
+    is_sorry: bool
+    line_pos: int
+    end_line_pos: int
+    signature: str = ""
+
+
 class ManifestNode(BaseModel):
-    """One `.lean` file in the project DAG."""
+    """One `.lean` file in the project DAG.
+
+    `status` is the MD5-diff verdict on the source against the previous
+    manifest (`new`, `clean`, `changed`). `declarations` holds the
+    Axle-extracted metadata; compile is all-or-nothing, so a *persisted*
+    manifest always carries valid extraction data for every node — a
+    clean node's data is carried over, anything else is re-extracted.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -42,6 +62,7 @@ class ManifestNode(BaseModel):
     children: list[str] = Field(default_factory=list)
     md5: str
     status: Literal["new", "clean", "changed"]
+    declarations: list[ExtractedDecl] = Field(default_factory=list)
     last_checked: datetime | None = None
 
 
@@ -215,20 +236,28 @@ def build_manifest(
 
     now = datetime.now(timezone.utc)
     previous_nodes = previous.by_name() if previous else {}
-    nodes = [
-        ManifestNode(
-            name=facts.name,
-            module=facts.module,
-            path=facts.path,
-            imports=facts.imports,
-            parents=parent_lists[name],
-            children=sorted(children[name]),
-            md5=facts.md5,
-            status=_status(name, facts.md5, previous_nodes),
-            last_checked=now,
+    nodes = []
+    for name, facts in sorted(scanned.items()):
+        # Unchanged files carry their previous extraction data forward, so
+        # they are not re-extracted (plan §3's incremental promise). A
+        # persisted manifest only ever contains valid extraction data:
+        # compile saves nothing unless every node extracted cleanly.
+        prior = previous_nodes.get(name)
+        carry = prior is not None and prior.md5 == facts.md5
+        nodes.append(
+            ManifestNode(
+                name=facts.name,
+                module=facts.module,
+                path=facts.path,
+                imports=facts.imports,
+                parents=parent_lists[name],
+                children=sorted(children[name]),
+                md5=facts.md5,
+                status=_status(name, facts.md5, previous_nodes),
+                declarations=list(prior.declarations) if carry else [],
+                last_checked=now,
+            )
         )
-        for name, facts in sorted(scanned.items())
-    ]
     return Manifest(version=MANIFEST_VERSION, generated_at=now, nodes=nodes)
 
 

@@ -7,13 +7,23 @@ commands (`compile` / `check` / `verify`) will follow.
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from pathlib import Path
 
 import click
 
-from axle_build_tool.config import CONFIG_FILENAME, ConfigError, load_config, scaffold_config
+from axle_build_tool.axle_service import AxleService, AxleServiceError
+from axle_build_tool.config import (
+    CONFIG_FILENAME,
+    AxleConfig,
+    ConfigError,
+    load_config,
+    scaffold_config,
+)
+from axle_build_tool.extraction import ExtractionError, apply_extraction
 from axle_build_tool.manifest import (
+    MANIFEST_VERSION,
     ManifestError,
     build_manifest,
     check_targets,
@@ -82,22 +92,39 @@ def init(path: Path) -> None:
     click.echo(f"  Created {project_name}/{project_name}.lean")
 
 
+def make_axle_service(config: AxleConfig) -> AxleService:
+    """Build the Axle service for CLI commands (tests patch this seam)."""
+    return AxleService(config)
+
+
 @main.command()
 def compile() -> None:
-    """Scan modules, parse imports, and write .axbt/manifest.json."""
+    """Scan modules, extract declarations via Axle, and write .axbt/manifest.json."""
     project_root = Path.cwd()
 
     try:
         config = load_config(project_root)
         try:
-            # A missing or damaged manifest simply means we start fresh.
+            # A missing, damaged, or stale-versioned manifest simply means
+            # we start fresh (everything gets re-extracted).
             previous = load_manifest(project_root)
+            if previous.version != MANIFEST_VERSION:
+                previous = None
         except ManifestError:
             previous = None
         manifest = build_manifest(project_root, config, previous)
         check_targets(config, manifest)
+
+        carried = sum(1 for node in manifest.nodes if node.status == "clean")
+        service = make_axle_service(config.axle)
+
+        async def extract() -> Manifest:
+            async with service:
+                return await apply_extraction(service, manifest, project_root)
+
+        manifest = asyncio.run(extract())
         written = save_manifest(manifest, project_root)
-    except (ConfigError, ScanError, ManifestError) as exc:
+    except (ConfigError, ScanError, ManifestError, AxleServiceError, ExtractionError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     counts = Counter(node.status for node in manifest.nodes)
@@ -105,6 +132,10 @@ def compile() -> None:
         f"Compiled {len(manifest.nodes)} file(s) across {len(config.modules)} "
         f"module(s): {counts.get('new', 0)} new, {counts.get('changed', 0)} changed, "
         f"{counts.get('clean', 0)} clean"
+    )
+    click.echo(
+        f"Extraction: {len(manifest.nodes) - carried} extracted now, "
+        f"{carried} carried over"
     )
     represented = {node.module for node in manifest.nodes}
     for module_name in config.modules:

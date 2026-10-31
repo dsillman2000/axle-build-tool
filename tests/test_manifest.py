@@ -13,6 +13,7 @@ from axle_build_tool.manifest import (
     Manifest,
     ManifestError,
     ManifestNode,
+    ExtractedDecl,
     build_manifest,
     check_targets,
     load_manifest,
@@ -164,6 +165,46 @@ class TestStatusTracking:
 
         assert second.by_name()["M.A"].status == "changed"
         assert second.by_name()["M.B"].status == "clean"
+
+    def _with_extracted_data(self, manifest: Manifest) -> Manifest:
+        declaration = ExtractedDecl(
+            name="sample_decl",
+            kind="theorem",
+            is_sorry=False,
+            line_pos=1,
+            end_line_pos=2,
+            signature="theorem sample_decl : True",
+        )
+        return manifest.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(update={"declarations": [declaration]})
+                    for node in manifest.nodes
+                ]
+            }
+        )
+
+    def test_unchanged_nodes_carry_extraction_data(self, simple_project: Path) -> None:
+        config = config_of(simple_project)
+        first = self._with_extracted_data(build_manifest(simple_project, config))
+
+        second = build_manifest(simple_project, config, previous=first)
+
+        for node in second.nodes:
+            assert [d.name for d in node.declarations] == ["sample_decl"]
+
+    def test_changed_nodes_drop_stale_extraction_data(self, simple_project: Path) -> None:
+        config = config_of(simple_project)
+        first = self._with_extracted_data(build_manifest(simple_project, config))
+        (simple_project / "M/A.lean").write_text("def x := 2\n", encoding="utf-8")
+
+        second = build_manifest(simple_project, config, previous=first)
+
+        changed = second.by_name()["M.A"]
+        assert changed.status == "changed"
+        assert changed.declarations == []  # pending: re-extracted by the command
+        carried = second.by_name()["M.B"]
+        assert [d.name for d in carried.declarations] == ["sample_decl"]
 
 
 class TestPersistence:
