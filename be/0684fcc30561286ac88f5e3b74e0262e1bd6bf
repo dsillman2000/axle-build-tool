@@ -1,0 +1,18 @@
+GEMINI_PLAN.md
+  h_4cc74772b10fd4 38,51
+demos/GaussIntSum/axbt_project.yml
+  h_4cc74772b10fd4 11
+demos/RootTwoIrrational/axbt_project.yml
+  h_4cc74772b10fd4 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be0684fcc30561286ac88f5e3b74e0262e1bd6bf",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
