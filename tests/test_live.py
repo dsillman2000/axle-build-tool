@@ -383,6 +383,67 @@ class TestLiveVerify:
         assert "failed declarations: uses_axiom" in result.output
 
 
+class TestLiveStubbing:
+    """`--sorry`: iterate downstream against incomplete upstream code."""
+
+    UPSTREAM = "theorem upstream : 1 + 1 = 2 := by sorry\n"
+
+    def project(self, make_live_project) -> Path:
+        return make_live_project(
+            {
+                "M/Base.lean": self.UPSTREAM,
+                "M/User.lean": (
+                    "import Base\n\ntheorem target : 1 + 1 = 2 := by simp [upstream]\n"
+                ),
+            },
+            targets=["User.target"],
+        )
+
+    def test_verify_over_incomplete_upstream_needs_the_stub(self, make_live_project) -> None:
+        """Upstream `sorry` fails verify by default; `--sorry` stubs and
+        permits it, so the downstream theorem verifies."""
+        self.project(make_live_project)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        without = runner.invoke(main, ["verify", "--select", "M.User"])
+        assert without.exit_code == 1, without.output
+
+        with_stub = runner.invoke(
+            main, ["verify", "--select", "M.User", "--sorry", "M.Base"]
+        )
+        assert with_stub.exit_code == 0, with_stub.output
+        assert status_line(with_stub.output, "M.User") == "M.User OK"
+
+    def test_check_over_stubbed_upstream(self, make_live_project) -> None:
+        """Check with stubbed upstream: the stubbed payload compiles
+        standalone (signatures preserved) and the selection checks clean."""
+        self.project(make_live_project)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.User", "--sorry", "M.Base"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.User") == "M.User OK"
+
+    def test_stubbed_payload_is_persisted_for_inspection(
+        self, make_live_project
+    ) -> None:
+        root = self.project(make_live_project)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        assert runner.invoke(
+            main, ["verify", "--select", "M.User", "--sorry", "M.Base"]
+        ).exit_code == 0
+
+        persisted = root / ".axbt" / "compiled" / "M_User_stubbed.lean"
+        assert persisted.is_file()
+        content = persisted.read_text(encoding="utf-8")
+        assert "theorem upstream : 1 + 1 = 2 := by sorry" in content
+        assert "theorem target : 1 + 1 = 2 := by simp [upstream]" in content
+
+
 class TestLiveEnvironmentValidation:
     def test_unknown_pinned_environment_fails_with_hint(
         self, make_live_project

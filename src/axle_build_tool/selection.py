@@ -45,10 +45,14 @@ class Selection:
     @property
     def compiled_filename(self) -> str:
         """The persisted payload filename for this selection."""
+        return self.compiled_filename_variant()
+
+    def compiled_filename_variant(self, variant: str = "isolated") -> str:
+        """The persisted payload filename for a payload kind (`variant`)."""
         if self.node_name is None:
-            return compiled_filename(self.module)
+            return compiled_filename(self.module, variant=variant)
         node_stem = self.node_name[len(self.module) + 1:]
-        return compiled_filename(self.module, node_stem)
+        return compiled_filename(self.module, node_stem, variant=variant)
 
     def payload_nodes(self, manifest: Manifest) -> list[ManifestNode]:
         """The manifest nodes whose sources make up this selection's payload."""

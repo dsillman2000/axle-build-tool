@@ -400,3 +400,97 @@ class TestRitual:
         # The payload inlines the dependency.
         assert "theorem t1 : 1 = 1 := rfl" in verify[0]["content"]
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+
+
+class TestSorry:
+    """`--sorry` on verify: stubbed declarations are permitted, and the
+    local sorry guard skips them (their `sorry` is ours by construction)."""
+
+    CHAIN_FILES = {
+        "M/A.lean": "def base := 1\ntheorem base_holds : base = 1 := rfl\n",
+        "M/B.lean": "import A\ntheorem middle : base = 1 := rfl\n",
+    }
+    # A carries a genuinely sorried declaration: without stubbing it
+    # would fail the guard; with --sorry it is stubbed and permitted.
+    SORRIED_A_DOCS = {
+        "def base := 1": {
+            "base": make_document(
+                "base", kind="def", line_pos=1, end_line_pos=1, signature="def base : Nat"
+            ),
+            "base_holds": make_document(
+                "base_holds",
+                kind="theorem",
+                line_pos=2,
+                end_line_pos=2,
+                signature="theorem base_holds : base = 1",
+                is_sorry=True,
+            ),
+        },
+        "theorem middle": {
+            "middle": make_document(
+                "middle",
+                kind="theorem",
+                line_pos=4,
+                end_line_pos=4,
+                signature="theorem middle : base = 1",
+            ),
+        },
+    }
+
+    def compile_chain(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> Path:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, self.CHAIN_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.SORRIED_A_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        return root
+
+    def test_sorry_permits_the_stubbed_subtree(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.B", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        # The stubbed declarations (and only they) are permitted; the
+        # selection's own theorem stays judged.
+        verify = verify_calls(fake_axle)[0]
+        assert verify["permitted_sorries"] == ["base", "base_holds"]
+        assert status_line(result.output, "M.B") == "M.B OK"
+
+    def test_sorry_guard_skips_stubbed_sorried_declarations(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Without stubbing, A's sorried theorem fails the local guard;
+        with `--sorry M.A` it is stubbed by construction and passes."""
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        without = runner.invoke(main, ["verify", "--select", "M.B"])
+        assert without.exit_code == 1
+        assert "has a `sorry`" in without.output
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.B", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+
+    def test_sorry_persists_the_stubbed_payload(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        assert runner.invoke(
+            main, ["verify", "--select", "M.B", "--sorry", "M.A"]
+        ).exit_code == 0
+
+        persisted = root / ".axbt" / "compiled" / "M_B_stubbed.lean"
+        assert persisted.is_file()
+        content = persisted.read_text(encoding="utf-8")
+        assert "def base : Nat := sorry" in content
+        assert "theorem base_holds : base = 1 := by sorry" in content
+        # The selection itself is never stubbed.
+        assert "theorem middle : base = 1 := rfl" in content
