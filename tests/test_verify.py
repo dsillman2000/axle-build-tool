@@ -494,3 +494,66 @@ class TestSorry:
         assert "theorem base_holds : base = 1 := by sorry" in content
         # The selection itself is never stubbed.
         assert "theorem middle : base = 1 := rfl" in content
+
+    def test_sorry_on_own_file_stubs_siblings_for_declaration_selections(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Declaration-level verify may stub its own file's siblings;
+        the selected theorem keeps its real proof and stays judged."""
+        files = {
+            "M/A.lean": "def base := 1\ntheorem base_holds : base = 1 := rfl\n",
+            "M/B.lean": (
+                "import A\ntheorem middle : base = 1 := rfl\n"
+                "theorem sibling : base = 1 := rfl\n"
+            ),
+        }
+        docs = {
+            **self.SORRIED_A_DOCS,
+            "theorem middle": {
+                "middle": make_document(
+                    "middle",
+                    kind="theorem",
+                    line_pos=4,
+                    end_line_pos=4,
+                    signature="theorem middle : base = 1",
+                ),
+                "sibling": make_document(
+                    "sibling",
+                    kind="theorem",
+                    line_pos=5,
+                    end_line_pos=5,
+                    signature="theorem sibling : base = 1",
+                ),
+            },
+        }
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, files)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.B.middle", "--sorry", "M.B"]
+        )
+
+        assert result.exit_code == 0, result.output
+        verify = verify_calls(fake_axle)[0]
+        # The sibling is stubbed (permitted); the selection is judged.
+        assert verify["permitted_sorries"] == ["base_holds", "sibling"]
+        assert status_line(result.output, "M.B.middle") == "M.B.middle OK"
+        persisted = root / ".axbt" / "compiled" / "M_B_stubbed.lean"
+        content = persisted.read_text(encoding="utf-8")
+        assert "theorem sibling : base = 1 := by sorry" in content
+        assert "theorem middle : base = 1 := rfl" in content
+
+    def test_sorry_naming_only_the_selected_declaration_is_rejected(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.B.middle", "--sorry", "M.B.middle"]
+        )
+
+        assert result.exit_code == 1
+        assert "never stubbed" in result.output

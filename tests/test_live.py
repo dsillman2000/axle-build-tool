@@ -444,6 +444,79 @@ class TestLiveStubbing:
         assert "theorem target : 1 + 1 = 2 := by simp [upstream]" in content
 
 
+class TestLiveScopedStatements:
+    """Scope-correctness of verification, locked against regressions.
+
+    verify's formal statements come from `theorem2sorry` — an in-place
+    transform of the scope-complete payload — so namespaced, section,
+    and variable-dependent declarations verify without any preamble
+    assembly. These tests lock that property (a future change that
+    assembles statements from bare signatures would fail here).
+    """
+
+    SCOPED = (
+        "namespace Algebra\n"
+        "variable (n : Nat)\n"
+        "\n"
+        "theorem gap : 2 + 2 = 5 := by sorry\n"
+        "\n"
+        "theorem helper : n = n := rfl\n"
+        "\n"
+        "def sibling : Nat := 1\n"
+        "\n"
+        "theorem uses_sibling : sibling = 1 := rfl\n"
+        "\n"
+        "end Algebra\n"
+    )
+
+    def test_verification_inside_namespaces_and_variables(self, make_live_project) -> None:
+        """A declaration under `namespace` + `variable` verifies; a
+        sorried sibling does not poison it."""
+        make_live_project({"M/A.lean": self.SCOPED}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify", "--select", "M.A.helper"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+
+    def test_stubbing_inside_a_namespace(self, make_live_project) -> None:
+        """`--sorry` over a namespaced file: stubs replace the spans
+        inside the namespace context and the payload still compiles."""
+        make_live_project({"M/A.lean": self.SCOPED}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.A.helper", "--sorry", "M.A.gap"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+
+    def test_stubbing_own_file_siblings(self, make_live_project) -> None:
+        """`--sorry` naming the selection's own node stubs its siblings;
+        the selected declaration keeps its real proof."""
+        make_live_project({"M/A.lean": self.SCOPED}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.A.helper", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+        from pathlib import Path
+
+        root = Path.cwd()
+        persisted = root / ".axbt" / "compiled" / "M_A_stubbed.lean"
+        content = persisted.read_text(encoding="utf-8")
+        # The sibling and the sorried gap are stubbed inside the namespace...
+        assert "theorem gap : 2 + 2 = 5 := by sorry" in content
+        assert "theorem uses_sibling : sibling = 1 := by sorry" in content
+        # ...and the selection's real proof survives.
+        assert "theorem helper : n = n := rfl" in content
+
+
 class TestLiveEnvironmentValidation:
     def test_unknown_pinned_environment_fails_with_hint(
         self, make_live_project
