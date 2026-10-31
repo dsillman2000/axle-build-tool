@@ -74,6 +74,18 @@ class TestConfigPlumbing:
         # with its default header (that would shift line positions).
         assert kwargs["ignore_imports"] is False
 
+    def test_theorem2sorry_applies_project_axle_config(self) -> None:
+        service, fake = make_service()
+        run(service.theorem2sorry("theorem t : True := True.intro", theorems_only=True))
+        (method, kwargs) = fake.calls[0]
+        assert method == "theorem2sorry"
+        assert kwargs["environment"] == "lean-4.35.0"
+        assert kwargs["timeout_seconds"] == 30
+        assert kwargs["global_options"] == {"maxHeartbeats": 100000}
+        # Payloads own their import lines (same rule as extraction).
+        assert kwargs["ignore_imports"] is False
+        assert kwargs["theorems_only"] is True
+
     def test_extra_kwargs_are_forwarded(self) -> None:
         service, fake = make_service()
         run(service.check("code", theorems_only=True, names=["t"]))

@@ -1,8 +1,8 @@
 """The `axbt` command-line interface.
 
 Command-line mechanics are implemented with `click`. The CLI ships
-`axbt init`, `axbt compile`, `axbt check`, and `axbt list`;
-kernel-level proof verification (`axbt verify`) will follow.
+`axbt init`, `axbt compile`, `axbt check`, `axbt verify`, and
+`axbt list`.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +116,8 @@ def make_axle_service(config: AxleConfig) -> AxleService:
 def _run_compile(
     project_root: Path, full_refresh: bool = False
 ) -> tuple[ProjectConfig, Manifest]:
-    """Compile the project in place; shared by `compile` and `check`.
+    """Compile the project in place; shared by `compile` and the
+    precursor of every submission command.
 
     Scans modules, updates the manifest, extracts pending declarations
     via Axle, persists payloads, and writes `.axbt/manifest.json`.
@@ -202,6 +204,59 @@ def _run_compile(
 def compile(incremental: bool) -> None:
     """Scan modules, extract declarations via Axle, and write .axbt/manifest.json."""
     _run_compile(Path.cwd(), full_refresh=not incremental)
+
+
+def _acquire_project_state(
+    project_root: Path, *, no_compile: bool, incremental: bool
+) -> tuple[ProjectConfig, Manifest]:
+    """Load (or freshly compile) the config and manifest of `project_root`.
+
+    Shared by the submission commands (`check`, `verify`): by default a
+    compile runs first so the manifest is never stale; `--no-compile`
+    takes the existing manifest at face value, and `--full-refresh`
+    makes the precursor re-extract everything. The latter two conflict.
+    """
+    if no_compile and not incremental:
+        raise click.UsageError(
+            "--full-refresh conflicts with --no-compile: skipping "
+            "compilation leaves nothing to refresh."
+        )
+    if no_compile:
+        try:
+            config = load_config(project_root)
+            manifest = load_manifest(project_root)
+            if manifest.version != MANIFEST_VERSION:
+                raise ManifestError(
+                    f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
+                    f"axbt version; run `axbt compile` first."
+                )
+        except (ConfigError, ManifestError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        return config, manifest
+    return _run_compile(project_root, full_refresh=not incremental)
+
+
+def _build_plan(
+    select: str | None, config: ProjectConfig, manifest: Manifest
+) -> list[tuple[str, Selection]]:
+    """Resolve the submission plan shared by `check` and `verify`.
+
+    With `--select`, a single selection labelled by the selector.
+    Otherwise every configured `targets` entry of every module, labelled
+    `<module>.<target>`, in declaration order with duplicates removed.
+    """
+    if select is not None:
+        return [(select, resolve_selection(select, config, manifest))]
+    plan: list[tuple[str, Selection]] = []
+    for module in config.modules.values():
+        seen: set[tuple[str, str | None]] = set()
+        for target in module.targets:
+            selection = resolve_selection(f"{module.name}.{target}", config, manifest)
+            key = (selection.node_name or "", selection.declaration)
+            if key not in seen:
+                seen.add(key)
+                plan.append((f"{module.name}.{target}", selection))
+    return plan
 
 
 #: Leading position of a Lean diagnostic message, e.g. `-:28:8-28:24: error: …`
@@ -295,42 +350,11 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
     definitions must be checked via file- or module-level selections.
     """
     project_root = Path.cwd()
-    if no_compile and not incremental:
-        raise click.UsageError(
-            "--full-refresh conflicts with --no-compile: skipping "
-            "compilation leaves nothing to refresh."
-        )
-    if no_compile:
-        try:
-            config = load_config(project_root)
-            manifest = load_manifest(project_root)
-            if manifest.version != MANIFEST_VERSION:
-                raise ManifestError(
-                    f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
-                    f"axbt version; run `axbt compile` first."
-                )
-        except (ConfigError, ManifestError) as exc:
-            raise click.ClickException(str(exc)) from exc
-    else:
-        config, manifest = _run_compile(project_root, full_refresh=not incremental)
-
     try:
-        if select is not None:
-            plan: list[tuple[str, Selection]] = [
-                (select, resolve_selection(select, config, manifest))
-            ]
-        else:
-            plan = []
-            for module in config.modules.values():
-                seen: set[tuple[str, str | None]] = set()
-                for target in module.targets:
-                    selection = resolve_selection(
-                        f"{module.name}.{target}", config, manifest
-                    )
-                    key = (selection.node_name or "", selection.declaration)
-                    if key not in seen:
-                        seen.add(key)
-                        plan.append((f"{module.name}.{target}", selection))
+        config, manifest = _acquire_project_state(
+            project_root, no_compile=no_compile, incremental=incremental
+        )
+        plan = _build_plan(select, config, manifest)
         checks = [
             (
                 label,
@@ -341,7 +365,7 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
             )
             for label, selection in plan
         ]
-    except SelectionError as exc:
+    except (ConfigError, ManifestError, SelectionError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     if not checks:
@@ -421,6 +445,230 @@ _KIND_COLORS = {
     "inductive": "magenta",
     "instance": "magenta",
 }
+
+
+#: Declaration kinds with a proof body — the things `axbt verify` checks.
+_VERIFY_KINDS = frozenset({"theorem", "lemma", "example"})
+
+
+@dataclass
+class _VerifyScope:
+    """What of a selection `axbt verify` will (or won't) verify."""
+
+    #: `theorem2sorry` names (None = every theorem in the payload).
+    names: list[str] | None
+    #: Other verifiable declarations in the payload whose incompleteness
+    #: (a `sorry`, or a proof relying on axioms) the API should excuse —
+    #: used to keep declaration-level selections focused on their own
+    #: declaration instead of the whole payload.
+    permitted: list[str] | None = None
+    #: Set when the selection has nothing to verify (e.g. defs only).
+    skip_reason: str | None = None
+    #: Verifiable declarations carrying a `sorry` — failed locally
+    #: without an API call, since they cannot pass verification.
+    sorried: list[str] = field(default_factory=list)
+
+
+def _verify_scope(
+    selection: Selection, payload: Payload, manifest: Manifest
+) -> _VerifyScope:
+    by_name = manifest.by_name()
+    closure = [by_name[node_name] for node_name in payload.sections]
+    verifiable = [
+        d for node in closure for d in node.declarations if d.kind in _VERIFY_KINDS
+    ]
+    if selection.declaration is not None:
+        node = by_name[selection.node_name]
+        declaration = next(
+            d for d in node.declarations if d.name == selection.declaration
+        )
+        if declaration.kind not in _VERIFY_KINDS:
+            return _VerifyScope(
+                names=None,
+                skip_reason=(
+                    f"'{declaration.name}' is a {declaration.kind}; verify checks "
+                    "theorems/lemmas only — use axbt check for definitions"
+                ),
+            )
+        if declaration.is_sorry:
+            return _VerifyScope(names=None, sorried=[declaration.name])
+        # The API sweeps the whole submitted content for incomplete
+        # proofs; excuse the payload's other theorems so the selection
+        # is judged only on its own declaration.
+        permitted = [d.name for d in verifiable if d.name != declaration.name]
+        return _VerifyScope(
+            names=[declaration.name], permitted=permitted or None
+        )
+    # File/module-level: the formal statement covers every verifiable
+    # declaration in the payload (the full dependency closure).
+    if not verifiable:
+        return _VerifyScope(
+            names=None, skip_reason="no theorems to verify (definitions only)"
+        )
+    return _VerifyScope(
+        names=None, sorried=[d.name for d in verifiable if d.is_sorry]
+    )
+
+
+@main.command()
+@click.option(
+    "--no-compile",
+    "no_compile",
+    is_flag=True,
+    default=False,
+    help="Use the existing manifest at face value instead of recompiling first.",
+)
+@click.option(
+    "--incremental/--full-refresh",
+    "incremental",
+    default=True,
+    help=(
+        "Run mode of the precursor compile. Incremental (default) "
+        "re-extracts only new and changed files. --full-refresh ignores "
+        "the previous manifest and re-extracts everything, even unchanged "
+        "files, so verifications run on freshly extracted data. The "
+        "verification step itself always re-submits its selection."
+    ),
+)
+@click.option(
+    "--select",
+    "select",
+    default=None,
+    help=(
+        "Verify <module>[.<file stem>[.<declaration>]] instead of the "
+        "configured targets. Declaration-level selections must name a "
+        "theorem/lemma — definitions have no proof to verify."
+    ),
+)
+def verify(no_compile: bool, incremental: bool, select: str | None) -> None:
+    """Verify proofs at kernel level via the Axle API.
+
+    The rigorous counterpart to `axbt check`: for every selection, the
+    payload's theorem proofs are stripped into a formal statement (the
+    API's theorem2sorry transform — imports and local definitions are
+    preserved, so statements referencing them stay verifiable), and the
+    real content is checked against it kernel-level. Selection and run
+    modes match `axbt check`, and selections carrying a `sorry` fail
+    without an API call.
+    """
+    project_root = Path.cwd()
+    try:
+        config, manifest = _acquire_project_state(
+            project_root, no_compile=no_compile, incremental=incremental
+        )
+        items: list[tuple[str, Selection, Payload, _VerifyScope]] = []
+        for label, selection in _build_plan(select, config, manifest):
+            payload = build_payload(
+                selection.payload_nodes(manifest), manifest, project_root
+            )
+            items.append(
+                (label, selection, payload, _verify_scope(selection, payload, manifest))
+            )
+    except (ConfigError, ManifestError, SelectionError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not items:
+        click.echo("No targets configured in axbt_project.yml; nothing to verify.")
+        return
+
+    submittable = [
+        (label, selection, payload, scope)
+        for label, selection, payload, scope in items
+        if scope.skip_reason is None and not scope.sorried
+    ]
+    paths = {node.name: node.path for node in manifest.nodes}
+    service = make_axle_service(config.axle)
+
+    async def submit_all() -> list[Any]:
+        async with service:
+            await service.validate_environment()
+            semaphore = asyncio.Semaphore(service.max_concurrency)
+
+            async def submit(
+                item: tuple[str, Selection, Payload, _VerifyScope],
+            ) -> Any:
+                label, selection, payload, scope = item
+                async with semaphore:
+                    # The formal statement is the payload with theorem
+                    # proofs stripped: self-contained (imports and local
+                    # definitions inline), so it elaborates standalone.
+                    spec = await service.theorem2sorry(
+                        payload.content,
+                        context=label,
+                        theorems_only=True,
+                        names=scope.names,
+                    )
+                    return await service.verify_proof(
+                        spec.content,
+                        payload.content,
+                        context=label,
+                        permitted_sorries=scope.permitted,
+                    )
+
+            return list(await asyncio.gather(*(submit(item) for item in submittable)))
+
+    try:
+        responses = asyncio.run(submit_all())
+    except AxleServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    failed = 0
+    skipped = 0
+    #: Pad labels so the status column aligns across the report.
+    width = max(len(label) for label, _, _, _ in items)
+    results = iter(responses)
+    for label, _, payload, scope in items:
+        if scope.skip_reason is not None:
+            skipped += 1
+            click.echo(f"{label:<{width}}  {click.style('SKIP', dim=True)}")
+            click.secho(f"    {scope.skip_reason}", dim=True)
+            continue
+        if scope.sorried:
+            failed += 1
+            click.echo(f"{label:<{width}}  {click.style('FAIL', fg='red')}")
+            for name in scope.sorried:
+                click.echo(
+                    f"    declaration '{name}' has a `sorry`; "
+                    "verify requires complete proofs"
+                )
+            continue
+        response = next(results)
+        # A provable negation means the statement is vacuous — the
+        # outcome is reported only when the API ran the negation check.
+        vacuous = response.negation is not None and response.negation.okay
+        if response.okay and not vacuous:
+            click.echo(f"{label:<{width}}  {click.style('OK', fg='green')}")
+        else:
+            failed += 1
+            click.echo(f"{label:<{width}}  {click.style('FAIL', fg='red')}")
+            if vacuous:
+                click.echo("    the negation is also provable; the statement is vacuous")
+        messages = [
+            *response.lean_messages.errors,
+            *response.lean_messages.warnings,
+        ]
+        for message in messages:
+            click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
+        if (
+            not response.okay
+            and not response.lean_messages.errors
+            and response.failed_declarations
+        ):
+            click.echo(
+                f"    failed declarations: {', '.join(response.failed_declarations)}"
+            )
+    total = len(items)
+    ok = total - failed - skipped
+    skipped_note = f", {skipped} skipped" if skipped else ""
+    if failed:
+        click.secho(
+            f"Verified {total} selection(s): {failed} failed, {ok} OK{skipped_note}",
+            fg="red",
+        )
+        raise click.exceptions.Exit(1)
+    click.secho(
+        f"Verified {total} selection(s): all OK{skipped_note}", fg="green"
+    )
 
 
 @main.command("list")

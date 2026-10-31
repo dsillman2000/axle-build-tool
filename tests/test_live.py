@@ -274,6 +274,44 @@ class TestLiveDemoCheck:
         assert "Checked 3 selection(s): all OK" in result.output
 
 
+class TestLiveDemoVerify:
+    def test_verify_demo_targets_all_okay(self, in_demo) -> None:
+        """The demo theorems survive kernel-level verification."""
+        in_demo("RootTwoIrrational")
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("  OK") == 3
+        assert "Verified 3 selection(s): all OK" in result.output
+
+    def test_verify_rejects_sorried_and_axiom_proofs(self, tmp_path, monkeypatch) -> None:
+        """Elaborating-but-incomplete proofs fail verification."""
+        root = tmp_path / "proj"
+        (root / "M").mkdir(parents=True)
+        (root / "axbt_project.yml").write_text(
+            "project:\n  name: proj\nmodules:\n  M:\n    targets:\n      - A.holds\n"
+            "      - A.uses_axiom\n",
+            encoding="utf-8",
+        )
+        (root / "M" / "A.lean").write_text(
+            "theorem holds : 1 + 1 = 2 := rfl\n\n"
+            "axiom magic : 2 + 2 = 5\n\n"
+            "theorem uses_axiom : 2 + 2 = 5 := magic\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 1, result.output
+        assert status_line(result.output, "M.A.holds") == "M.A.holds OK"
+        assert status_line(result.output, "M.A.uses_axiom") == "M.A.uses_axiom FAIL"
+        assert "failed declarations: uses_axiom" in result.output
+
+
 class TestLiveEnvironmentValidation:
     def test_unknown_pinned_environment_fails_with_hint(self, tmp_path, monkeypatch) -> None:
         """Decision 2: a bogus pinned env fails compile with the names."""

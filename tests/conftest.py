@@ -12,6 +12,7 @@ from axle.types import (
     Document,
     ExtractDeclsResponse,
     Messages,
+    Theorem2SorryResponse,
     VerifyProofResponse,
 )
 
@@ -235,6 +236,22 @@ class FakeAxleClient:
         if self._error:
             raise self._error
         return self.verify_result
+
+    async def theorem2sorry(self, **kwargs: Any) -> Theorem2SorryResponse:
+        self.calls.append(("theorem2sorry", kwargs))
+        if self._error:
+            raise self._error
+        # Echo the requested scope back in the formal statement so tests
+        # can assert the names plumbing reached the API.
+        names = kwargs.get("names")
+        scope = ",".join(names) if names else "all"
+        return Theorem2SorryResponse(
+            lean_messages=Messages([], [], []),
+            tool_messages=Messages([], [], []),
+            content=f"formal[{scope}]",
+            timings={},
+            info=None,
+        )
 
     async def extract_decls(self, **kwargs: Any) -> ExtractDeclsResponse:
         self.calls.append(("extract_decls", kwargs))
