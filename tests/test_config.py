@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from axle_build_tool.config import (
     CACHE_DIRNAME,
@@ -12,6 +13,7 @@ from axle_build_tool.config import (
     AxleConfig,
     ConfigError,
     load_config,
+    scaffold_config,
 )
 
 
@@ -76,9 +78,17 @@ class TestAxleConfig:
         write_config(tmp_path, "modules:\n  Foo: {}\n")
         config = load_config(tmp_path)
         assert config.axle == AxleConfig()
-        assert config.axle.environment == "lean-4.35.0"
+        # No pinned environment: the service auto-selects the latest Lean
+        # environment the Axle API offers.
+        assert config.axle.environment is None
         assert config.axle.timeout_seconds == 120
         assert config.axle.global_options == {}
+
+    def test_scaffold_omits_environment_for_auto_selection(self) -> None:
+        axle = yaml.safe_load(scaffold_config("proj"))["axle"]
+        assert "environment" not in axle
+        assert axle["timeout_seconds"] == 120
+        assert axle["global_options"] == {}
 
     def test_partial_section_keeps_defaults_for_the_rest(self, tmp_path: Path) -> None:
         write_config(

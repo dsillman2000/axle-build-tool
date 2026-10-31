@@ -23,7 +23,7 @@ from axle.types import (
 )
 
 from axle_build_tool.axle_service import AxleService, AxleServiceError, describe_axle_error
-from axle_build_tool.config import AxleConfig
+from axle_build_tool.config import AxleConfig, FALLBACK_ENVIRONMENT
 
 CONFIG = AxleConfig(
     environment="lean-4.35.0",
@@ -47,12 +47,24 @@ def make_response(cls: type, **overrides: Any):
 
 
 class FakeAxleClient:
-    """Records call kwargs; returns canned results or raises a canned error."""
+    """Records call kwargs; returns canned results or raises a canned error.
 
-    def __init__(self, error: Exception | None = None) -> None:
+    `error` is raised by the operations; `ping_error` by the
+    environment auto-detection endpoint; `latest` is what
+    `get_latest_environment` returns when no error is set.
+    """
+
+    def __init__(
+        self,
+        error: Exception | None = None,
+        ping_error: Exception | None = None,
+        latest: dict[str, Any] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.closed = False
         self._error = error
+        self._ping_error = ping_error
+        self._latest = latest
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
         self.extract_result = ExtractDeclsResponse(
@@ -63,6 +75,12 @@ class FakeAxleClient:
             timings={},
             info=None,
         )
+
+    async def get_latest_environment(self, **kwargs: Any) -> dict[str, Any] | None:
+        self.calls.append(("get_latest_environment", kwargs))
+        if self._ping_error:
+            raise self._ping_error
+        return self._latest
 
     async def check(self, **kwargs: Any) -> CheckResponse:
         self.calls.append(("check", kwargs))
@@ -96,6 +114,11 @@ def make_service(error: Exception | None = None) -> tuple[AxleService, FakeAxleC
     fake = FakeAxleClient(error=error)
     service = AxleService(CONFIG, client_factory=lambda: fake)
     return service, fake
+
+
+def make_auto_service(fake: FakeAxleClient) -> AxleService:
+    """A service with no pinned environment (the default configuration)."""
+    return AxleService(AxleConfig(), client_factory=lambda: fake)
 
 
 def run(coro):
@@ -211,3 +234,100 @@ class TestErrorMapping:
 
         with pytest.raises(AttributeError):
             run(service.check("code"))
+
+
+class TestAutoEnvironment:
+    """The default configuration has no pinned environment: axbt pings the
+    environments endpoint and picks the latest Lean version, falling back
+    to lean-4.35.0 only when the Axle API is unreachable."""
+
+    def test_pings_environments_and_picks_latest(self) -> None:
+        fake = FakeAxleClient(latest={"name": "lean-4.36.0"})
+        service = make_auto_service(fake)
+
+        run(service.check("code"))
+
+        assert [method for method, _ in fake.calls] == [
+            "get_latest_environment",
+            "check",
+        ]
+        assert fake.calls[-1][1]["environment"] == "lean-4.36.0"
+
+    def test_latest_result_is_cached_across_operations(self) -> None:
+        fake = FakeAxleClient(latest={"name": "lean-4.36.0"})
+        service = make_auto_service(fake)
+
+        run(service.check("a"))
+        run(service.verify_proof("stmt", "a"))
+        run(service.extract_decls("a"))
+
+        pings = [method for method, _ in fake.calls].count("get_latest_environment")
+        assert pings == 1
+        assert {kwargs["environment"] for _, kwargs in fake.calls[1:]} == {"lean-4.36.0"}
+
+    def test_pings_use_the_configured_timeout(self) -> None:
+        fake = FakeAxleClient(latest={"name": "lean-4.36.0"})
+        service = AxleService(
+            AxleConfig(environment=None, timeout_seconds=77),
+            client_factory=lambda: fake,
+        )
+
+        run(service.check("code"))
+
+        (_, ping_kwargs) = fake.calls[0]
+        assert ping_kwargs["timeout_seconds"] == 77
+
+    def test_unreachable_api_falls_back_to_lean_4_35_0(self) -> None:
+        fake = FakeAxleClient(
+            ping_error=AxleIsUnavailable("https://axle.axiommath.ai", "connection refused")
+        )
+        service = make_auto_service(fake)
+
+        run(service.check("code"))
+
+        assert fake.calls[-1][1]["environment"] == FALLBACK_ENVIRONMENT
+
+    def test_fallback_is_cached_no_repeated_pings(self) -> None:
+        fake = FakeAxleClient(
+            ping_error=AxleIsUnavailable("https://axle.axiommath.ai", "connection refused")
+        )
+        service = make_auto_service(fake)
+
+        run(service.check("a"))
+        run(service.extract_decls("b"))
+
+        pings = [method for method, _ in fake.calls].count("get_latest_environment")
+        assert pings == 1
+        assert {kwargs["environment"] for _, kwargs in fake.calls[1:]} == {
+            FALLBACK_ENVIRONMENT
+        }
+
+    def test_no_lean_environments_listed_falls_back(self) -> None:
+        fake = FakeAxleClient(latest=None)
+        service = make_auto_service(fake)
+
+        run(service.check("code"))
+
+        assert fake.calls[-1][1]["environment"] == FALLBACK_ENVIRONMENT
+
+    def test_explicit_environment_never_pings(self) -> None:
+        fake = FakeAxleClient(latest={"name": "lean-4.36.0"})
+        service = AxleService(
+            AxleConfig(environment="lean-4.99.0"), client_factory=lambda: fake
+        )
+
+        run(service.check("code"))
+
+        assert "get_latest_environment" not in [method for method, _ in fake.calls]
+        assert fake.calls[0][1]["environment"] == "lean-4.99.0"
+
+    def test_other_detection_errors_are_not_swallowed(self) -> None:
+        fake = FakeAxleClient(ping_error=AxleRateLimitedError("429"))
+        service = make_auto_service(fake)
+
+        with pytest.raises(AxleServiceError) as excinfo:
+            run(service.check("code"))
+
+        assert "rate limit" in str(excinfo.value)
+        # No check was submitted with a silently-downgraded environment.
+        assert [method for method, _ in fake.calls] == ["get_latest_environment"]

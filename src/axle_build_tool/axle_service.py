@@ -7,12 +7,18 @@ the environment itself) and applies the project's `axle` settings
 API errors are translated into `AxleServiceError` with actionable,
 user-facing messages.
 
+When the project does not pin `axle.environment`, the service picks the
+latest Lean environment the API offers, using the SDK's
+`get_latest_environment`; if the API is unreachable it falls back to
+`FALLBACK_ENVIRONMENT`.
+
 The CLI stays synchronous; command bodies run these coroutines via
 `asyncio.run`. Tests inject a fake client through `client_factory`.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -29,7 +35,9 @@ from axle.exceptions import (
 )
 from axle.types import CheckResponse, ExtractDeclsResponse, VerifyProofResponse
 
-from axle_build_tool.config import AxleConfig
+from axle_build_tool.config import AxleConfig, FALLBACK_ENVIRONMENT
+
+logger = logging.getLogger(__name__)
 
 #: Factory signature so tests can substitute a fake client.
 ClientFactory = Callable[[], Any]
@@ -99,6 +107,7 @@ class AxleService:
         self._config = config
         self._client_factory = client_factory
         self._client: Any | None = None
+        self._resolved_environment: str | None = None
 
     @property
     def client(self) -> Any:
@@ -106,12 +115,56 @@ class AxleService:
             self._client = self._client_factory()
         return self._client
 
+    async def _effective_environment(self) -> str:
+        """Resolve the environment for an API call.
+
+        An explicitly configured `axle.environment` is used verbatim.
+        Otherwise (the default) axbt pings the Axle API's environments
+        endpoint and picks the latest Lean version it offers, via the
+        SDK's `get_latest_environment`. The resolved value is cached for
+        the lifetime of the service. If the Axle API is unreachable, the
+        ultimate fallback is `FALLBACK_ENVIRONMENT` so a best-effort
+        attempt can still be made; any other detection error propagates.
+        """
+        if self._config.environment is not None:
+            return self._config.environment
+        if self._resolved_environment is None:
+            try:
+                latest = await self.client.get_latest_environment(
+                    timeout_seconds=self._config.timeout_seconds
+                )
+            except AxleIsUnavailable as exc:
+                logger.warning(
+                    "Could not reach the Axle API to pick the latest Lean "
+                    "environment (%s); falling back to %s",
+                    exc,
+                    FALLBACK_ENVIRONMENT,
+                )
+                self._resolved_environment = FALLBACK_ENVIRONMENT
+            except AxleError as exc:
+                raise AxleServiceError(
+                    describe_axle_error(
+                        exc, self._config, context="picking the default environment"
+                    )
+                ) from exc
+            else:
+                if latest is None:
+                    logger.warning(
+                        "The Axle API listed no Lean environments; "
+                        "falling back to %s",
+                        FALLBACK_ENVIRONMENT,
+                    )
+                    self._resolved_environment = FALLBACK_ENVIRONMENT
+                else:
+                    self._resolved_environment = latest["name"]
+        return self._resolved_environment
+
     async def check(self, content: str, *, context: str = "", **kwargs: Any) -> CheckResponse:
         """Evaluate Lean code for errors (plan: lightweight typechecking)."""
         try:
             return await self.client.check(
                 content=content,
-                environment=self._config.environment,
+                environment=await self._effective_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 **kwargs,
@@ -134,7 +187,7 @@ class AxleService:
             return await self.client.verify_proof(
                 formal_statement=formal_statement,
                 content=content,
-                environment=self._config.environment,
+                environment=await self._effective_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 **kwargs,
@@ -151,7 +204,7 @@ class AxleService:
         try:
             return await self.client.extract_decls(
                 content=content,
-                environment=self._config.environment,
+                environment=await self._effective_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
                 **kwargs,

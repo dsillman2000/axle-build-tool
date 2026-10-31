@@ -24,7 +24,9 @@ CONFIG_FILENAME = "axbt_project.yml"
 #: The one and only cache directory. Not configurable, by design.
 CACHE_DIRNAME = ".axbt"
 
-DEFAULT_ENVIRONMENT = "lean-4.35.0"
+#: The environment used as an ultimate fallback when axbt is asked to pick
+#: the latest Lean environment automatically but the Axle API is unreachable.
+FALLBACK_ENVIRONMENT = "lean-4.35.0"
 DEFAULT_TIMEOUT_SECONDS = 120
 
 #: Top-level keys left over from the old config shape that most plausibly
@@ -41,7 +43,11 @@ class AxleConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    environment: str = DEFAULT_ENVIRONMENT
+    #: Lean environment for API calls. `None` (the default) means auto:
+    #: axbt asks the Axle API for its environments and picks the latest
+    #: Lean version, falling back to `FALLBACK_ENVIRONMENT` when the API
+    #: is unreachable. An explicit value is used verbatim.
+    environment: str | None = None
     timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, strict=True)
     #: Lean global options forwarded verbatim to the Axle API.
     global_options: dict[str, bool | int | str] = Field(default_factory=dict)
@@ -176,16 +182,20 @@ def scaffold_config(project_name: str) -> str:
 
     The starter module is named after the project and omits `dir`,
     exercising the default-dir rule. The `axle` section is written out
-    with the default values from `AxleConfig`.
+    with the default values from `AxleConfig`; the environment is left
+    out so new projects auto-select the latest Lean environment the Axle
+    API offers.
     """
     defaults = AxleConfig()
+    axle_section: dict[str, Any] = {
+        "timeout_seconds": defaults.timeout_seconds,
+        "global_options": dict(defaults.global_options),
+    }
+    if defaults.environment is not None:
+        axle_section = {"environment": defaults.environment, **axle_section}
     config: dict[str, Any] = {
         "project": {"name": project_name, "version": "0.1.0"},
         "modules": {project_name: {"targets": []}},
-        "axle": {
-            "environment": defaults.environment,
-            "timeout_seconds": defaults.timeout_seconds,
-            "global_options": dict(defaults.global_options),
-        },
+        "axle": axle_section,
     }
     return yaml.safe_dump(config, sort_keys=False)
