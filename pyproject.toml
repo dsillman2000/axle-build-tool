@@ -1,17 +1,27 @@
 [project]
 name = "axle-build-tool"
 version = "0.1.0"
-description = "Add your description here"
+description = "dbt-inspired build/orchestration tool for Lean 4 projects, executed via the Axle (Axiom Lean Engine) API"
 readme = "README.md"
 authors = [
     { name = "dsillman2000", email = "dsillman2000@yahoo.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "click>=8.5.0",
+    "pyyaml>=6.0.3",
+]
 
 [project.scripts]
+axbt = "axle_build_tool:main"
+# Alias kept for backwards compatibility with the original package name.
 axle-build-tool = "axle_build_tool:main"
 
 [build-system]
 requires = ["uv_build>=0.13.0,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
