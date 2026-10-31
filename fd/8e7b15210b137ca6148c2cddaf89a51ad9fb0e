@@ -1,0 +1,18 @@
+.gitignore
+  h_4cc74772b10fd4 18-20
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 10,15-23,83-113
+tests/test_compile.py
+  h_4cc74772b10fd4 1-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fd8e7b15210b137ca6148c2cddaf89a51ad9fb0e",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
