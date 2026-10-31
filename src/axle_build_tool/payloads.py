@@ -37,8 +37,12 @@ class Payload:
     lines: list[str]
     #: Node name -> 1-based inclusive line span of its section.
     sections: dict[str, tuple[int, int]]
-    #: Node name -> number of import lines removed from its section.
-    stripped: dict[str, int]
+    #: Node name -> source line number of each of the section's lines
+    #: (parallel to the section's slice of `lines`). Import lines have no
+    #: counterpart in the payload, so the mapping skips them; this is the
+    #: exact, order-independent way to attribute payload positions back
+    #: to the original files.
+    line_map: dict[str, list[int]]
 
 
 def dotted_stem_of(node: ManifestNode) -> str:
@@ -56,8 +60,9 @@ def build_payload(
 
     The dependency closure is visited parents-first (the manifest DAG is
     acyclic and already validated), then the selected nodes follow in
-    name order. Every node's section span is recorded so callers can
-    attribute extracted documents or errors back to a file.
+    name order. Every node's section span is recorded, along with the
+    source line each section line came from (`line_map`), so callers can
+    attribute extracted documents or diagnostics back to a file.
     """
     by_name = manifest.by_name()
     order: list[ManifestNode] = []
@@ -76,43 +81,55 @@ def build_payload(
 
     hoisted: list[str] = []
     hoisted_seen: set[str] = set()
-    sections: list[tuple[ManifestNode, list[str], int]] = []
+    sections: list[tuple[ManifestNode, list[str], list[int]]] = []
     for member in order:
         source = (project_root / member.path).read_text(encoding="utf-8")
         internal_stems = {
             dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
         }
         section: list[str] = []
-        stripped = 0
-        for line in source.splitlines():
+        line_numbers: list[int] = []
+        for number, line in enumerate(source.splitlines(), start=1):
             match = _IMPORT_LINE.match(line)
             if match is None:
                 section.append(line)
+                line_numbers.append(number)
                 continue
             # Every import line leaves the section: intra-project imports
             # are satisfied by the inlined content; external ones are
             # hoisted into the payload's single header block.
-            stripped += 1
             if match.group(1) not in internal_stems and match.group(1) not in hoisted_seen:
                 hoisted_seen.add(match.group(1))
                 hoisted.append(line)
-        sections.append((member, section, stripped))
+        sections.append((member, section, line_numbers))
 
     lines: list[str] = []
     if hoisted:
         lines.extend(hoisted)
         lines.append("")
-    result = Payload(content="", lines=[], sections={}, stripped={})
-    for index, (member, section, stripped) in enumerate(sections):
+    result = Payload(content="", lines=[], sections={}, line_map={})
+    for index, (member, section, line_numbers) in enumerate(sections):
         if index:
             lines.append("")
         start = len(lines) + 1
         lines.extend(section)
         result.sections[member.name] = (start, len(lines))
-        result.stripped[member.name] = stripped
+        result.line_map[member.name] = line_numbers
     result.lines = lines
     result.content = "\n".join(lines) + "\n"
     return result
+
+
+def source_position(payload: Payload, line: int) -> tuple[str, int] | None:
+    """Map a 1-based payload line to (node name, source file line).
+
+    Returns `None` for lines outside every node's section (the hoisted
+    import header block, or out-of-range lines).
+    """
+    for node_name, (start, end) in payload.sections.items():
+        if start <= line <= end:
+            return node_name, payload.line_map[node_name][line - start]
+    return None
 
 
 def build_file_payload(

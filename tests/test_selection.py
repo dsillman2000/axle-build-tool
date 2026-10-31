@@ -8,7 +8,11 @@ import pytest
 
 from axle_build_tool.config import load_config
 from axle_build_tool.manifest import build_manifest
-from axle_build_tool.payloads import build_payload, compiled_filename
+from axle_build_tool.payloads import (
+    build_payload,
+    compiled_filename,
+    source_position,
+)
 from axle_build_tool.selection import Selection, SelectionError, resolve_selection
 
 SIMPLE_CONFIG = """\
@@ -205,4 +209,32 @@ class TestSelectionPayloads:
                 "RootTwoIrrational.Divisibility.prime_gt_one", config, manifest
             ).compiled_filename
             == "RootTwoIrrational_Divisibility_isolated.lean"
+        )
+
+    def test_line_map_attributes_section_lines_to_source_lines(
+        self, demo_state
+    ) -> None:
+        config, manifest, root = demo_state
+        selection = resolve_selection("RootTwoIrrational.EuclidLemma", config, manifest)
+
+        payload = build_payload(selection.payload_nodes(manifest), manifest, root)
+
+        start, end = payload.sections["RootTwoIrrational.EuclidLemma"]
+        mapped = payload.line_map["RootTwoIrrational.EuclidLemma"]
+        assert len(mapped) == end - start + 1
+        # The mapping is exact: the section's last line is the file's
+        # last line, and positions strictly increase (import lines were
+        # skipped, not shifted over).
+        source_lines = (
+            (root / "RootTwoIrrational/EuclidLemma.lean")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        assert mapped[-1] == len(source_lines)
+        assert all(before < after for before, after in zip(mapped, mapped[1:]))
+        # The hoisted import header has no source counterpart.
+        assert source_position(payload, start - 1) is None
+        assert source_position(payload, start) == (
+            "RootTwoIrrational.EuclidLemma",
+            mapped[0],
         )

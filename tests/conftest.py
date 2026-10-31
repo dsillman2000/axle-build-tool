@@ -177,6 +177,7 @@ class FakeAxleClient:
         extract_documents: dict[str, Document] | None = None,
         extract_documents_by_marker: dict[str, dict[str, Document]] | None = None,
         extract_lean_errors: list[str] | None = None,
+        environments: list[dict[str, Any]] | None = None,
     ) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.closed = False
@@ -190,6 +191,9 @@ class FakeAxleClient:
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
         self._extract_lean_errors = list(extract_lean_errors or [])
+        self._environments = (
+            environments if environments is not None else [{"name": "lean-4.35.0"}]
+        )
         self._request_counter = 0
         self.request_ids: list[str] = []
 
@@ -238,7 +242,7 @@ class FakeAxleClient:
         self.calls.append(("environments", kwargs))
         if self._error:
             raise self._error
-        return [{"name": "lean-4.35.0"}]
+        return self._environments
 
     async def close(self) -> None:
         self.closed = True

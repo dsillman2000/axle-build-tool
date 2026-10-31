@@ -43,10 +43,10 @@ def compiled_demo(demos_dir: Path, fake_axle, monkeypatch) -> Path:
 
 
 class TestHelp:
-    def test_help_lists_init_compile_and_list(self) -> None:
+    def test_help_lists_init_compile_check_and_list(self) -> None:
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        for command in ("init", "compile", "list"):
+        for command in ("init", "compile", "check", "list"):
             assert command in result.output
 
 

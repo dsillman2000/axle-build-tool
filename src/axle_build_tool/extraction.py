@@ -55,10 +55,9 @@ def _decl_from_document(
     Axle reports `line_pos` zero-based within the submitted payload;
     convert to one-based payload coordinates, keep only documents that
     belong to the node's own file section (documents of inlined
-    dependencies are extracted under their own nodes), and shift back
-    into original-file coordinates (every import line stripped from the
-    section sat above the declarations, so they shift everything down by
-    `stripped`).
+    dependencies are extracted under their own nodes), and map back into
+    original-file coordinates exactly via the payload's line map (import
+    lines stripped from the section simply have no counterpart).
 
     Axle's reported start can land on the declaration's docstring rather
     than on the `theorem`/`def` keyword itself (observed with multi-line
@@ -66,11 +65,11 @@ def _decl_from_document(
     position reliably points at the declaration.
     """
     section_start, section_end = payload.sections[node_name]
-    section_stripped = payload.stripped[node_name]
-    if not (section_start <= doc.line_pos + 1 <= section_end):
+    line_map = payload.line_map[node_name]
+    start = doc.line_pos + 1
+    if not (section_start <= start <= section_end):
         return None
-    offset = section_stripped - (section_start - 1) + 1
-    keyword_line = doc.line_pos + 1
+    keyword_line = start
     bound = min(section_end, keyword_line + 64)
     scanned = 0
     while scanned < 64 and keyword_line <= bound and not _DECLARATION_KEYWORD.match(
@@ -79,14 +78,20 @@ def _decl_from_document(
         keyword_line += 1
         scanned += 1
     if scanned > 64 or keyword_line > section_end:
-        keyword_line = doc.line_pos + 1  # keep the reported position
-    shift = keyword_line - (doc.line_pos + 1)
+        keyword_line = start  # keep the reported position
+    line_pos = line_map[keyword_line - section_start]
+    end = doc.end_line_pos + 1
+    if section_start <= end <= section_end:
+        end_line_pos = line_map[end - section_start]
+    else:
+        # Out-of-section ends keep the declaration's own length.
+        end_line_pos = line_pos + (end - keyword_line)
     return ExtractedDecl(
         name=doc.name,
         kind=doc.kind,
         is_sorry=doc.is_sorry,
-        line_pos=doc.line_pos + offset + shift,
-        end_line_pos=doc.end_line_pos + offset + shift,
+        line_pos=line_pos,
+        end_line_pos=end_line_pos,
         signature=doc.signature,
     )
 
