@@ -461,10 +461,8 @@ _VERIFY_KINDS = frozenset({"theorem", "lemma", "example"})
 
 
 def _mask_key(key: str) -> str:
-    """A safely recognizable rendering of the API key for diagnostics."""
-    if len(key) <= 10:
-        return "…"
-    return f"{key[:6]}…{key[-4:]}"
+    """A recognizable rendering of the API key for diagnostics."""
+    return f"{key[:12]}..."
 
 
 @main.command()

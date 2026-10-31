@@ -90,7 +90,7 @@ class TestDebug:
         result = runner.invoke(main, ["debug"])
 
         assert result.exit_code == 0, result.output
-        assert "pk_sec…7890" in result.output
+        assert "pk_secret_12..." in result.output
         # The full key never appears.
         assert "pk_secret_1234567890" not in result.output
 
