@@ -7,11 +7,20 @@ commands (`compile` / `check` / `verify`) will follow.
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 import click
 
-from axle_build_tool.config import CONFIG_FILENAME, scaffold_config
+from axle_build_tool.config import CONFIG_FILENAME, ConfigError, load_config, scaffold_config
+from axle_build_tool.manifest import (
+    ManifestError,
+    build_manifest,
+    check_targets,
+    load_manifest,
+    save_manifest,
+)
+from axle_build_tool.scanner import ScanError
 
 _PLACEHOLDER_SOURCE = """\
 /-!
@@ -71,3 +80,34 @@ def init(path: Path) -> None:
     click.echo(f"Initialized axbt project '{project_name}' in {target}")
     click.echo(f"  Created {CONFIG_FILENAME}")
     click.echo(f"  Created {project_name}/{project_name}.lean")
+
+
+@main.command()
+def compile() -> None:
+    """Scan modules, parse imports, and write .axbt/manifest.json."""
+    project_root = Path.cwd()
+
+    try:
+        config = load_config(project_root)
+        try:
+            # A missing or damaged manifest simply means we start fresh.
+            previous = load_manifest(project_root)
+        except ManifestError:
+            previous = None
+        manifest = build_manifest(project_root, config, previous)
+        check_targets(config, manifest)
+        written = save_manifest(manifest, project_root)
+    except (ConfigError, ScanError, ManifestError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    counts = Counter(node.status for node in manifest.nodes)
+    click.echo(
+        f"Compiled {len(manifest.nodes)} file(s) across {len(config.modules)} "
+        f"module(s): {counts.get('new', 0)} new, {counts.get('changed', 0)} changed, "
+        f"{counts.get('clean', 0)} clean"
+    )
+    represented = {node.module for node in manifest.nodes}
+    for module_name in config.modules:
+        if module_name not in represented:
+            click.echo(f"  Note: module '{module_name}' has no .lean files")
+    click.echo(f"Wrote {written}")
