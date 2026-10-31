@@ -13,6 +13,7 @@ from axle_build_tool.manifest import (
     Manifest,
     ManifestError,
     ManifestNode,
+    ExtractedDecl,
     build_manifest,
     check_targets,
     load_manifest,
@@ -164,6 +165,79 @@ class TestStatusTracking:
 
         assert second.by_name()["M.A"].status == "changed"
         assert second.by_name()["M.B"].status == "clean"
+
+    def _with_extracted_data(self, manifest: Manifest) -> Manifest:
+        declaration = ExtractedDecl(
+            name="sample_decl",
+            kind="theorem",
+            is_sorry=False,
+            line_pos=1,
+            end_line_pos=2,
+            signature="theorem sample_decl : True",
+        )
+        return manifest.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(
+                        update={
+                            "extraction": "ok",
+                            "declarations": [declaration],
+                        }
+                    )
+                    for node in manifest.nodes
+                ]
+            }
+        )
+
+    def test_unchanged_nodes_carry_extraction_data(self, simple_project: Path) -> None:
+        config = config_of(simple_project)
+        first = self._with_extracted_data(build_manifest(simple_project, config))
+
+        second = build_manifest(simple_project, config, previous=first)
+
+        for node in second.nodes:
+            assert node.extraction == "ok"
+            assert [d.name for d in node.declarations] == ["sample_decl"]
+
+    def test_changed_nodes_drop_stale_extraction_data(self, simple_project: Path) -> None:
+        config = config_of(simple_project)
+        first = self._with_extracted_data(build_manifest(simple_project, config))
+        (simple_project / "M/A.lean").write_text("def x := 2\n", encoding="utf-8")
+
+        second = build_manifest(simple_project, config, previous=first)
+
+        changed = second.by_name()["M.A"]
+        assert changed.status == "changed"
+        assert changed.extraction is None  # pending: re-extracted by the command
+        assert changed.declarations == []
+        carried = second.by_name()["M.B"]
+        assert carried.extraction == "ok"
+        assert [d.name for d in carried.declarations] == ["sample_decl"]
+
+    def test_pre_v2_manifest_nodes_are_pending_extraction(self, simple_project: Path) -> None:
+        config = config_of(simple_project)
+        first = build_manifest(simple_project, config)
+
+        # Simulate a v1 manifest: nodes carry no extraction fields at all.
+        stripped_previous = Manifest.model_validate(
+            {
+                "version": 1,
+                "generated_at": first.generated_at.isoformat(),
+                "nodes": [
+                    {
+                        key: value
+                        for key, value in node.model_dump(mode="json").items()
+                        if key not in ("extraction", "declarations")
+                    }
+                    for node in first.nodes
+                ],
+            }
+        )
+
+        second = build_manifest(simple_project, config, previous=stripped_previous)
+
+        assert all(node.extraction is None for node in second.nodes)
+        assert all(node.declarations == [] for node in second.nodes)
 
 
 class TestPersistence:
