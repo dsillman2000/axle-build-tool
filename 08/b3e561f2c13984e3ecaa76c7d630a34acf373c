@@ -1,0 +1,18 @@
+src/axle_build_tool/manifest.py
+  h_4cc74772b10fd4 1-265
+tests/conftest.py
+  h_4cc74772b10fd4 20-40
+tests/test_manifest.py
+  h_4cc74772b10fd4 1-231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "08b3e561f2c13984e3ecaa76c7d630a34acf373c",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
