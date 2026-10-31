@@ -48,6 +48,7 @@ from axle_build_tool.payloads import (
     write_compiled_payloads,
 )
 from axle_build_tool.scanner import ScanError, scan_module
+from axle_build_tool.stubbing import STUBBABLE_KINDS
 from axle_build_tool.selection import Selection, SelectionError, resolve_selection
 
 _PLACEHOLDER_SOURCE = """\
@@ -268,6 +269,60 @@ def _build_plan(
     return plan
 
 
+def _build_stub_map(
+    selectors: tuple[str, ...] | list[str],
+    config: ProjectConfig,
+    manifest: Manifest,
+) -> dict[str, frozenset[str] | None]:
+    """Resolve `--sorry` selectors into per-node stub instructions.
+
+    Maps node names to the declarations to stub in that node — `None`
+    meaning every stubbable declaration. Repeatable selectors merge
+    (an all-declarations stub absorbs narrower ones).
+    """
+    stub_map: dict[str, frozenset[str] | None] = {}
+    for selector in selectors:
+        selection = resolve_selection(selector, config, manifest)
+        for node in selection.payload_nodes(manifest):
+            names = (
+                None
+                if selection.declaration is None
+                else frozenset({selection.declaration})
+            )
+            if node.name not in stub_map:
+                stub_map[node.name] = names
+            elif stub_map[node.name] is None or names is None:
+                stub_map[node.name] = None
+            else:
+                stub_map[node.name] = stub_map[node.name] | names
+    return stub_map
+
+
+def _validate_stub_scope(
+    stub_map: dict[str, frozenset[str] | None],
+    selection: Selection,
+    label: str,
+    payload: Payload,
+    manifest: Manifest,
+) -> None:
+    """Every `--sorry` target must be a dependency of the selection —
+    and never the selection itself (which is never stubbed)."""
+    if not stub_map:
+        return
+    closure = set(payload.sections)
+    own = {node.name for node in selection.payload_nodes(manifest)}
+    for name in stub_map:
+        if name in own:
+            raise SelectionError(
+                f"--sorry {name!r}: the selection {label!r} is never stubbed."
+            )
+        if name not in closure:
+            raise SelectionError(
+                f"--sorry {name!r}: not a dependency of {label!r}; stubbing "
+                "applies to the selection's dependency closure."
+            )
+
+
 #: Leading position of a Lean diagnostic message, e.g. `-:28:8-28:24: error: …`
 #: (`-` is the API's filename placeholder for submitted content).
 _MESSAGE_POSITION = re.compile(r"^-:(\d+):(\d+)(?:-(\d+):(\d+))?(?=:)")
@@ -326,6 +381,16 @@ def _rewrite_message_position(
     ),
 )
 @click.option(
+    "--sorry",
+    "sorry",
+    multiple=True,
+    help=(
+        "Stub the given dependency subtree's proof/definition bodies "
+        "(signatures preserved; repeatable). The selection itself is "
+        "never stubbed."
+    ),
+)
+@click.option(
     "--select",
     "select",
     default=None,
@@ -336,7 +401,7 @@ def _rewrite_message_position(
         "file or module to check definitions."
     ),
 )
-def check(no_compile: bool, incremental: bool, select: str | None) -> None:
+def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: str | None) -> None:
     """Typecheck targets or a selection via the Axle API.
 
     By default, check runs `axbt compile` first — scanning modules,
@@ -364,16 +429,17 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
             project_root, no_compile=no_compile, incremental=incremental
         )
         plan = _build_plan(select, config, manifest)
-        checks = [
-            (
-                label,
-                selection,
-                build_payload(
-                    selection.payload_nodes(manifest), manifest, project_root
-                ),
+        stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        checks = []
+        for label, selection in plan:
+            payload = build_payload(
+                selection.payload_nodes(manifest),
+                manifest,
+                project_root,
+                stubbed=stub_map or None,
             )
-            for label, selection in plan
-        ]
+            _validate_stub_scope(stub_map, selection, label, payload, manifest)
+            checks.append((label, selection, payload))
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -407,6 +473,17 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
         responses = asyncio.run(submit_all())
     except AxleServiceError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    if stub_map:
+        try:
+            for _, selection, payload in checks:
+                out = compiled_payload_dir(project_root)
+                out.mkdir(parents=True, exist_ok=True)
+                (out / selection.compiled_filename_variant("stubbed")).write_text(
+                    payload.content, encoding="utf-8"
+                )
+        except OSError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     failed = 0
     #: Pad labels so the status column aligns across the report.
@@ -592,13 +669,31 @@ class _VerifyScope:
 
 
 def _verify_scope(
-    selection: Selection, payload: Payload, manifest: Manifest
+    selection: Selection,
+    payload: Payload,
+    manifest: Manifest,
+    stub_map: dict[str, frozenset[str] | None] | None = None,
 ) -> _VerifyScope:
     by_name = manifest.by_name()
     closure = [by_name[node_name] for node_name in payload.sections]
     verifiable = [
         d for node in closure for d in node.declarations if d.kind in _VERIFY_KINDS
     ]
+    # Declarations stubbed by `--sorry` are sorried by construction:
+    # they are excused in the verification and skipped by the local
+    # guard (their recorded is_sorry refers to the original source).
+    stubbed_names: set[str] = set()
+    for node_name, names in (stub_map or {}).items():
+        node = by_name.get(node_name)
+        if node is None:
+            continue
+        if names is None:
+            stubbed_names |= {
+                d.name for d in node.declarations if d.kind in STUBBABLE_KINDS
+            }
+        else:
+            stubbed_names |= names
+
     if selection.declaration is not None:
         node = by_name[selection.node_name]
         declaration = next(
@@ -615,11 +710,14 @@ def _verify_scope(
         if declaration.is_sorry:
             return _VerifyScope(names=None, sorried=[declaration.name])
         # The API sweeps the whole submitted content for incomplete
-        # proofs; excuse the payload's other theorems so the selection
-        # is judged only on its own declaration.
-        permitted = [d.name for d in verifiable if d.name != declaration.name]
+        # proofs; excuse the payload's other theorems and every stubbed
+        # declaration so the selection is judged only on its own proof.
+        permitted = {
+            d.name for d in verifiable if d.name != declaration.name
+        } | stubbed_names
         return _VerifyScope(
-            names=[declaration.name], permitted=permitted or None
+            names=[declaration.name],
+            permitted=sorted(permitted) or None,
         )
     # File/module-level: the formal statement covers every verifiable
     # declaration in the payload (the full dependency closure).
@@ -628,7 +726,13 @@ def _verify_scope(
             names=None, skip_reason="no theorems to verify (definitions only)"
         )
     return _VerifyScope(
-        names=None, sorried=[d.name for d in verifiable if d.is_sorry]
+        names=None,
+        permitted=sorted(stubbed_names) or None,
+        sorried=[
+            d.name
+            for d in verifiable
+            if d.is_sorry and d.name not in stubbed_names
+        ],
     )
 
 
@@ -653,6 +757,17 @@ def _verify_scope(
     ),
 )
 @click.option(
+    "--sorry",
+    "sorry",
+    multiple=True,
+    help=(
+        "Stub the given dependency subtree's proof/definition bodies "
+        "(signatures preserved; repeatable); the stubbed declarations "
+        "are automatically permitted in the verification. The selection "
+        "itself is never stubbed."
+    ),
+)
+@click.option(
     "--select",
     "select",
     default=None,
@@ -662,7 +777,7 @@ def _verify_scope(
         "theorem/lemma — definitions have no proof to verify."
     ),
 )
-def verify(no_compile: bool, incremental: bool, select: str | None) -> None:
+def verify(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: str | None) -> None:
     """Verify proofs at kernel level via the Axle API.
 
     The rigorous counterpart to `axbt check`: for every selection, the
@@ -678,13 +793,24 @@ def verify(no_compile: bool, incremental: bool, select: str | None) -> None:
         config, manifest = _acquire_project_state(
             project_root, no_compile=no_compile, incremental=incremental
         )
+        plan = _build_plan(select, config, manifest)
+        stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         items: list[tuple[str, Selection, Payload, _VerifyScope]] = []
-        for label, selection in _build_plan(select, config, manifest):
+        for label, selection in plan:
             payload = build_payload(
-                selection.payload_nodes(manifest), manifest, project_root
+                selection.payload_nodes(manifest),
+                manifest,
+                project_root,
+                stubbed=stub_map or None,
             )
+            _validate_stub_scope(stub_map, selection, label, payload, manifest)
             items.append(
-                (label, selection, payload, _verify_scope(selection, payload, manifest))
+                (
+                    label,
+                    selection,
+                    payload,
+                    _verify_scope(selection, payload, manifest, stub_map),
+                )
             )
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -733,6 +859,17 @@ def verify(no_compile: bool, incremental: bool, select: str | None) -> None:
         responses = asyncio.run(submit_all())
     except AxleServiceError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    if stub_map:
+        try:
+            for _, selection, payload, _ in items:
+                out = compiled_payload_dir(project_root)
+                out.mkdir(parents=True, exist_ok=True)
+                (out / selection.compiled_filename_variant("stubbed")).write_text(
+                    payload.content, encoding="utf-8"
+                )
+        except OSError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     failed = 0
     skipped = 0

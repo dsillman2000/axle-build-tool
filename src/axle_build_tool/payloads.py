@@ -21,6 +21,7 @@ from typing import Sequence
 
 from axle_build_tool.config import CACHE_DIRNAME
 from axle_build_tool.manifest import Manifest, ManifestNode
+from axle_build_tool.stubbing import stubbed_source
 
 _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:--.*)?$")
 
@@ -54,6 +55,7 @@ def build_payload(
     nodes: Sequence[ManifestNode],
     manifest: Manifest,
     project_root: Path,
+    stubbed: dict[str, frozenset[str] | None] | None = None,
 ) -> Payload:
     """Assemble a standalone payload covering `nodes` plus their full
     transitive dependency closure.
@@ -63,6 +65,12 @@ def build_payload(
     name order. Every node's section span is recorded, along with the
     source line each section line came from (`line_map`), so callers can
     attribute extracted documents or diagnostics back to a file.
+
+    `stubbed` (the `--sorry` machinery) maps node names to the
+    declarations to stub in that node — `None` meaning every stubbable
+    declaration. A stubbed node's section is built from its
+    stubbed source; line maps still refer to the *original* file
+    (stub lines have no counterpart there).
     """
     by_name = manifest.by_name()
     order: list[ManifestNode] = []
@@ -84,6 +92,8 @@ def build_payload(
     sections: list[tuple[ManifestNode, list[str], list[int]]] = []
     for member in order:
         source = (project_root / member.path).read_text(encoding="utf-8")
+        if stubbed and member.name in stubbed:
+            source = stubbed_source(member, source, stubbed[member.name])
         internal_stems = {
             dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
         }
@@ -146,14 +156,18 @@ def compiled_payload_dir(project_root: Path) -> Path:
     return project_root / CACHE_DIRNAME / COMPILED_DIRNAME
 
 
-def compiled_filename(module: str, stem: str | None = None) -> str:
+def compiled_filename(
+    module: str, stem: str | None = None, variant: str = "isolated"
+) -> str:
     """The persisted payload filename for a module- or file-level selection.
 
-    Dots in dotted stems become underscores:
+    Dots in dotted stems become underscores; `variant` selects the
+    payload kind (`isolated` for compiled payloads, `stubbed` for
+    `--sorry` submissions):
     `compiled_filename("M", "Utils.Basic")` -> `M_Utils_Basic_isolated.lean`.
     """
     base = module if stem is None else f"{module}_{stem.replace('.', '_')}"
-    return f"{base}_isolated.lean"
+    return f"{base}_{variant}.lean"
 
 
 def write_compiled_payloads(manifest: Manifest, project_root: Path) -> list[Path]:

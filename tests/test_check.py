@@ -528,6 +528,142 @@ axle:
 """
 
 
+class TestSorry:
+    """`--sorry <selector>`: stub dependency subtrees (plan §5)."""
+
+    SORRY_FILES = {
+        "M/A.lean": "def base := 1\ntheorem base_holds : base = 1 := rfl\n",
+        "M/B.lean": "import A\ndef middle := base + 1\n",
+        "M/C.lean": "import B\ntheorem top : middle = 2 := by decide\n",
+    }
+    SORRY_DOCS = {
+        "def base := 1": {
+            "base": make_document(
+                "base", kind="def", line_pos=1, end_line_pos=1, signature="def base : Nat"
+            ),
+            "base_holds": make_document(
+                "base_holds",
+                kind="theorem",
+                line_pos=2,
+                end_line_pos=2,
+                signature="theorem base_holds : base = 1",
+            ),
+        },
+        "def middle := base + 1": {
+            "middle": make_document(
+                "middle", kind="def", line_pos=4, end_line_pos=4, signature="def middle : Nat"
+            ),
+        },
+        "theorem top": {
+            "top": make_document(
+                "top",
+                kind="theorem",
+                line_pos=6,
+                end_line_pos=6,
+                signature="theorem top : middle = 2",
+            ),
+        },
+    }
+
+    def compile_chain(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> Path:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, self.SORRY_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.SORRY_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        return root
+
+    def test_sorry_stubs_the_dependency_subtree(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M.C", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        # A's bodies are stubbed (signatures preserved)...
+        assert "def base : Nat := sorry" in content
+        assert "theorem base_holds : base = 1 := by sorry" in content
+        # ...B (not stubbed) is real...
+        assert "def middle := base + 1" in content
+        # ...and the selection is never stubbed.
+        assert "theorem top : middle = 2 := by decide" in content
+        # The submitted payload is persisted for inspection.
+        persisted = root / ".axbt" / "compiled" / "M_C_stubbed.lean"
+        assert persisted.is_file()
+        assert persisted.read_text(encoding="utf-8") == content
+
+    def test_sorry_is_repeatable(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.C", "--sorry", "M.A", "--sorry", "M.B"]
+        )
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base : Nat := sorry" in content
+        assert "def middle : Nat := sorry" in content
+        assert "theorem top : middle = 2 := by decide" in content
+
+    def test_sorry_declaration_level_stubs_one_declaration(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.C", "--sorry", "M.A.base"]
+        )
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base : Nat := sorry" in content
+        assert "theorem base_holds : base = 1 := rfl" in content  # sibling stays real
+
+    def test_sorry_rejects_non_dependencies(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.A", "--sorry", "M.C"]
+        )
+
+        assert result.exit_code == 1
+        assert "not a dependency of 'M.A'" in result.output
+
+    def test_sorry_rejects_the_selection_itself(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.A", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 1
+        assert "never stubbed" in result.output
+
+    def test_sorry_rejects_targets_inside_the_stubbed_subtree(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        config = NO_TARGETS_CONFIG.replace("targets: []", "targets:\n      - B.middle")
+        root = make_project(tmp_path, config, self.SORRY_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.SORRY_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--sorry", "M.B"])
+
+        assert result.exit_code == 1
+        assert "never stubbed" in result.output
+        assert check_calls(fake_axle) == []
+
+
 class TestRitual:
     def test_compile_then_check_ritual(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
