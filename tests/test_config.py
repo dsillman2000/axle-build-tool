@@ -48,18 +48,18 @@ class TestModuleConfig:
 
     def test_modules_must_be_non_empty(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules: {}\n")
-        with pytest.raises(ConfigError, match=r"non-empty|at least one"):
+        with pytest.raises(ConfigError, match=r"non-empty|at least 1 item"):
             load_config(tmp_path)
 
     def test_modules_must_be_a_mapping(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules: [Foo, Bar]\n")
-        with pytest.raises(ConfigError, match=r"'modules'.*mapping"):
+        with pytest.raises(ConfigError, match=r"modules.*dictionary"):
             load_config(tmp_path)
 
     @pytest.mark.parametrize("bad", ["dir: [a, b]", "dir: 3"])
     def test_module_dir_must_be_a_string(self, tmp_path: Path, bad: str) -> None:
         write_config(tmp_path, f"modules:\n  Foo:\n    {bad}\n")
-        with pytest.raises(ConfigError, match=r"'dir'"):
+        with pytest.raises(ConfigError, match=r"modules -> Foo -> dir"):
             load_config(tmp_path)
 
     @pytest.mark.parametrize("bad", ["targets: Bar.baz", "targets: [1, 2]"])
@@ -67,7 +67,7 @@ class TestModuleConfig:
         self, tmp_path: Path, bad: str
     ) -> None:
         write_config(tmp_path, f"modules:\n  Foo:\n    {bad}\n")
-        with pytest.raises(ConfigError, match=r"'targets'"):
+        with pytest.raises(ConfigError, match=r"modules -> Foo -> targets"):
             load_config(tmp_path)
 
 
@@ -111,17 +111,17 @@ class TestAxleConfig:
         write_config(
             tmp_path, "modules:\n  Foo: {}\naxle:\n  timeout_seconds: 120s\n"
         )
-        with pytest.raises(ConfigError, match=r"'axle.timeout_seconds'"):
+        with pytest.raises(ConfigError, match=r"axle -> timeout_seconds"):
             load_config(tmp_path)
 
     def test_timeout_seconds_rejects_bool(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules:\n  Foo: {}\naxle:\n  timeout_seconds: true\n")
-        with pytest.raises(ConfigError, match=r"'axle.timeout_seconds'"):
+        with pytest.raises(ConfigError, match=r"axle -> timeout_seconds"):
             load_config(tmp_path)
 
     def test_environment_must_be_a_string(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules:\n  Foo: {}\naxle:\n  environment: 4.35\n")
-        with pytest.raises(ConfigError, match=r"'axle.environment'"):
+        with pytest.raises(ConfigError, match=r"axle -> environment"):
             load_config(tmp_path)
 
 
@@ -148,7 +148,7 @@ class TestUnknownKeys:
 
     def test_rejects_any_unknown_top_level_key(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules:\n  Foo: {}\nbogus: true\n")
-        with pytest.raises(ConfigError, match=r"'bogus'"):
+        with pytest.raises(ConfigError, match=r"bogus.*[Ee]xtra inputs"):
             load_config(tmp_path)
 
 
@@ -164,7 +164,7 @@ class TestFileHandling:
 
     def test_non_mapping_document(self, tmp_path: Path) -> None:
         write_config(tmp_path, "- just\n- a\n- list\n")
-        with pytest.raises(ConfigError, match="mapping"):
+        with pytest.raises(ConfigError, match="dictionary"):
             load_config(tmp_path)
 
     def test_empty_document(self, tmp_path: Path) -> None:
