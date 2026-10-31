@@ -1,3 +1,4 @@
+import Mathlib
 import Divisibility
 
 /-!
@@ -8,6 +9,6 @@ the factors.
 -/
 
 /-- **Euclid's lemma**: a prime dividing `a * b` divides `a` or `b`. -/
-theorem euclid_lemma (p a b : ℕ) (hp : Prime p) (h : p ∣ a * b) :
-    p ∣ a ∨ p ∣ b := by
-  sorry
+theorem euclid_lemma (p a b : ℕ) (hp : Nat.Prime p) (h : p ∣ a * b) :
+    p ∣ a ∨ p ∣ b :=
+  hp.dvd_mul.1 h
