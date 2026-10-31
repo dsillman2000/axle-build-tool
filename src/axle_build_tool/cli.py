@@ -365,12 +365,15 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
         raise click.ClickException(str(exc)) from exc
 
     failed = 0
+    #: Pad labels so the status column aligns across the report.
+    width = max(len(label) for label, _, _ in checks)
     for (label, _, payload), response in zip(checks, responses):
         if response.okay:
-            click.echo(f"{label}: okay")
+            status = click.style("OK", fg="green")
         else:
             failed += 1
-            click.echo(f"{label}: FAILED")
+            status = click.style("FAIL", fg="red")
+        click.echo(f"{label:<{width}}  {status}")
         messages = [
             *response.lean_messages.errors,
             *response.lean_messages.warnings,
@@ -387,9 +390,12 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
             )
     total = len(checks)
     if failed:
-        click.echo(f"Checked {total} selection(s): {failed} failed, {total - failed} okay")
+        click.secho(
+            f"Checked {total} selection(s): {failed} failed, {total - failed} OK",
+            fg="red",
+        )
         raise click.exceptions.Exit(1)
-    click.echo(f"Checked {total} selection(s): all okay")
+    click.secho(f"Checked {total} selection(s): all OK", fg="green")
 
 
 @main.command("list")

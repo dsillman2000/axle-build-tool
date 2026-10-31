@@ -10,7 +10,7 @@ from click.testing import CliRunner
 
 from axle_build_tool import main
 from axle_build_tool.manifest import load_manifest, manifest_path
-from conftest import make_document, make_response
+from conftest import make_document, make_response, status_line
 
 runner = CliRunner()
 
@@ -89,9 +89,9 @@ class TestTargetsDefault:
         # Declaration-level targets focus the check on their declaration.
         assert first["names"] == ["t1"]
         assert second["names"] == ["t2"]
-        assert "M.A.t1: okay" in result.output
-        assert "M.B.t2: okay" in result.output
-        assert "Checked 2 selection(s): all okay" in result.output
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        assert "Checked 2 selection(s): all OK" in result.output
 
     def test_duplicate_targets_are_deduplicated(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -106,7 +106,7 @@ class TestTargetsDefault:
 
         assert result.exit_code == 0, result.output
         assert len(check_calls(fake_axle)) == 1
-        assert "Checked 1 selection(s): all okay" in result.output
+        assert "Checked 1 selection(s): all OK" in result.output
 
     def test_no_targets_reports_nothing_and_makes_no_api_calls(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -146,8 +146,8 @@ class TestSelection:
         # payload carries the dependency's source.
         assert calls[0]["names"] == ["t2"]
         assert "def t1 := 1" in calls[0]["content"]
-        assert "M.B.t2: okay" in result.output
-        assert "Checked 1 selection(s): all okay" in result.output
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        assert "Checked 1 selection(s): all OK" in result.output
 
     def test_module_selection_checks_everything_in_one_call(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -165,7 +165,7 @@ class TestSelection:
         assert calls[0]["names"] is None
         assert "def t1 := 1" in calls[0]["content"]
         assert "def t2 := t1" in calls[0]["content"]
-        assert "M: okay" in result.output
+        assert status_line(result.output, "M") == "M OK"
 
 
 class TestFailureReporting:
@@ -199,12 +199,12 @@ class TestFailureReporting:
         result = runner.invoke(main, ["check", "--select", "M.A"])
 
         assert result.exit_code == 1
-        assert "M.A: FAILED" in result.output
+        assert status_line(result.output, "M.A") == "M.A FAIL"
         # Positions are attributed back to the real source file...
         assert "    M/A.lean:3:15: error: unknown identifier 'x'" in result.output
         # ...while positions with no source counterpart are left alone.
         assert "    -:1:1: error: header trouble" in result.output
-        assert "Checked 1 selection(s): 1 failed, 0 okay" in result.output
+        assert "Checked 1 selection(s): 1 failed, 0 OK" in result.output
 
     def test_okay_response_with_warnings_still_succeeds(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -226,7 +226,7 @@ class TestFailureReporting:
         result = runner.invoke(main, ["check", "--select", "M.A"])
 
         assert result.exit_code == 0, result.output
-        assert "M.A: okay" in result.output
+        assert status_line(result.output, "M.A") == "M.A OK"
         assert "    M/A.lean:1:4: warning: unused variable" in result.output
 
     def test_failure_without_lean_messages_reports_failed_declarations(
@@ -309,7 +309,7 @@ class TestCompilePrecursor:
         # per-target checks ran.
         assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 2
         assert len(check_calls(fake_axle)) == 2
-        assert "M.B.t2: okay" in result.output
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
 
     def test_check_recompiles_changed_sources_by_default(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -336,7 +336,7 @@ class TestCompilePrecursor:
 
         assert result.exit_code == 0, result.output
         assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 1
-        assert "M.B.t2: okay" in result.output
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
         extracted = load_manifest(root).by_name()["M.B"].declarations
         assert [d.name for d in extracted] == ["t2", "t3"]
 
@@ -414,8 +414,8 @@ class TestRunModes:
         assert result.exit_code == 0, result.output
         assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 2
         assert len(check_calls(fake_axle)) == 2
-        assert "M.A.t1: okay" in result.output
-        assert "Checked 2 selection(s): all okay" in result.output
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
+        assert "Checked 2 selection(s): all OK" in result.output
 
     def test_explicit_incremental_matches_the_default(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -531,8 +531,8 @@ class TestDemo:
         result = runner.invoke(main, ["check"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count(": okay") == 3  # the demo's three targets
-        assert "Checked 3 selection(s): all okay" in result.output
+        assert result.output.count("  OK") == 3  # the demo's three targets
+        assert "Checked 3 selection(s): all OK" in result.output
         # The demo pins its environment: validated once, then one check
         # per target, with the config's global options reaching the API.
         methods = [method for method, _ in fake_axle.calls]
@@ -561,4 +561,6 @@ class TestDemo:
         assert calls[0]["names"] == ["euclid_lemma"]
         # The payload inlines the Divisibility dependency.
         assert "theorem prime_gt_one" in calls[0]["content"]
-        assert "RootTwoIrrational.EuclidLemma.euclid_lemma: okay" in result.output
+        assert status_line(
+            result.output, "RootTwoIrrational.EuclidLemma.euclid_lemma"
+        ) == "RootTwoIrrational.EuclidLemma.euclid_lemma OK"

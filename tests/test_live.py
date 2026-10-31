@@ -23,6 +23,7 @@ import pytest
 from click.testing import CliRunner
 
 from axle_build_tool import main
+from conftest import status_line
 
 #: The live suite needs credentials; without them every test skips.
 HAVE_API_KEY = bool(os.environ.get("AXLE_API_KEY"))
@@ -163,7 +164,7 @@ class TestLiveDemoCompile:
 
         check_result = runner.invoke(main, ["check"])
         assert check_result.exit_code == 0, check_result.output
-        assert "M.A.t1: okay" in check_result.output
+        assert status_line(check_result.output, "M.A.t1") == "M.A.t1 OK"
 
     def test_compile_failure_reports_the_broken_file(self, in_demo, tmp_path) -> None:
         """A Lean error in a source fails compile with file context."""
@@ -189,15 +190,18 @@ class TestLiveDemoCheck:
         assert runner.invoke(main, ["compile"]).exit_code == 0
         result = runner.invoke(main, ["check"])
         assert result.exit_code == 0, result.output
-        assert result.output.count(": okay") == 3
-        assert "Checked 3 selection(s): all okay" in result.output
+        assert result.output.count("  OK") == 3
+        assert "Checked 3 selection(s): all OK" in result.output
 
     def test_check_gauss_demo_target(self, in_demo) -> None:
         in_demo("GaussIntSum")
         assert runner.invoke(main, ["compile"]).exit_code == 0
         result = runner.invoke(main, ["check"])
         assert result.exit_code == 0, result.output
-        assert "GaussIntSum.GaussSum.gauss_sum_identity: okay" in result.output
+        assert (
+            status_line(result.output, "GaussIntSum.GaussSum.gauss_sum_identity")
+            == "GaussIntSum.GaussSum.gauss_sum_identity OK"
+        )
 
     def test_check_declaration_selection(self, in_demo) -> None:
         """A declaration-level selection checks in full dependency context."""
@@ -207,7 +211,10 @@ class TestLiveDemoCheck:
             main, ["check", "--select", "RootTwoIrrational.EuclidLemma.euclid_lemma"]
         )
         assert result.exit_code == 0, result.output
-        assert "RootTwoIrrational.EuclidLemma.euclid_lemma: okay" in result.output
+        assert (
+            status_line(result.output, "RootTwoIrrational.EuclidLemma.euclid_lemma")
+            == "RootTwoIrrational.EuclidLemma.euclid_lemma OK"
+        )
 
     def test_check_failure_exits_1_with_messages(self, in_demo) -> None:
         """A source corrupted after compile fails check with attribution."""
@@ -228,7 +235,7 @@ class TestLiveDemoCheck:
         )
         result = runner.invoke(main, ["check", "--no-compile"])
         assert result.exit_code == 1, result.output
-        assert "FAILED" in result.output
+        assert "FAIL" in result.output
         # The Lean error is attributed back to the user's file.
         assert "Divisibility.lean" in result.output
 
@@ -263,8 +270,8 @@ class TestLiveDemoCheck:
 
         assert result.exit_code == 0, result.output
         assert "3 new, 0 changed, 0 clean" in result.output
-        assert result.output.count(": okay") == 3
-        assert "Checked 3 selection(s): all okay" in result.output
+        assert result.output.count("  OK") == 3
+        assert "Checked 3 selection(s): all OK" in result.output
 
 
 class TestLiveEnvironmentValidation:

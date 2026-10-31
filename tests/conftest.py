@@ -102,6 +102,18 @@ def with_declarations(manifest, names_by_node: dict[str, list[str]]):
     )
 
 
+def status_line(output: str, label: str) -> str:
+    """The check report line for `label`, whitespace-normalized.
+
+    Report lines pad labels so the status column aligns; this helper
+    erases that padding so tests can assert on `label + status`.
+    """
+    for line in output.splitlines():
+        if line.startswith(label):
+            return " ".join(line.split())
+    raise AssertionError(f"no report line for {label!r} in:\n{output}")
+
+
 def make_extract_response(
     documents: dict[str, Document], info: dict[str, Any] | None = None
 ) -> ExtractDeclsResponse:
