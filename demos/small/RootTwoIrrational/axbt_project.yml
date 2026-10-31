@@ -9,9 +9,7 @@ modules:
       - Divisibility.prime_gt_one
       - Divisibility.prime_dvd_square
       - EuclidLemma.euclid_lemma
-      - Scoped.variable_holds
-      - Scoped.deep_holds
-      - Scoped.helpers_holds
+      - IrrationalSqrtTwo.sqrt_two_irrational
 
 axle:
   environment: "lean-4.35.0"

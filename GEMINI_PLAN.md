@@ -156,7 +156,7 @@ To validate end-to-end behavior, the repository includes small, self-contained d
 
 A project proving that `√2` is not rational (irrationality of the square root of two).
 
-* **Module structure:** `Divisibility.lean` (helper lemmas such as `prime_gt_one` and `prime_dvd_square`) and `EuclidLemma.lean` (`euclid_lemma`), with the main irrationality theorem importing them — deliberately multi-file to exercise the import-DAG. Configured via the `modules`/`targets` example in §2.
+* **Module structure:** `Divisibility.lean` (helper lemmas such as `prime_gt_one` and `prime_dvd_square`), `EuclidLemma.lean` (`euclid_lemma`), and `IrrationalSqrtTwo.lean` (the main `sqrt_two_irrational` theorem: if `a * a = 2 * (b * b)` with `b ≠ 0`, then `2 ∣ a`, `b < a`, and strong induction on `a` closes the descent) — deliberately multi-file to exercise the import-DAG. Configured via the `modules`/`targets` example in §2.
 * **Features exercised:** `axbt init` scaffolding, import parsing, all three `--select` granularities, `--sorry` stubbing, and the `axbt check` / `axbt verify` success paths.
 
 ### 7.2 `demos/small/GaussIntSum`
