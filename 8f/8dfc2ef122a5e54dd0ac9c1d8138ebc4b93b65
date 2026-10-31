@@ -1,0 +1,20 @@
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 16,43,345-369,720-726,744-746,767-775,784,790-797,799-803,805-812,814,817,822,824-838,840-842,877-892,903-910,920-925,934-973,984-995,1001-1009,1018,1030-1033,1038,1049-1055,1068-1070,1073,1091-1096,1101-1105,1125-1148,1152,1160
+src/axle_build_tool/manifest.py
+  h_4cc74772b10fd4 33-41,51-52,311-342
+tests/test_live.py
+  h_4cc74772b10fd4 520-569,584-601
+tests/test_verify.py
+  h_4cc74772b10fd4 148-151,202-206,225-227,254-256,360-545
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8f8dfc2ef122a5e54dd0ac9c1d8138ebc4b93b65",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
