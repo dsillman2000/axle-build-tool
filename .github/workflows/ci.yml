@@ -31,9 +31,9 @@ jobs:
         run: uv run pytest
 
   live:
-    # Merge pipeline into main: exercise axbt against the real Axle API
-    # with the live-marked suite (ad-hoc projects; no demo dependence).
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Exercise axbt against the real Axle API with the live-marked suite
+    # (ad-hoc projects; no demo dependence) on every PR and every push
+    # to main — API quota is not a concern.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: test
