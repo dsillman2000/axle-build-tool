@@ -10,7 +10,7 @@ Formal theorem proving in Lean 4 often forces a compromise between monolithic fi
 
 **`axbt`** bridges this gap by applying the proven data-pipeline concepts of **dbt (data build tool)** to formal verification:
 
-* **Lean Models:** Modular `.lean` files or distinct declaration blocks treated as isolated verification targets ("models").
+* **Modules:** Named directories of `.lean` files (the dbt "model" analog) whose declarations are addressed as isolated verification **targets**.
 * **Dependency Graphs (DAG):** Automatic parsing of standard Lean `import` statements to construct project lineage and track metadata via `manifest.json`.
 * **Incremental Builds:** MD5 fingerprinting to avoid redundant extraction and verification of unchanged files.
 * **Rapid Feedback Tiers:** Separation of lightweight typechecking (`axbt check`) from rigorous proof verification (`axbt verify`).
@@ -19,42 +19,59 @@ Formal theorem proving in Lean 4 often forces a compromise between monolithic fi
 
 ## 2. Project Structure & Configuration (`axbt_project.yml`)
 
-The project root will contain a central configuration file, `axbt_project.yml`, which defines project metadata, source directories, and target output paths.
+The project root will contain a central configuration file, `axbt_project.yml`, which defines project metadata, the project's modules, and Axle API settings. YAML serde (parsing `axbt_project.yml`, and writing it during `axbt init` scaffolding) uses the [**`PyYAML`**](https://pyyaml.org/) Python library.
 
 ```yaml
 project:
   name: "my_lean_project"
   version: "0.1.0"
 
-dirs:
-  models: "models"
-  target: "target"
-  cache: ".axbt"
+modules:
+  RootTwoIrrational: # module name; used as the first component of selectors
+    dir: "RootTwoIrrational" # optional; defaults to the module name
+    targets: # default build set for a bare `axbt check`
+      - Divisibility.prime_gt_one
+      - Divisibility.prime_dvd_square
+      - EuclidLemma.euclid_lemma
 
 axle:
-  endpoint: "local" # or remote axle connection details
-
+  environment: "lean-v4.35.0" # Lean environment for the Axle API
+  timeout_seconds: 120 # Per-request timeout for Axle API calls
+  global_options: # Lean global options passed through to Axle
+    maxHeartbeats: 100000
 ```
+
+`modules` is a mapping of module names to module configs. Each entry describes one module — a named directory of `.lean` files:
+
+* **`dir`:** Path of the module's source directory, relative to the project root. Optional; defaults to the module's name.
+* **`targets`:** Module-relative selectors (`<file>.<declaration>`) for the isolated theorems/definitions that form the module's **default build set**. A bare `axbt check` checks every target of every module; any other declaration can still be addressed ad hoc with `--select` (see §6).
+
+The `axle` section configures how `axbt` talks to the Axle (Axiom Lean Engine) API:
+
+* **`environment`:** The Lean environment (toolchain version) Axle should run code in, e.g. `lean-v4.35.0`.
+* **`timeout_seconds`:** Maximum wall-clock time in seconds allowed for a single Axle request before it is cancelled.
+* **`global_options`:** A dict of Lean global options applied to every submission (e.g. `maxHeartbeats`), forwarded verbatim to the API.
+
+Notes on configuration behavior:
+
+* **Cache directory:** `.axbt/` is the default and only cache location. It is **not** a configurable setting and cannot be overridden.
+* **Connectivity:** `axbt` always executes against the remote Axle API configuration; there is no `endpoint` setting. Unit tests use mocks in place of the real API.
+
+Authentication is handled via the **`AXLE_API_KEY`** environment variable, which is the default API key used for all `axbt` executions against the Axle API.
 
 ### Directory Layout
 
 ```text
 my_lean_project/
 ├── axbt_project.yml
-├── models/
-│   ├── base/
-│   │   └── numbers.lean
-│   └── derived/
-│       └── arithmetic.lean
+├── RootTwoIrrational/           # modules.RootTwoIrrational.dir
+│   ├── Divisibility.lean
+│   └── EuclidLemma.lean
 └── .axbt/
-    ├── manifest.json            # Full project DAG and metadata
-    ├── cache/
-    │   ├── numbers.md5          # MD5 hash for change detection
-    │   └── arithmetic.md5
-    └── compiled/
-        ├── numbers_isolated.lean  # Cached isolated verification targets
-        └── arithmetic_isolated.lean
-
+    ├── manifest.json            # Full project DAG, metadata, and per-file MD5 hashes
+    └── compiled/                # Cached standalone payloads (one per selection)
+        ├── Divisibility_isolated.lean
+        └── EuclidLemma_isolated.lean
 ```
 
 ---
@@ -63,15 +80,15 @@ my_lean_project/
 
 To ensure fast execution cycles, `axbt` maintains a local cache (`.axbt/`) that tracks file states:
 
-* **MD5 Fingerprinting:** During `axbt compile`, the tool computes an MD5 hash for each source file in `models/`.
-* **Change Detection:** If a file's hash matches its cached `.md5` counterpart, downstream extraction and compilation steps are skipped.
+* **MD5 Fingerprinting:** During `axbt compile`, the tool computes an MD5 hash for each source file in every configured module directory and records it directly in `manifest.json` (as an `md5` field on each DAG node).
+* **Change Detection:** If a file's current hash matches the `md5` recorded in `manifest.json`, downstream extraction and compilation steps are skipped.
 * **Inspection Support:** All generated, isolated, and stubbed source files are preserved in `.axbt/compiled/`, allowing developers to inspect the exact payload sent to Axle when debugging verification failures.
 
 ---
 
 ## 4. Manifest & DAG Engine (`manifest.json`)
 
-`axbt` parses standard Lean `import` statements to map dependencies between models, compiling them into a structured Directed Acyclic Graph (DAG) exported to `target/manifest.json`.
+`axbt` parses standard Lean `import` statements to map dependencies between files across the configured modules, compiling them into a structured Directed Acyclic Graph (DAG) exported to `.axbt/manifest.json`.
 
 * **Declaration Extraction:** Interacts with Axle's underlying native metadata APIs (`extract_decls`) to catalog declarations, types, and dependencies without requiring a heavy local Lean compiler installation.
 * **Node Metadata:** Each entry in `manifest.json` tracks:
@@ -79,6 +96,7 @@ To ensure fast execution cycles, `axbt` maintains a local cache (`.axbt/`) that 
 * Source file path
 * Direct upstream dependencies (parents)
 * Downstream dependents (children)
+* Current MD5 fingerprint of the source file (for incremental change detection)
 * Current compilation/verification status and last-checked timestamp
 
 
@@ -89,26 +107,73 @@ To ensure fast execution cycles, `axbt` maintains a local cache (`.axbt/`) that 
 
 Checking a single model in isolation requires reconstructing its required context while stubbing out unneeded code:
 
-* **Upstream `sorry`-ing:** When executing an isolated model, upstream dependencies are automatically stubbed out with `sorry` or axiom placeholders to isolate the proof/definition under test.
+* **Payload construction:** A selected model is compiled into a standalone `.lean` file by topologically flattening its dependency subgraph. By default the payload inlines the **full transitive source** of all upstream dependencies.
+* **Opt-in stubbing (`--sorry`):** Passing `--sorry <selector>` replaces the proof bodies of the selected dependency subtree with `sorry` stubs (signatures preserved), trading completeness for speed when iterating against broken or slow-to-elaborate upstream code. The flag may be repeated to stub multiple subtrees.
 * **Scoping Preservation:** Special care is taken to wrap extracted code blocks in their respective `namespace`, `section`, `variable`, and `open` headers to prevent name-resolution or scope errors.
 
 ---
 
 ## 6. CLI Command Architecture
 
-The `axbt` CLI supports three primary commands mirroring a progressive developer workflow:
+The `axbt` CLI supports three primary commands mirroring a progressive developer workflow. Command-line mechanics (argument parsing, subcommands, options like `--select`/`--sorry`, help output, exit codes) are implemented with the [**`click`**](https://click.palletsprojects.com/) Python library:
 
 | Command | Description | Performance & Purpose |
 | --- | --- | --- |
-| **`axbt compile`** | Scans `models/`, checks MD5 hashes, updates the DAG, and outputs `target/manifest.json`. | **Fast:** Only re-extracts declarations for modified files. |
-| **`axbt check`** | Assembles the isolated model (with upstream `sorry` stubs) and submits it for a rapid typecheck via Axle. | **Fast & Lightweight:** Optimized for daily modeling and rapid proof iteration. |
-| **`axbt verify`** | Executes rigorous kernel-level proof verification or equality checking via Axle. | **Slow & Strict:** Intended for final validation, release gates, and CI/CD pipelines. |
+| **`axbt compile`** | Scans every configured module directory, checks MD5 hashes, updates the DAG, outputs `.axbt/manifest.json`, and (re)generates cached standalone payloads for all declared `targets`. | **Fast:** Only re-extracts declarations for modified files. |
+| **`axbt check`** | Assembles the standalone payload for the selection (inlining dependencies, stubbing only where `--sorry` requests it) and submits it for a rapid typecheck via Axle. | **Fast & Lightweight:** Optimized for daily modeling and rapid proof iteration. |
+| **`axbt verify`** | Executes rigorous kernel-level proof verification or equality checking via Axle (same selection mechanics as `check`). | **Slow & Strict:** Intended for final validation, release gates, and CI/CD pipelines. |
+
+### Selection (`--select`) and stubbing (`--sorry`)
+
+Selectors are dot-separated and resolved against the manifest: the first segment must match a module name, the next greedily matches a file stem, and the remainder — which may itself contain dots, since Lean declaration names do — is matched against the extracted declaration names.
+
+| Invocation | Scope |
+| --- | --- |
+| `axbt check --select RootTwoIrrational` | Whole module: every file in the module, including dependencies, all flattened and checked. |
+| `axbt check --select RootTwoIrrational.Divisibility` | Whole `Divisibility.lean` file, including dependencies. |
+| `axbt check --select RootTwoIrrational.Divisibility.prime_dvd_square` | Single theorem, including its dependency subgraph. |
+
+Without `--select`, every `targets` entry of every module is built. Standalone payloads inline the full transitive source of dependencies by default; `--sorry <selector>` swaps the selected dependency subtree for `sorry` stubs instead, e.g.
+
+```text
+axbt check --select RootTwoIrrational.EuclidLemma --sorry RootTwoIrrational.Divisibility
+# checks EuclidLemma.lean, sorrying anything imported from Divisibility.lean
+```
 
 ---
 
-## 7. MVP Implementation Roadmap
+## 7. Demo Projects (`demos/`)
 
-1. **Phase 1 (Core CLI & Config):** Implement `axbt_project.yml` parsing, directory initialization (`axbt init`), and file-system scanning.
+To validate end-to-end behavior, the repository will include **exactly two** small, self-contained demo projects in a top-level `demos/` directory. Each demo is a complete, runnable `axbt` project (own `axbt_project.yml`, module source directory, and generated `.axbt/` output) and doubles as a regression fixture asserting that axbt's features work as expected.
+
+### 7.1 `demos/RootTwoIrrational`
+
+A project proving that `√2` is not rational (irrationality of the square root of two).
+
+* **Module structure:** `Divisibility.lean` (helper lemmas such as `prime_gt_one` and `prime_dvd_square`) and `EuclidLemma.lean` (`euclid_lemma`), with the main irrationality theorem importing them — deliberately multi-file to exercise the import-DAG. Configured via the `modules`/`targets` example in §2.
+* **Features exercised:** `axbt init` scaffolding, import parsing, all three `--select` granularities, `--sorry` stubbing, and the `axbt check` / `axbt verify` success paths.
+
+### 7.2 `demos/GaussIntSum`
+
+A project proving the Gauss summation identity: `1 + 2 + ⋯ + n = n * (n + 1) / 2` for the first `n` positive integers.
+
+* **Module structure:** One file stating the identity (with the induction proof), possibly plus a small helper file for summation lemmas, imported via the DAG.
+* **Features exercised:** incremental rebuild — after a scripted edit to a source file, `axbt compile` must re-extract *only* the modified file (MD5 change detection), plus declaration extraction and inspection of cached payloads in `.axbt/compiled/`.
+
+### 7.3 Role as test cases
+
+Both demos serve as executable acceptance tests for the tool:
+
+* Running `axbt compile && axbt check` (including `--select`/`--sorry` combinations, and `axbt verify` where a full proof is present) inside each demo directory must succeed with zero errors.
+* The `RootTwoIrrational` demo primarily validates correctness of DAG construction and stubbing; `GaussIntSum` primarily validates incremental caching behavior.
+* They are kept out of the `axbt` package itself and exist purely as fixtures for integration tests and manual smoke-testing.
+
+---
+
+## 8. MVP Implementation Roadmap
+
+1. **Phase 1 (Core CLI & Config):** Implement `axbt_project.yml` parsing (via `PyYAML`), directory initialization (`axbt init`), and file-system scanning, using the `click` library for command-line mechanics.
 2. **Phase 2 (Parser & DAG):** Integrate standard Lean import parsing, MD5 caching, and `manifest.json` generation.
 3. **Phase 3 (Axle Integration):** Connect `axbt compile` and `axbt check` to the Axle SDK/CLI endpoints for declaration extraction and lightweight checking.
 4. **Phase 4 (Isolation Engine):** Build the automated stubbing mechanism to handle namespaces, sections, and upstream `sorry` injection for isolated model execution.
+5. **Phase 5 (Demo Projects):** Create the `demos/RootTwoIrrational` and `demos/GaussIntSum` projects and wire them into the integration test suite as end-to-end acceptance fixtures.
