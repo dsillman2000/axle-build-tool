@@ -43,10 +43,10 @@ def compiled_demo(demos_dir: Path, fake_axle, monkeypatch) -> Path:
 
 
 class TestHelp:
-    def test_help_lists_init_compile_and_list(self) -> None:
+    def test_help_lists_init_compile_check_and_list(self) -> None:
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        for command in ("init", "compile", "list"):
+        for command in ("init", "compile", "check", "list"):
             assert command in result.output
 
 
@@ -78,7 +78,7 @@ class TestList:
         from conftest import make_document
 
         fake_axle._extract_documents = {
-            "open_problem": make_document("open_problem", is_sorry=True, line_pos=0, end_line_pos=0)
+            "open_problem": make_document("open_problem", is_sorry=True, line_pos=1, end_line_pos=1)
         }
         root = make_project(
             tmp_path,

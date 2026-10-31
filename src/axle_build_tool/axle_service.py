@@ -18,6 +18,7 @@ The CLI stays synchronous; command bodies run these coroutines via
 
 from __future__ import annotations
 
+import difflib
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -108,6 +109,7 @@ class AxleService:
         self._client_factory = client_factory
         self._client: Any | None = None
         self._resolved_environment: str | None = None
+        self._environment_validated = False
 
     @property
     def client(self) -> Any:
@@ -163,6 +165,34 @@ class AxleService:
                 else:
                     self._resolved_environment = latest["name"]
         return self._resolved_environment
+
+    async def validate_environment(self) -> None:
+        """Validate an explicitly pinned `axle.environment` against the API.
+
+        The default (auto-selected) environment needs no validation — it
+        is picked from this very endpoint. A pinned value, however, is
+        otherwise passed verbatim to every API call and would only fail
+        opaquely at submission time, so check it (once per service
+        lifetime) and raise `AxleServiceError` naming the available
+        environments — with a close-match hint — when the API does not
+        serve it.
+        """
+        if self._config.environment is None or self._environment_validated:
+            return
+        available = sorted(
+            str(entry["name"])
+            for entry in await self.environments(timeout_seconds=self._config.timeout_seconds)
+        )
+        if self._config.environment in available:
+            self._environment_validated = True
+            return
+        close = difflib.get_close_matches(self._config.environment, available, n=1)
+        hint = f" Did you mean {close[0]!r}?" if close else ""
+        raise AxleServiceError(
+            f"Axle environment {self._config.environment!r} is not served by the "
+            f"Axle API (available: {', '.join(available)}).{hint} "
+            "Fix 'axle.environment' in axbt_project.yml."
+        )
 
     async def check(self, content: str, *, context: str = "", **kwargs: Any) -> CheckResponse:
         """Evaluate Lean code for errors (plan: lightweight typechecking)."""

@@ -1,15 +1,17 @@
 """The `axbt` command-line interface.
 
-Command-line mechanics are implemented with `click`. The CLI currently
-ships a single subcommand, `axbt init [PATH]`; build and verification
-commands (`compile` / `check` / `verify`) will follow.
+Command-line mechanics are implemented with `click`. The CLI ships
+`axbt init`, `axbt compile`, `axbt check`, and `axbt list`;
+kernel-level proof verification (`axbt verify`) will follow.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -33,11 +35,14 @@ from axle_build_tool.manifest import (
     topological_order,
 )
 from axle_build_tool.payloads import (
+    Payload,
+    build_payload,
     compiled_payload_dir,
+    source_position,
     write_compiled_payloads,
 )
 from axle_build_tool.scanner import ScanError
-from axle_build_tool.selection import SelectionError, resolve_selection
+from axle_build_tool.selection import Selection, SelectionError, resolve_selection
 
 _PLACEHOLDER_SOURCE = """\
 /-!
@@ -127,6 +132,7 @@ def compile() -> None:
 
         async def extract() -> Manifest:
             async with service:
+                await service.validate_environment()
                 return await apply_extraction(service, manifest, project_root)
 
         manifest = asyncio.run(extract())
@@ -151,6 +157,166 @@ def compile() -> None:
             click.echo(f"  Note: module '{module_name}' has no .lean files")
     click.echo(f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}")
     click.echo(f"Wrote {written}")
+
+
+#: Leading position of a Lean diagnostic message, e.g. `-:28:8-28:24: error: …`
+#: (`-` is the API's filename placeholder for submitted content).
+_MESSAGE_POSITION = re.compile(r"^-:(\d+):(\d+)(?:-(\d+):(\d+))?(?=:)")
+
+
+def _rewrite_message_position(
+    message: str, payload: Payload, paths: dict[str, str]
+) -> str:
+    """Attribute a Lean diagnostic's payload position to its source file.
+
+    Check responses report positions in payload coordinates with a `-`
+    filename placeholder; rewrite the leading position (both ends of a
+    range) into `<file>:<line>` form using the payload's line map.
+    Messages without a mappable leading position (e.g. errors on the
+    hoisted import header) are returned unchanged.
+    """
+    match = _MESSAGE_POSITION.match(message)
+    if match is None:
+        return message
+
+    def locate(line: str) -> str | None:
+        found = source_position(payload, int(line))
+        if found is None:
+            return None
+        node_name, source_line = found
+        return f"{paths.get(node_name, node_name)}:{source_line}"
+
+    start_line, start_col, end_line, end_col = match.groups()
+    start = locate(start_line)
+    if start is None or (end_line is not None and locate(end_line) is None):
+        return message
+    prefix = f"{start}:{start_col}"
+    if end_line is not None:
+        prefix += f"-{locate(end_line)}:{end_col}"
+    return prefix + message[match.end():]
+
+
+@main.command()
+@click.option(
+    "--select",
+    "select",
+    default=None,
+    help=(
+        "Check <module>[.<file stem>[.<declaration>]] instead of the configured "
+        "targets. Declaration-level selections must name a theorem/lemma: Axle's "
+        "focused checking resolves theorems by name only, not defs — select the "
+        "file or module to check definitions."
+    ),
+)
+def check(select: str | None) -> None:
+    """Typecheck targets or a selection via the Axle API.
+
+    Without --select, checks every configured `targets` entry of every
+    module (one Axle `check` call per target). Submissions are standalone
+    payloads — dependencies inlined — so even a single declaration is
+    checked in full context. This is the fast, lightweight tier;
+    kernel-level proof verification is `axbt verify`.
+
+    Declaration-level selections pass `names=[<declaration>]` so Axle
+    focuses the check; Axle resolves names against theorems/lemmas only
+    (a `def` name is rejected with "Theorem '<name>' not found"), so
+    definitions must be checked via file- or module-level selections.
+    """
+    project_root = Path.cwd()
+    try:
+        config = load_config(project_root)
+        manifest = load_manifest(project_root)
+        if manifest.version != MANIFEST_VERSION:
+            raise ManifestError(
+                f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
+                f"axbt version; run `axbt compile` first."
+            )
+        if select is not None:
+            plan: list[tuple[str, Selection]] = [
+                (select, resolve_selection(select, config, manifest))
+            ]
+        else:
+            plan = []
+            for module in config.modules.values():
+                seen: set[tuple[str, str | None]] = set()
+                for target in module.targets:
+                    selection = resolve_selection(
+                        f"{module.name}.{target}", config, manifest
+                    )
+                    key = (selection.node_name or "", selection.declaration)
+                    if key not in seen:
+                        seen.add(key)
+                        plan.append((f"{module.name}.{target}", selection))
+        checks = [
+            (
+                label,
+                selection,
+                build_payload(
+                    selection.payload_nodes(manifest), manifest, project_root
+                ),
+            )
+            for label, selection in plan
+        ]
+    except (ConfigError, ManifestError, SelectionError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if not checks:
+        click.echo("No targets configured in axbt_project.yml; nothing to check.")
+        return
+
+    paths = {node.name: node.path for node in manifest.nodes}
+    service = make_axle_service(config.axle)
+
+    async def submit_all() -> list[Any]:
+        async with service:
+            await service.validate_environment()
+            semaphore = asyncio.Semaphore(service.max_concurrency)
+
+            async def submit(item: tuple[str, Selection, Payload]) -> Any:
+                label, selection, payload = item
+                async with semaphore:
+                    # Declaration-level selections focus the check by name;
+                    # Axle resolves theorems/lemmas only — defs are rejected
+                    # with "Theorem '<name>' not found".
+                    return await service.check(
+                        payload.content,
+                        context=label,
+                        names=[selection.declaration] if selection.declaration else None,
+                    )
+
+            return list(await asyncio.gather(*(submit(item) for item in checks)))
+
+    try:
+        responses = asyncio.run(submit_all())
+    except AxleServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    failed = 0
+    for (label, _, payload), response in zip(checks, responses):
+        if response.okay:
+            click.echo(f"{label}: okay")
+        else:
+            failed += 1
+            click.echo(f"{label}: FAILED")
+        messages = [
+            *response.lean_messages.errors,
+            *response.lean_messages.warnings,
+        ]
+        for message in messages:
+            click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
+        if (
+            not response.okay
+            and not response.lean_messages.errors
+            and response.failed_declarations
+        ):
+            click.echo(
+                f"    failed declarations: {', '.join(response.failed_declarations)}"
+            )
+    total = len(checks)
+    if failed:
+        click.echo(f"Checked {total} selection(s): {failed} failed, {total - failed} okay")
+        raise click.exceptions.Exit(1)
+    click.echo(f"Checked {total} selection(s): all okay")
 
 
 @main.command("list")

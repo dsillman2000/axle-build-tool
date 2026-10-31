@@ -103,6 +103,44 @@ class TestConfigPlumbing:
         assert [method for method, _ in fake.calls] == ["environments"]
 
 
+class TestEnvironmentValidation:
+    def test_pinned_environment_is_validated_against_the_api(self) -> None:
+        service, fake = make_service()
+        run(service.validate_environment())
+        assert [method for method, _ in fake.calls] == ["environments"]
+        assert fake.calls[0][1]["timeout_seconds"] == 30
+        # Validation is cached: one API call per service lifetime.
+        run(service.validate_environment())
+        assert len(fake.calls) == 1
+
+    def test_unknown_pinned_environment_lists_available_and_hints(self) -> None:
+        fake = FakeAxleClient(environments=[{"name": "lean-4.35.0"}])
+        service = AxleService(
+            AxleConfig(environment="lean-4.35.1", timeout_seconds=30),
+            client_factory=lambda: fake,
+        )
+
+        with pytest.raises(AxleServiceError, match=r"Did you mean 'lean-4\.35\.0'\?"):
+            run(service.validate_environment())
+
+    def test_unknown_environment_without_close_match_has_no_hint(self) -> None:
+        fake = FakeAxleClient(environments=[{"name": "lean-4.35.0"}])
+        service = AxleService(
+            AxleConfig(environment="totally-other", timeout_seconds=30),
+            client_factory=lambda: fake,
+        )
+
+        with pytest.raises(AxleServiceError, match="available: lean-4.35.0") as info:
+            run(service.validate_environment())
+        assert "Did you mean" not in str(info.value)
+
+    def test_auto_selected_environment_needs_no_validation(self) -> None:
+        fake = FakeAxleClient()
+        service = AxleService(AxleConfig(), client_factory=lambda: fake)
+        run(service.validate_environment())
+        assert fake.calls == []
+
+
 ERROR_CASES = [
     (AxleIsUnavailable("https://axle.axiommath.ai", "connection refused"), "unreachable"),
     (AxleForbiddenError("403"), "AXLE_API_KEY"),

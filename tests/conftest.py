@@ -177,6 +177,7 @@ class FakeAxleClient:
         extract_documents: dict[str, Document] | None = None,
         extract_documents_by_marker: dict[str, dict[str, Document]] | None = None,
         extract_lean_errors: list[str] | None = None,
+        environments: list[dict[str, Any]] | None = None,
     ) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.closed = False
@@ -190,6 +191,9 @@ class FakeAxleClient:
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
         self._extract_lean_errors = list(extract_lean_errors or [])
+        self._environments = (
+            environments if environments is not None else [{"name": "lean-4.35.0"}]
+        )
         self._request_counter = 0
         self.request_ids: list[str] = []
 
@@ -238,35 +242,35 @@ class FakeAxleClient:
         self.calls.append(("environments", kwargs))
         if self._error:
             raise self._error
-        return [{"name": "lean-4.35.0"}]
+        return self._environments
 
     async def close(self) -> None:
         self.closed = True
 
 
 #: Marker-routed extraction documents matching the RootTwoIrrational demo:
-#: the theorem keyword lines (zero-based payload coordinates) of each file.
+#: the theorem keyword lines (one-based payload coordinates, as the API
+#: reports them) of each file.
 DEMO_EXTRACTION_DOCS = {
     "theorem prime_gt_one": {
         "prime_gt_one": make_document(
             "prime_gt_one",
-            line_pos=11,
-            end_line_pos=12,
+            line_pos=12,
+            end_line_pos=13,
             signature="theorem prime_gt_one (p : ℕ) (hp : Nat.Prime p) : 1 < p",
         ),
-        "prime_dvd_square": make_document("prime_dvd_square", line_pos=15, end_line_pos=16),
+        "prime_dvd_square": make_document("prime_dvd_square", line_pos=16, end_line_pos=17),
     },
     "theorem euclid_lemma": {
-        # Zero-based payload coordinates: the Euclid section starts at
-        # one-based payload line 19 (after the hoisted import header and
-        # the inlined Divisibility source), so the theorem at file line
-        # 12 sits at zero-based payload line 27.
-        "euclid_lemma": make_document("euclid_lemma", line_pos=27, end_line_pos=28),
+        # The Euclid section starts at one-based payload line 19 (after
+        # the hoisted import header and the inlined Divisibility source),
+        # so the theorem at file line 12 sits at payload line 28.
+        "euclid_lemma": make_document("euclid_lemma", line_pos=28, end_line_pos=29),
     },
     "theorem sqrt_two_irrational": {
-        # Zero-based payload line 42 == file line 15 (three imports
-        # stripped, section starting at one-based payload line 32).
-        "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=42, end_line_pos=55),
+        # Payload line 43 == file line 15 (three imports stripped,
+        # section starting at one-based payload line 32).
+        "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=43, end_line_pos=56),
     },
 }
 
