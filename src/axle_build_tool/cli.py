@@ -201,7 +201,12 @@ def _rewrite_message_position(
     "--select",
     "select",
     default=None,
-    help="Check <module>[.<file stem>[.<declaration>]] instead of the configured targets.",
+    help=(
+        "Check <module>[.<file stem>[.<declaration>]] instead of the configured "
+        "targets. Declaration-level selections must name a theorem/lemma: Axle's "
+        "focused checking resolves theorems by name only, not defs — select the "
+        "file or module to check definitions."
+    ),
 )
 def check(select: str | None) -> None:
     """Typecheck targets or a selection via the Axle API.
@@ -211,6 +216,11 @@ def check(select: str | None) -> None:
     payloads — dependencies inlined — so even a single declaration is
     checked in full context. This is the fast, lightweight tier;
     kernel-level proof verification is `axbt verify`.
+
+    Declaration-level selections pass `names=[<declaration>]` so Axle
+    focuses the check; Axle resolves names against theorems/lemmas only
+    (a `def` name is rejected with "Theorem '<name>' not found"), so
+    definitions must be checked via file- or module-level selections.
     """
     project_root = Path.cwd()
     try:
@@ -265,6 +275,9 @@ def check(select: str | None) -> None:
             async def submit(item: tuple[str, Selection, Payload]) -> Any:
                 label, selection, payload = item
                 async with semaphore:
+                    # Declaration-level selections focus the check by name;
+                    # Axle resolves theorems/lemmas only — defs are rejected
+                    # with "Theorem '<name>' not found".
                     return await service.check(
                         payload.content,
                         context=label,

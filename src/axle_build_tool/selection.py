@@ -8,6 +8,13 @@ A selector is dot-separated and resolved against the manifest:
   **greedily** (stems may themselves contain dots for nested files); any
   remainder is the declaration name, which may also contain dots, since
   Lean declaration names do.
+
+Declaration-level selectors resolve against *every* extracted
+declaration (defs, instances, structures, …), but note that Axle's
+name-focused checking only accepts theorems/lemmas: a declaration-level
+selection of a `def` fails at submission time with "Theorem '<name>'
+not found" (observed live). Use module- or file-level selectors to
+check definitions.
 """
 
 from __future__ import annotations

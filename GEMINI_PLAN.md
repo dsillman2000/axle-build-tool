@@ -44,7 +44,7 @@ axle:
 `modules` is a mapping of module names to module configs. Each entry describes one module — a named directory of `.lean` files:
 
 * **`dir`:** Path of the module's source directory, relative to the project root. Optional; defaults to the module's name.
-* **`targets`:** Module-relative selectors (`<file>.<declaration>`) for the isolated theorems/definitions that form the module's **default build set**. A bare `axbt check` checks every target of every module; any other declaration can still be addressed ad hoc with `--select` (see §6).
+* **`targets`:** Module-relative selectors (`<file>.<declaration>`) for the isolated theorems/lemmas that form the module's **default build set**. A bare `axbt check` checks every target of every module; any other declaration can still be addressed ad hoc with `--select` (see §6). Note: declaration-level targets must be theorems/lemmas — Axle's name-focused checking does not resolve `def`s by name (see §6).
 
 The `axle` section configures how `axbt` talks to the Axle (Axiom Lean Engine) API:
 
@@ -126,6 +126,8 @@ The `axbt` CLI supports three primary commands mirroring a progressive developer
 ### Selection (`--select`) and stubbing (`--sorry`)
 
 Selectors are dot-separated and resolved against the manifest: the first segment must match a module name, the next greedily matches a file stem, and the remainder — which may itself contain dots, since Lean declaration names do — is matched against the extracted declaration names.
+
+Declaration-level selectors resolve against any extracted declaration, but **targeted (declaration-level) checks only work for theorems and lemmas**: Axle's name-focused checking resolves theorems by name only, so selecting a `def` fails at submission with `Theorem '<name>' not found` (observed live against the API). To check definitions, select the enclosing file or module instead.
 
 | Invocation | Scope |
 | --- | --- |
