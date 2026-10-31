@@ -1,0 +1,17 @@
+[project]
+name = "axle-build-tool"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "dsillman2000", email = "dsillman2000@yahoo.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+axle-build-tool = "axle_build_tool:main"
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
