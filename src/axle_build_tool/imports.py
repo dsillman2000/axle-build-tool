@@ -14,11 +14,12 @@ import re
 _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*$")
 
 
-def _strip_comments(source: str) -> str:
+def strip_comments(source: str) -> str:
     """Remove `--` and `/- -/` comments while preserving line structure.
 
     Block comments may be nested. Line breaks inside comments are kept so
-    that callers can keep matching line by line.
+    that callers can keep matching line by line. Shared line-oriented
+    preprocessing for axbt's local parsers.
     """
     out: list[str] = []
     depth = 0
@@ -57,7 +58,7 @@ def parse_imports(source: str) -> list[str]:
     import.
     """
     imports: list[str] = []
-    for line in _strip_comments(source).splitlines():
+    for line in strip_comments(source).splitlines():
         if not line.strip():
             continue
         match = _IMPORT_LINE.match(line)
