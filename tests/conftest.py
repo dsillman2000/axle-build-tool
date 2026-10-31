@@ -1,4 +1,9 @@
-"""Shared fixtures and paths for the axbt test suite."""
+"""Shared fixtures and paths for the axbt test suite.
+
+The offline suite builds its own throwaway projects; the live suite
+(`tests/test_live.py`) builds ad-hoc Lean projects per test. Neither
+depends on the repository's `demos/`.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from axle.types import (
     CheckResponse,
     Document,
@@ -15,19 +21,6 @@ from axle.types import (
     Theorem2SorryResponse,
     VerifyProofResponse,
 )
-
-#: Repository root, derived from this file's location:
-#: tests/conftest.py -> repo root. Used to locate the `demos/` fixtures
-#: for the live integration suite (the offline suite builds its own
-#: throwaway projects).
-REPO_ROOT = Path(__file__).parents[1]
-DEMOS_DIR = REPO_ROOT / "demos"
-
-
-@pytest.fixture
-def demos_dir() -> Path:
-    """Path to the repo's `demos/` directory (live integration fixtures)."""
-    return DEMOS_DIR
 
 
 @pytest.fixture

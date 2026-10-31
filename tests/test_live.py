@@ -1,22 +1,23 @@
 """Live regression tests against the real Axle API.
 
-These exercise the demos end-to-end through the real entry point with a
-real `AxleClient` — no fakes — so regressions in payload assembly,
-environment handling, or the SDK wiring surface against the actual
-service. They are marked `live` and skipped unless `AXLE_API_KEY` is
-set; CI (offline) never runs them. Run explicitly with:
+These drive the real CLI entry point with a real `AxleClient` — no
+fakes — so regressions in payload assembly, environment handling, or
+the SDK wiring surface against the actual service. They are marked
+`live` and skipped unless `AXLE_API_KEY` is set; CI (offline) never
+runs them. Run explicitly with:
 
     AXLE_API_KEY=... uv run pytest -m live
 
-Each test copies its demo fixture to a temporary directory so a live
-run never leaves `.axbt/` state in the repository.
+The suite is fully self-contained: every test builds its own ad-hoc
+Lean project in a temporary directory. Nothing here depends on the
+repository's `demos/` — those are exercised by the dedicated demo
+workflows, not by this suite.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 from pathlib import Path
 
 import pytest
@@ -37,30 +38,90 @@ pytestmark = [
 
 runner = CliRunner()
 
-DEMO_NAMES = ("RootTwoIrrational", "GaussIntSum")
+#: The Lean environment the live suite pins (deterministic submissions).
+LIVE_ENVIRONMENT = "lean-4.35.0"
 
-#: Expected extracted declarations per demo file (the fully proved
-#: targets the demos ship with).
-EXPECTED_DECLS = {
-    "RootTwoIrrational": {
-        "Divisibility": {"prime_gt_one", "prime_dvd_square"},
-        "EuclidLemma": {"euclid_lemma"},
-        "IrrationalSqrtTwo": {"sqrt_two_irrational"},
-    },
-    "GaussIntSum": {"GaussSum": {"gauss_sum_identity"}},
-}
+#: A base file with a hoisted external import, a module docstring (so
+#: positions only come out right if the keyword-snap attribution works),
+#: and proved declarations at known file lines.
+BASE_SOURCE = """\
+import Mathlib
+
+/-! Base definitions. -/
+
+def base : Nat := 1
+
+theorem base_holds : base = 1 := rfl
+"""
+
+#: A file importing its sibling: cross-file dependency in full context.
+USER_SOURCE = """\
+import Base
+
+theorem derived_holds : base + 0 = 1 := by simp [base]
+"""
+
+#: Elaborates cleanly but is not a complete proof.
+SORRY_SOURCE = """\
+import Mathlib
+
+theorem gap : 2 + 2 = 5 := by sorry
+"""
+
+#: Elaborates cleanly but relies on an axiom — incomplete by another door.
+AXIOM_SOURCE = """\
+import Mathlib
+
+axiom magic : 2 + 2 = 5
+
+theorem uses_axiom : 2 + 2 = 5 := magic
+"""
+
+#: A Lean error: fails elaboration, so compile (not check/verify) gates it.
+BROKEN_SOURCE = """\
+import Mathlib
+
+theorem broken : False := by rfl
+"""
 
 
 @pytest.fixture
-def in_demo(tmp_path: Path, demos_dir: Path, monkeypatch):
-    """Copy a demo to tmp, chdir into it, yield the project root."""
-    def _enter(name: str) -> Path:
-        root = tmp_path / name
-        shutil.copytree(demos_dir / name, root)
+def make_live_project(tmp_path: Path, monkeypatch):
+    """Build an ad-hoc Lean project and chdir into it.
+
+    `files` maps module-relative paths to Lean sources; `targets` are
+    the module-relative target selectors (default: none); pass
+    `environment=None` to omit the pin (auto-select). Returns the
+    project root.
+    """
+    import yaml
+
+    def _make(
+        files: dict[str, str],
+        targets: list[str] | None = None,
+        environment: str | None = LIVE_ENVIRONMENT,
+    ) -> Path:
+        root = tmp_path / "proj"
+        (root / "M").mkdir(parents=True)
+        for relative, content in files.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        axle: dict = {"timeout_seconds": 120}
+        if environment is not None:
+            axle["environment"] = environment
+        config = {
+            "project": {"name": "proj"},
+            "modules": {"M": {"targets": targets or []}},
+            "axle": axle,
+        }
+        (root / "axbt_project.yml").write_text(
+            yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+        )
         monkeypatch.chdir(root)
         return root
 
-    return _enter
+    return _make
 
 
 class TestLiveEnvironments:
@@ -93,44 +154,60 @@ class TestLiveEnvironments:
         assert resolved.startswith("lean-"), resolved
 
 
-class TestLiveDemoCompile:
-    @pytest.mark.parametrize("demo_name", DEMO_NAMES)
-    def test_compile_extracts_expected_declarations(
-        self, in_demo, demo_name: str
-    ) -> None:
-        """`axbt compile` against the real API enriches every node."""
-        root = in_demo(demo_name)
-        result = runner.invoke(main, ["compile"])
-        assert result.exit_code == 0, result.output
+class TestLiveCompile:
+    def test_compile_extracts_expected_declarations(self, make_live_project) -> None:
+        """`axbt compile` against the real API enriches every node, with
+        positions attributed to the declaring file's own coordinates."""
+        root = make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["Base.base_holds", "User.derived_holds"],
+        )
 
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
         from axle_build_tool.manifest import load_manifest
 
         manifest = load_manifest(root)
-        assert manifest.nodes, "no nodes compiled"
+        assert [node.name for node in manifest.nodes] == ["M.Base", "M.User"]
+        base, user = manifest.by_name()["M.Base"], manifest.by_name()["M.User"]
+        assert user.parents == ["M.Base"]  # the intra-project dependency
+
+        base_decls = {decl.name: decl for decl in base.declarations}
+        assert set(base_decls) == {"base", "base_holds"}
+        # Positions point at the declaration keyword lines of the file.
+        assert base_decls["base"].line_pos == 5
+        assert base_decls["base_holds"].line_pos == 7
+        assert base_decls["base"].kind == "def"
+        assert base_decls["base_holds"].kind == "theorem"
+
+        user_decls = {decl.name: decl for decl in user.declarations}
+        assert set(user_decls) == {"derived_holds"}
+        assert user_decls["derived_holds"].line_pos == 3
+
         for node in manifest.nodes:
-            # A successful compile records every node as clean (the
-            # source-diff status is computed after the build).
-            assert node.status == "clean"
-            expected = EXPECTED_DECLS[demo_name][node.name.split(".")[-1]]
-            extracted = {decl.name for decl in node.declarations}
-            assert expected <= extracted, (node.name, extracted)
-            # The demos are fully proved: no sorry anywhere.
+            # A first compile extracts everything fresh (no previous
+            # manifest): every node is "new" until the next compile
+            # carries it as "clean".
+            assert node.status == "new"
+            assert node.declarations, f"{node.name} extracted nothing"
+            # The sources are fully proved: no sorry anywhere.
             assert not any(decl.is_sorry for decl in node.declarations)
 
-    def test_recompile_marks_everything_clean(self, in_demo) -> None:
-        """§3's incremental promise holds against the live API."""
-        root = in_demo("RootTwoIrrational")
+    def test_recompile_marks_everything_clean(self, make_live_project) -> None:
+        """The incremental promise holds against the live API."""
+        root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
         assert runner.invoke(main, ["compile"]).exit_code == 0
-        result = runner.invoke(main, ["compile"])
-        assert result.exit_code == 0, result.output
-        assert "Nothing to extract" in result.output or "clean" in result.output
 
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert "0 new, 0 changed, 1 clean" in result.output
         from axle_build_tool.manifest import load_manifest
 
-        manifest = load_manifest(root)
-        assert all(node.status == "clean" for node in manifest.nodes)
+        assert all(node.status == "clean" for node in load_manifest(root).nodes)
 
-    def test_no_import_project_extracts_declarations(self, tmp_path, monkeypatch) -> None:
+    def test_no_import_project_extracts_declarations(self, make_live_project) -> None:
         """Regression: files with no import lines extract declarations.
 
         There was a time when every document was silently dropped for
@@ -138,17 +215,10 @@ class TestLiveDemoCompile:
         leaving `declarations: []` in the manifest and a confusing
         "no declarations were extracted" error from `check`.
         """
-        root = tmp_path / "proj"
-        (root / "M").mkdir(parents=True)
-        (root / "axbt_project.yml").write_text(
-            "project:\n  name: proj\nmodules:\n  M:\n    targets:\n      - A.t1\n",
-            encoding="utf-8",
+        root = make_live_project(
+            {"M/A.lean": "theorem t1 : 1 = 1 := rfl\n\ntheorem t2 : 2 = 1 + 1 := rfl\n"},
+            targets=["A.t1"],
         )
-        (root / "M" / "A.lean").write_text(
-            "theorem t1 : 1 = 1 := rfl\n\ntheorem t2 : 2 = 1 + 1 := rfl\n",
-            encoding="utf-8",
-        )
-        monkeypatch.chdir(root)
 
         result = runner.invoke(main, ["compile"])
         assert result.exit_code == 0, result.output
@@ -166,14 +236,14 @@ class TestLiveDemoCompile:
         assert check_result.exit_code == 0, check_result.output
         assert status_line(check_result.output, "M.A.t1") == "M.A.t1 OK"
 
-    def test_compile_failure_reports_the_broken_file(self, in_demo, tmp_path) -> None:
+    def test_compile_failure_reports_the_broken_file(self, make_live_project) -> None:
         """A Lean error in a source fails compile with file context."""
-        root = in_demo("RootTwoIrrational")
-        (root / "RootTwoIrrational" / "Broken.lean").write_text(
-            "import Mathlib\n\ntheorem broken : False := by rfl\n",
-            encoding="utf-8",
+        root = make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/Broken.lean": BROKEN_SOURCE},
         )
+
         result = runner.invoke(main, ["compile"])
+
         assert result.exit_code == 1, result.output
         assert "Broken.lean" in result.output
         # The previous manifest is untouched by the failed run.
@@ -183,42 +253,38 @@ class TestLiveDemoCompile:
             assert load_manifest(root).version == MANIFEST_VERSION
 
 
-class TestLiveDemoCheck:
-    def test_check_demo_targets_all_okay(self, in_demo) -> None:
+class TestLiveCheck:
+    def test_check_targets_all_okay(self, make_live_project) -> None:
         """The full compile-then-check ritual passes on the live API."""
-        in_demo("RootTwoIrrational")
-        assert runner.invoke(main, ["compile"]).exit_code == 0
-        result = runner.invoke(main, ["check"])
-        assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 3
-        assert "Checked 3 selection(s): all OK" in result.output
-
-    def test_check_gauss_demo_target(self, in_demo) -> None:
-        in_demo("GaussIntSum")
-        assert runner.invoke(main, ["compile"]).exit_code == 0
-        result = runner.invoke(main, ["check"])
-        assert result.exit_code == 0, result.output
-        assert (
-            status_line(result.output, "GaussIntSum.GaussSum.gauss_sum_identity")
-            == "GaussIntSum.GaussSum.gauss_sum_identity OK"
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["Base.base_holds", "User.derived_holds"],
         )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
 
-    def test_check_declaration_selection(self, in_demo) -> None:
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("  OK") == 2
+        assert "Checked 2 selection(s): all OK" in result.output
+
+    def test_check_declaration_selection(self, make_live_project) -> None:
         """A declaration-level selection checks in full dependency context."""
-        in_demo("RootTwoIrrational")
-        assert runner.invoke(main, ["compile"]).exit_code == 0
-        result = runner.invoke(
-            main, ["check", "--select", "RootTwoIrrational.EuclidLemma.euclid_lemma"]
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
         )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--select", "M.User.derived_holds"])
+
         assert result.exit_code == 0, result.output
-        assert (
-            status_line(result.output, "RootTwoIrrational.EuclidLemma.euclid_lemma")
-            == "RootTwoIrrational.EuclidLemma.euclid_lemma OK"
+        assert status_line(result.output, "M.User.derived_holds") == (
+            "M.User.derived_holds OK"
         )
 
-    def test_check_failure_exits_1_with_messages(self, in_demo) -> None:
+    def test_check_failure_exits_1_with_messages(self, make_live_project) -> None:
         """A source corrupted after compile fails check with attribution."""
-        root = in_demo("RootTwoIrrational")
+        root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
         assert runner.invoke(main, ["compile"]).exit_code == 0
         # Corrupt the *targeted declaration itself*: check submits the
         # current sources with `names=[declaration]` focusing, so errors
@@ -226,28 +292,24 @@ class TestLiveDemoCheck:
         # `--no-compile` is required to reach check's own failure path:
         # the default precursor compile would fail first (a corrupted
         # source cannot be extracted cleanly either).
-        divisibility = root / "RootTwoIrrational" / "Divisibility.lean"
-        source = divisibility.read_text(encoding="utf-8")
-        assert "hp.one_lt" in source
-        divisibility.write_text(
-            source.replace("hp.one_lt", "hp.nonexistent_property"),
-            encoding="utf-8",
-        )
+        base = root / "M" / "Base.lean"
+        base.write_text(BASE_SOURCE.replace("= rfl", "= Hoff"), encoding="utf-8")
+
         result = runner.invoke(main, ["check", "--no-compile"])
+
         assert result.exit_code == 1, result.output
         assert "FAIL" in result.output
         # The Lean error is attributed back to the user's file.
-        assert "Divisibility.lean" in result.output
+        assert "Base.lean" in result.output
 
-    def test_check_recompiles_a_corrupted_source_by_default(self, in_demo) -> None:
+    def test_check_recompiles_a_corrupted_source_by_default(
+        self, make_live_project
+    ) -> None:
         """The default precursor compile fails fast with file context."""
-        root = in_demo("RootTwoIrrational")
+        root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
         assert runner.invoke(main, ["compile"]).exit_code == 0
-        divisibility = root / "RootTwoIrrational" / "Divisibility.lean"
-        source = divisibility.read_text(encoding="utf-8")
-        divisibility.write_text(
-            source.replace("hp.one_lt", "hp.nonexistent_property"),
-            encoding="utf-8",
+        (root / "M" / "Base.lean").write_text(
+            BASE_SOURCE.replace("= rfl", "= Hoff"), encoding="utf-8"
         )
 
         result = runner.invoke(main, ["check"])
@@ -256,76 +318,82 @@ class TestLiveDemoCheck:
         # The failure is the precursor's extraction, reported against the
         # user's file — not an unchecked stale selection.
         assert "Failed to extract declarations" in result.output
-        assert "Divisibility.lean" in result.output
+        assert "Base.lean" in result.output
 
     def test_full_refresh_reextracts_and_rechecks_unchanged_files(
-        self, in_demo
+        self, make_live_project
     ) -> None:
         """--full-refresh on a clean tree: everything re-extracted and
         re-checked, even though nothing changed."""
-        in_demo("RootTwoIrrational")
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["Base.base_holds", "User.derived_holds"],
+        )
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
         result = runner.invoke(main, ["check", "--full-refresh"])
 
         assert result.exit_code == 0, result.output
-        assert "3 new, 0 changed, 0 clean" in result.output
-        assert result.output.count("  OK") == 3
-        assert "Checked 3 selection(s): all OK" in result.output
+        assert "2 new, 0 changed, 0 clean" in result.output
+        assert result.output.count("  OK") == 2
+        assert "Checked 2 selection(s): all OK" in result.output
 
 
-class TestLiveDemoVerify:
-    def test_verify_demo_targets_all_okay(self, in_demo) -> None:
-        """The demo theorems survive kernel-level verification."""
-        in_demo("RootTwoIrrational")
+class TestLiveVerify:
+    def test_verify_targets_all_okay(self, make_live_project) -> None:
+        """Proved theorems survive kernel-level verification."""
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["Base.base_holds", "User.derived_holds"],
+        )
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 3
-        assert "Verified 3 selection(s): all OK" in result.output
+        assert result.output.count("  OK") == 2
+        assert "Verified 2 selection(s): all OK" in result.output
 
-    def test_verify_rejects_sorried_and_axiom_proofs(self, tmp_path, monkeypatch) -> None:
-        """Elaborating-but-incomplete proofs fail verification."""
-        root = tmp_path / "proj"
-        (root / "M").mkdir(parents=True)
-        (root / "axbt_project.yml").write_text(
-            "project:\n  name: proj\nmodules:\n  M:\n    targets:\n      - A.holds\n"
-            "      - A.uses_axiom\n",
-            encoding="utf-8",
-        )
-        (root / "M" / "A.lean").write_text(
-            "theorem holds : 1 + 1 = 2 := rfl\n\n"
-            "axiom magic : 2 + 2 = 5\n\n"
-            "theorem uses_axiom : 2 + 2 = 5 := magic\n",
-            encoding="utf-8",
-        )
-        monkeypatch.chdir(root)
+    def test_verify_sorried_target_fails_locally(self, make_live_project) -> None:
+        """A `sorry` target is judged without an API roundtrip."""
+        make_live_project({"M/Gap.lean": SORRY_SOURCE}, targets=["Gap.gap"])
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1, result.output
-        assert status_line(result.output, "M.A.holds") == "M.A.holds OK"
-        assert status_line(result.output, "M.A.uses_axiom") == "M.A.uses_axiom FAIL"
+        assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap FAIL"
+        assert "declaration 'gap' has a `sorry`" in result.output
+
+    def test_verify_rejects_axiom_proofs(self, make_live_project) -> None:
+        """Elaborating-but-incomplete proofs fail verification."""
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/Axiom.lean": AXIOM_SOURCE},
+            targets=["Base.base_holds", "Axiom.uses_axiom"],
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 1, result.output
+        assert status_line(result.output, "M.Base.base_holds") == "M.Base.base_holds OK"
+        assert status_line(result.output, "M.Axiom.uses_axiom") == (
+            "M.Axiom.uses_axiom FAIL"
+        )
         assert "failed declarations: uses_axiom" in result.output
 
 
 class TestLiveEnvironmentValidation:
-    def test_unknown_pinned_environment_fails_with_hint(self, tmp_path, monkeypatch) -> None:
-        """Decision 2: a bogus pinned env fails compile with the names."""
-        root = tmp_path / "proj"
-        root.mkdir()
-        (root / "axbt_project.yml").write_text(
-            "project:\n  name: proj\nmodules:\n  M:\n    targets: []\n"
-            "axle:\n  environment: lean-9.9.9\n",
-            encoding="utf-8",
+    def test_unknown_pinned_environment_fails_with_hint(
+        self, make_live_project
+    ) -> None:
+        """A bogus pinned env fails compile with the available names."""
+        root = make_live_project(
+            {"M/A.lean": "def t1 := 1\n"}, environment="lean-9.9.9"
         )
-        (root / "M").mkdir()
-        (root / "M" / "A.lean").write_text("def t1 := 1\n", encoding="utf-8")
-        monkeypatch.chdir(root)
+
         result = runner.invoke(main, ["compile"])
+
         assert result.exit_code == 1, result.output
         assert "lean-9.9.9" in result.output
         assert "available" in result.output
