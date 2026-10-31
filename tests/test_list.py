@@ -70,7 +70,7 @@ class TestHelp:
     def test_help_lists_init_compile_check_verify_and_list(self) -> None:
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        for command in ("init", "compile", "check", "verify", "list"):
+        for command in ("init", "compile", "check", "verify", "debug", "list"):
             assert command in result.output
 
 

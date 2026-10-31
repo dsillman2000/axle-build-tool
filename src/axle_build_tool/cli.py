@@ -8,7 +8,9 @@ Command-line mechanics are implemented with `click`. The CLI ships
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,7 +47,7 @@ from axle_build_tool.payloads import (
     source_position,
     write_compiled_payloads,
 )
-from axle_build_tool.scanner import ScanError
+from axle_build_tool.scanner import ScanError, scan_module
 from axle_build_tool.selection import Selection, SelectionError, resolve_selection
 
 _PLACEHOLDER_SOURCE = """\
@@ -456,6 +458,121 @@ _KIND_COLORS = {
 
 #: Declaration kinds with a proof body — the things `axbt verify` checks.
 _VERIFY_KINDS = frozenset({"theorem", "lemma", "example"})
+
+
+def _mask_key(key: str) -> str:
+    """A safely recognizable rendering of the API key for diagnostics."""
+    if len(key) <= 10:
+        return "…"
+    return f"{key[:6]}…{key[-4:]}"
+
+
+@main.command()
+def debug() -> None:
+    """Verify the Axle API key and print the project's configuration.
+
+    A developer diagnostic: shows what axbt will use for this project —
+    the `axbt_project.yml` settings, the state of the `.axbt/` cache,
+    and whether the `AXLE_API_KEY` environment variable is set and
+    accepted by the API. Exits 1 when the key is missing or rejected.
+    """
+    import time
+
+    project_root = Path.cwd()
+
+    # --- Project configuration -------------------------------------------
+    click.secho("Project (axbt_project.yml):", bold=True)
+    config: AxleConfig | None = None
+    try:
+        project = load_config(project_root)
+        config = project.axle
+    except ConfigError as exc:
+        click.secho(f"  {exc}", dim=True)
+        click.secho("  (the Axle API check below runs without project settings)", dim=True)
+
+    if config is not None:
+        name_note = f" (v{project.version})" if project.version else ""
+        click.echo(f"  name:       {project.name}{name_note}")
+        click.echo(f"  location:   {project_root}")
+        for module in project.modules.values():
+            click.secho(f"  module {module.name}:", bold=True)
+            click.echo(f"    dir:       {module.dir or module.name}")
+            targets = ", ".join(module.targets) if module.targets else "(none configured)"
+            click.echo(f"    targets:   {targets}")
+            try:
+                files = scan_module(project.module_path(project_root, module.name))
+                click.echo(f"    files:     {len(files)} scanned")
+            except ScanError as exc:
+                click.secho(f"    files:     {exc}", dim=True)
+        click.echo(f"  axle:")
+        pinned = config.environment
+        environment_note = "pinned in axbt_project.yml" if pinned else "auto-select (latest the API serves)"
+        click.echo(f"    environment:    {pinned or '(unpinned)'} — {environment_note}")
+        click.echo(f"    timeout:        {config.timeout_seconds} s")
+        options = (
+            ", ".join(f"{key}={value}" for key, value in config.global_options.items())
+            or "(none)"
+        )
+        click.echo(f"    global options: {options}")
+
+    # --- Cache state ------------------------------------------------------
+    click.secho("Cache (.axbt/):", bold=True)
+    try:
+        manifest = load_manifest(project_root)
+        if manifest.version != MANIFEST_VERSION:
+            raise ManifestError("stale version")
+        from collections import Counter
+
+        statuses = Counter(node.status for node in manifest.nodes)
+        generated = manifest.generated_at.strftime("%Y-%m-%d %H:%M")
+        click.echo(f"  manifest:    version {manifest.version}, generated {generated}")
+        click.echo(
+            f"  files:       {len(manifest.nodes)} "
+            f"({statuses.get('clean', 0)} clean, {statuses.get('changed', 0)} changed, "
+            f"{statuses.get('new', 0)} new)"
+        )
+        declarations = sum(len(node.declarations) for node in manifest.nodes)
+        click.echo(f"  declarations: {declarations} extracted")
+        payloads = list(compiled_payload_dir(project_root).glob("*.lean"))
+        click.echo(f"  payloads:    {len(payloads)} in {compiled_payload_dir(project_root)}")
+    except ManifestError as exc:
+        click.secho(f"  manifest:    not usable ({exc})", dim=True)
+
+    # --- Axle API ---------------------------------------------------------
+    click.secho("Axle API:", bold=True)
+    key = os.environ.get("AXLE_API_KEY", "")
+    if not key:
+        click.secho("  key:         NOT SET", fg="red")
+        click.secho(
+            "  Set AXLE_API_KEY (the SDK reads it from the environment) and retry.",
+            fg="red",
+        )
+        raise click.exceptions.Exit(1)
+
+    click.echo(f"  key:         {_mask_key(key)} (set)")
+    axle_config = config or AxleConfig()
+    service = make_axle_service(axle_config)
+
+    async def probe() -> tuple[str, int, list[str]]:
+        async with service:
+            started = time.monotonic()
+            served = await service.environments(
+                timeout_seconds=axle_config.timeout_seconds
+            )
+            latency_ms = int((time.monotonic() - started) * 1000)
+            resolved = await service.resolve_environment()
+        available = sorted(str(entry["name"]) for entry in served)
+        return resolved, latency_ms, available
+
+    try:
+        resolved, latency_ms, available = asyncio.run(probe())
+    except AxleServiceError as exc:
+        click.secho(f"  reachable:   no — {exc}", fg="red")
+        raise click.exceptions.Exit(1) from exc
+
+    click.echo(f"  reachable:   yes ({latency_ms} ms)")
+    click.echo("  key valid:   yes")
+    click.echo(f"  environment: {resolved} resolved; {len(available)} served by the API")
 
 
 @dataclass
