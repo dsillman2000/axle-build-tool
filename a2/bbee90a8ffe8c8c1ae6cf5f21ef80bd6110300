@@ -1,0 +1,14 @@
+GEMINI_PLAN.md
+  h_4cc74772b10fd4 58,177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a2bbee90a8ffe8c8c1ae6cf5f21ef80bd6110300",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
