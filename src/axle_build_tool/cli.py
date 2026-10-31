@@ -30,6 +30,10 @@ from axle_build_tool.manifest import (
     load_manifest,
     save_manifest,
 )
+from axle_build_tool.payloads import (
+    compiled_payload_dir,
+    write_compiled_payloads,
+)
 from axle_build_tool.scanner import ScanError
 
 _PLACEHOLDER_SOURCE = """\
@@ -123,6 +127,7 @@ def compile() -> None:
                 return await apply_extraction(service, manifest, project_root)
 
         manifest = asyncio.run(extract())
+        payload_paths = write_compiled_payloads(manifest, project_root)
         written = save_manifest(manifest, project_root)
     except (ConfigError, ScanError, ManifestError, AxleServiceError, ExtractionError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -141,4 +146,5 @@ def compile() -> None:
     for module_name in config.modules:
         if module_name not in represented:
             click.echo(f"  Note: module '{module_name}' has no .lean files")
+    click.echo(f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}")
     click.echo(f"Wrote {written}")

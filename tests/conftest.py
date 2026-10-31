@@ -67,6 +67,41 @@ def make_response(cls: type, **overrides: Any):
     return cls(**defaults)
 
 
+def with_declarations(manifest, names_by_node: dict[str, list[str]]):
+    """Stamp a freshly-built manifest with canned extraction data.
+
+    Selection resolution matches declarations against the *extracted*
+    metadata, which only exists after `axbt compile` has run against the
+    API; tests stamp representative declarations directly.
+    """
+    from axle_build_tool.manifest import ExtractedDecl
+
+    return manifest.model_copy(
+        update={
+            "nodes": [
+                node.model_copy(
+                    update={
+                        "declarations": [
+                            ExtractedDecl(
+                                name=name,
+                                kind="theorem",
+                                is_sorry=False,
+                                line_pos=index + 1,
+                                end_line_pos=index + 2,
+                                signature=f"theorem {name}",
+                            )
+                            for index, name in enumerate(
+                                names_by_node.get(node.name, [])
+                            )
+                        ]
+                    }
+                )
+                for node in manifest.nodes
+            ]
+        }
+    )
+
+
 def make_extract_response(documents: dict[str, Document]) -> ExtractDeclsResponse:
     """Build an `ExtractDeclsResponse` carrying the given documents."""
     return ExtractDeclsResponse(

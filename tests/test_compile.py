@@ -482,3 +482,52 @@ class TestExtraction:
         assert extract_calls(fake_axle) == calls_before + 1
         rewritten = load_manifest(root)
         assert rewritten.version == MANIFEST_VERSION
+
+
+class TestCompiledPayloads:
+    """Scope C: compile persists per-file isolated payloads for inspection."""
+
+    def test_compile_writes_isolated_payloads(
+        self, demos_dir: Path, fake_axle, monkeypatch
+    ) -> None:
+        demo = fresh_demo(demos_dir, "RootTwoIrrational")
+        monkeypatch.chdir(demo)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        compiled = demo / ".axbt" / "compiled"
+        assert sorted(p.name for p in compiled.iterdir()) == [
+            "RootTwoIrrational_Divisibility_isolated.lean",
+            "RootTwoIrrational_EuclidLemma_isolated.lean",
+            "RootTwoIrrational_IrrationalSqrtTwo_isolated.lean",
+        ]
+
+        euclid_payload = (compiled / "RootTwoIrrational_EuclidLemma_isolated.lean").read_text(
+            encoding="utf-8"
+        )
+        # Dependencies are inlined before the target file...
+        assert euclid_payload.index("theorem prime_gt_one") < euclid_payload.index(
+            "theorem euclid_lemma"
+        )
+        # ...intra-project imports are replaced by the inlined content...
+        assert "import Divisibility" not in euclid_payload
+        # ...and external imports are hoisted to the top exactly once.
+        assert euclid_payload.count("import Mathlib") == 1
+        assert euclid_payload.splitlines()[0] == "import Mathlib"
+
+    def test_recompile_rewrites_payloads_idempotently(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, SIMPLE_CONFIG, {"M/A.lean": "def x := 1\n"})
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        first = (root / ".axbt" / "compiled" / "M_A_isolated.lean").read_text(
+            encoding="utf-8"
+        )
+
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        assert (
+            root / ".axbt" / "compiled" / "M_A_isolated.lean"
+        ).read_text(encoding="utf-8") == first
