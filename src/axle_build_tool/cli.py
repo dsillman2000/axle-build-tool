@@ -371,18 +371,39 @@ def _validate_stub_closure(
     stub_map: dict[str, frozenset[str] | None],
     label: str,
     payload: Payload,
-) -> None:
-    """Every `--sorry` target must be inside the selection's payload —
-    i.e. an actual dependency of the selection."""
-    if not stub_map:
-        return
+) -> bool:
+    """Whether any `--sorry` target applies to this selection's payload.
+
+    A stubbed node outside the payload is simply irrelevant here (the
+    selection doesn't depend on it — there is nothing to stub), so this
+    is not an error; the run-level check (`_require_stub_application`)
+    only fails when a stub applies nowhere at all.
+    """
     closure = set(payload.sections)
-    for name in stub_map:
-        if name not in closure:
-            raise SelectionError(
-                f"--sorry {name!r}: not a dependency of {label!r}; stubbing "
-                "applies to the selection's dependency closure."
-            )
+    return any(name in closure for name in stub_map)
+
+
+def _require_stub_application(
+    stub_map: dict[str, frozenset[str] | None],
+    applied: set[str],
+    plan: list[tuple[str, Selection]],
+) -> None:
+    """Fail when a `--sorry` target applies to no planned selection.
+
+    A stub that is relevant to some selections but not others is fine
+    (a default run checks every target; not all of them need the
+    stub). Applying nowhere at all means a misunderstanding — most
+    likely a mistyped selector — and is rejected.
+    """
+    never_applied = sorted(set(stub_map) - applied)
+    if not never_applied:
+        return
+    labels = ", ".join(label for label, _ in plan)
+    raise SelectionError(
+        f"--sorry {', '.join(repr(name) for name in never_applied)}: not a "
+        f"dependency of any planned selection ({labels}); stubbing applies "
+        "to the selections' dependency closures."
+    )
 
 
 #: Leading position of a Lean diagnostic message, e.g. `-:28:8-28:24: error: …`
@@ -535,6 +556,7 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         stub_warnings: list[str] = []
+        applied: set[str] = set()
         checks = []
         for label, selection in plan:
             refined = _refine_stub_map(stub_map, selection, label, manifest)
@@ -545,8 +567,10 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
                 stubbed=refined or None,
                 warnings=stub_warnings,
             )
-            _validate_stub_closure(refined, label, payload)
+            if _validate_stub_closure(refined, label, payload):
+                applied |= set(refined)
             checks.append((label, selection, payload))
+        _require_stub_application(stub_map, applied, plan)
         for warning in dict.fromkeys(stub_warnings):
             click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
@@ -991,6 +1015,7 @@ def verify(
             permitted_sorries, config, manifest
         )
         stub_warnings: list[str] = []
+        applied: set[str] = set()
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -1038,7 +1063,8 @@ def verify(
                 stubbed=refined or None,
                 warnings=stub_warnings,
             )
-            _validate_stub_closure(refined, label, payload)
+            if _validate_stub_closure(refined, label, payload):
+                applied |= set(refined)
             # User-permitted declarations must belong to this payload.
             closure_decls = {
                 d.name
@@ -1067,6 +1093,7 @@ def verify(
                     ),
                 )
             )
+        _require_stub_application(stub_map, applied, plan)
         for warning in dict.fromkeys(stub_warnings):
             click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:

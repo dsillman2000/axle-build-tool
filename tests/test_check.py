@@ -623,9 +623,36 @@ class TestSorry:
         assert "def base : Nat := sorry" in content
         assert "theorem base_holds : base = 1 := rfl" in content  # sibling stays real
 
-    def test_sorry_rejects_non_dependencies(
+    def test_sorry_applies_where_relevant_for_default_runs(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """A bare run checks every target; a `--sorry` that is only a
+        dependency of SOME of them applies where relevant and never
+        errors for the rest (the Scoped-style targets don't depend on
+        the stubbed file — nothing to stub there)."""
+        config = NO_TARGETS_CONFIG.replace(
+            "targets: []",
+            "targets:\n      - B.middle\n      - C.top\n",
+        )
+        root = make_project(tmp_path, config, self.SORRY_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.SORRY_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        # B.middle's selection: A is its dependency -> stubbed.
+        # C.top's selection: A is transitive -> stubbed too.
+        assert len(check_calls(fake_axle)) == 2
+        for call in check_calls(fake_axle):
+            assert "def base : Nat := sorry" in call["content"]
+
+    def test_sorry_nowhere_applicable_is_rejected(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A stub relevant to NO planned selection is a mistake."""
         self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
         result = runner.invoke(
@@ -633,7 +660,7 @@ class TestSorry:
         )
 
         assert result.exit_code == 1
-        assert "not a dependency of 'M.A'" in result.output
+        assert "not a dependency of any planned selection" in result.output
 
     def test_sorry_rejects_the_selection_itself(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
