@@ -34,7 +34,12 @@ from axle.exceptions import (
     LeanResourceExceeded,
     LeanTimeout,
 )
-from axle.types import CheckResponse, ExtractDeclsResponse, VerifyProofResponse
+from axle.types import (
+    CheckResponse,
+    ExtractDeclsResponse,
+    Theorem2SorryResponse,
+    VerifyProofResponse,
+)
 
 from axle_build_tool.config import AxleConfig, FALLBACK_ENVIRONMENT
 
@@ -225,6 +230,31 @@ class AxleService:
                 environment=await self._effective_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
+                **kwargs,
+            )
+        except AxleError as exc:
+            raise AxleServiceError(
+                describe_axle_error(exc, self._config, context)
+            ) from exc
+
+    async def theorem2sorry(
+        self, content: str, *, context: str = "", **kwargs: Any
+    ) -> Theorem2SorryResponse:
+        """Replace theorem proofs with `sorry` (verify's formal statements).
+
+        The transform preserves everything else — import lines, local
+        definitions, order — so the result elaborates standalone even
+        when the verified statements reference file-local declarations.
+        As with extraction, `ignore_imports=False` is forced: axbt's
+        payloads carry their own (hoisted) import lines.
+        """
+        try:
+            return await self.client.theorem2sorry(
+                content=content,
+                environment=await self._effective_environment(),
+                timeout_seconds=self._config.timeout_seconds,
+                global_options=dict(self._config.global_options),
+                ignore_imports=False,
                 **kwargs,
             )
         except AxleError as exc:

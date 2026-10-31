@@ -38,17 +38,3 @@ class TestParseImports:
     def test_multiple_imports_in_order(self) -> None:
         source = "import Aa\nimport Bb.Cc\nimport Dd\n\ndef x := 1\n"
         assert parse_imports(source) == ["Aa", "Bb.Cc", "Dd"]
-
-
-class TestDemoSources:
-    def test_divisibility_imports_mathlib_only(self, demos_dir: Path) -> None:
-        source = (demos_dir / "RootTwoIrrational/RootTwoIrrational/Divisibility.lean").read_text(encoding="utf-8")
-        assert parse_imports(source) == ["Mathlib"]
-
-    def test_euclid_lemma_imports_mathlib_and_divisibility(self, demos_dir: Path) -> None:
-        source = (demos_dir / "RootTwoIrrational/RootTwoIrrational/EuclidLemma.lean").read_text(encoding="utf-8")
-        assert parse_imports(source) == ["Mathlib", "Divisibility"]
-
-    def test_irrational_sqrt_two_imports_all(self, demos_dir: Path) -> None:
-        source = (demos_dir / "RootTwoIrrational/RootTwoIrrational/IrrationalSqrtTwo.lean").read_text(encoding="utf-8")
-        assert parse_imports(source) == ["Mathlib", "Divisibility", "EuclidLemma"]

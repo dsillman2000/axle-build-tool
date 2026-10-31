@@ -23,50 +23,53 @@ modules:
     targets: []
 """
 
+# A synthetic dependency-chain project with the shapes the demo projects
+# used to provide to the offline suite: a hoisted external import, a
+# module-docstring shift, an A <- B <- C chain, and a nested file stem.
+CHAIN_FILES = {
+    "M/A.lean": "import Mathlib\n\n/-! Base definitions. -/\n\ndef base := 1\n",
+    "M/B.lean": "import A\ndef middle := base + 1\n",
+    "M/C.lean": "import B\ntheorem top : middle = 2 := by decide\n",
+    "M/Utils/Basic.lean": "def Utils.Basic.x := 1\n",
+}
+
+CHAIN_DECLARATIONS = {
+    "M.A": ["base"],
+    "M.B": ["middle"],
+    "M.C": ["top"],
+    "M.Utils.Basic": ["Utils.Basic.x"],
+}
+
 
 @pytest.fixture
-def demo_state(demos_dir: Path):
-    """The RootTwoIrrational demo with representative extraction data stamped in."""
+def chain_state(make_project, tmp_path: Path):
+    """The chain project with representative extraction data stamped in."""
     from conftest import with_declarations
 
-    root = demos_dir / "RootTwoIrrational"
+    root = make_project(tmp_path, SIMPLE_CONFIG, CHAIN_FILES)
     config = load_config(root)
-    manifest = build_manifest(root, config, None)
-    manifest = with_declarations(
-        manifest,
-        {
-            "RootTwoIrrational.Divisibility": ["prime_gt_one", "prime_dvd_square"],
-            "RootTwoIrrational.EuclidLemma": ["euclid_lemma"],
-            "RootTwoIrrational.IrrationalSqrtTwo": ["sqrt_two_irrational"],
-        },
-    )
+    manifest = with_declarations(build_manifest(root, config, None), CHAIN_DECLARATIONS)
     return config, manifest, root
 
 
 class TestResolveSelection:
-    def test_module_selection(self, demo_state) -> None:
-        config, manifest, _ = demo_state
-        selection = resolve_selection("RootTwoIrrational", config, manifest)
-        assert selection == Selection(module="RootTwoIrrational")
+    def test_module_selection(self, chain_state) -> None:
+        config, manifest, _ = chain_state
+        selection = resolve_selection("M", config, manifest)
+        assert selection == Selection(module="M")
         assert selection.node_name is None
         assert selection.declaration is None
 
-    def test_file_selection(self, demo_state) -> None:
-        config, manifest, _ = demo_state
-        selection = resolve_selection("RootTwoIrrational.Divisibility", config, manifest)
-        assert selection == Selection(
-            module="RootTwoIrrational", node_name="RootTwoIrrational.Divisibility"
-        )
+    def test_file_selection(self, chain_state) -> None:
+        config, manifest, _ = chain_state
+        selection = resolve_selection("M.B", config, manifest)
+        assert selection == Selection(module="M", node_name="M.B")
 
-    def test_declaration_selection(self, demo_state) -> None:
-        config, manifest, _ = demo_state
-        selection = resolve_selection(
-            "RootTwoIrrational.EuclidLemma.euclid_lemma", config, manifest
-        )
+    def test_declaration_selection(self, chain_state) -> None:
+        config, manifest, _ = chain_state
+        selection = resolve_selection("M.C.top", config, manifest)
         assert selection == Selection(
-            module="RootTwoIrrational",
-            node_name="RootTwoIrrational.EuclidLemma",
-            declaration="euclid_lemma",
+            module="M", node_name="M.C", declaration="top"
         )
 
     def test_dotted_lean_declaration_names_resolve_greedily(
@@ -100,29 +103,31 @@ class TestResolveSelection:
         # The stored declaration is the full extracted name.
         assert selection.declaration == "A.t"
 
-    def test_unknown_module_names_valid_modules(self, demo_state) -> None:
-        config, manifest, _ = demo_state
-        with pytest.raises(SelectionError, match=r"Unknown module 'Nope'.*RootTwoIrrational"):
+    def test_unknown_module_names_valid_modules(self, chain_state) -> None:
+        config, manifest, _ = chain_state
+        with pytest.raises(SelectionError, match=r"Unknown module 'Nope'.*yml: M\."):
             resolve_selection("Nope.Divisibility", config, manifest)
 
-    def test_unknown_stem_lists_available_stems(self, demo_state) -> None:
-        config, manifest, _ = demo_state
-        with pytest.raises(SelectionError, match=r"no file stem matches 'Nope'.*Divisibility"):
-            resolve_selection("RootTwoIrrational.Nope", config, manifest)
+    def test_unknown_stem_lists_available_stems(self, chain_state) -> None:
+        config, manifest, _ = chain_state
+        with pytest.raises(
+            SelectionError, match=r"no file stem matches 'Nope'.*A, B, C, Utils\.Basic"
+        ):
+            resolve_selection("M.Nope", config, manifest)
 
     def test_unknown_declaration_lists_extracted_declarations(
-        self, demo_state
+        self, chain_state
     ) -> None:
-        config, manifest, _ = demo_state
-        with pytest.raises(SelectionError, match=r"'nope' not found.*prime_gt_one"):
-            resolve_selection("RootTwoIrrational.Divisibility.nope", config, manifest)
+        config, manifest, _ = chain_state
+        with pytest.raises(SelectionError, match=r"'nope' not found.*\btop\b"):
+            resolve_selection("M.C.nope", config, manifest)
 
-    def test_unknown_nested_stem_is_rejected(self, demo_state) -> None:
-        config, manifest, _ = demo_state
-        # The stem `Divisibility` matches, so the remainder is diagnosed as
+    def test_unknown_nested_stem_is_rejected(self, chain_state) -> None:
+        config, manifest, _ = chain_state
+        # The stem `C` matches, so the remainder is diagnosed as
         # an unknown declaration rather than an unknown stem.
         with pytest.raises(SelectionError, match=r"declaration 'Nope\.thing' not found"):
-            resolve_selection("RootTwoIrrational.Divisibility.Nope.thing", config, manifest)
+            resolve_selection("M.C.Nope.thing", config, manifest)
 
     def test_empty_module_selection_is_rejected(self, make_project, tmp_path: Path) -> None:
         root = make_project(tmp_path, SIMPLE_CONFIG, files={})
@@ -136,32 +141,26 @@ class TestResolveSelection:
 
 class TestSelectionPayloads:
     def test_module_selection_covers_all_files_in_dependency_order(
-        self, demo_state
+        self, chain_state
     ) -> None:
-        config, manifest, root = demo_state
-        selection = resolve_selection("RootTwoIrrational", config, manifest)
+        config, manifest, root = chain_state
+        selection = resolve_selection("M", config, manifest)
 
         payload = build_payload(selection.payload_nodes(manifest), manifest, root)
 
-        assert list(payload.sections) == [
-            "RootTwoIrrational.Divisibility",
-            "RootTwoIrrational.EuclidLemma",
-            "RootTwoIrrational.IrrationalSqrtTwo",
-        ]
-        # Dependencies first: Divisibility's source appears before Euclid's.
-        assert payload.content.index("theorem prime_gt_one") < payload.content.index(
-            "theorem euclid_lemma"
-        )
-        assert "theorem sqrt_two_irrational" in payload.content
+        assert list(payload.sections) == ["M.A", "M.B", "M.C", "M.Utils.Basic"]
+        # Dependencies first: A's source appears before B's, B's before C's.
+        assert payload.content.index("def base") < payload.content.index(
+            "def middle"
+        ) < payload.content.index("theorem top")
+        assert "def Utils.Basic.x" in payload.content
 
     def test_declaration_selection_payload_equals_file_payload(
-        self, demo_state
+        self, chain_state
     ) -> None:
-        config, manifest, root = demo_state
-        file_selection = resolve_selection("RootTwoIrrational.EuclidLemma", config, manifest)
-        decl_selection = resolve_selection(
-            "RootTwoIrrational.EuclidLemma.euclid_lemma", config, manifest
-        )
+        config, manifest, root = chain_state
+        file_selection = resolve_selection("M.C", config, manifest)
+        decl_selection = resolve_selection("M.C.top", config, manifest)
 
         file_payload = build_payload(file_selection.payload_nodes(manifest), manifest, root)
         decl_payload = build_payload(decl_selection.payload_nodes(manifest), manifest, root)
@@ -194,47 +193,38 @@ class TestSelectionPayloads:
         assert compiled_filename("M", "A") == "M_A_isolated.lean"
         assert compiled_filename("M", "Utils.Basic") == "M_Utils_Basic_isolated.lean"
 
-    def test_selection_compiled_filename(self, demo_state) -> None:
-        config, manifest, _ = demo_state
+    def test_selection_compiled_filename(self, chain_state) -> None:
+        config, manifest, _ = chain_state
         assert (
-            resolve_selection("RootTwoIrrational", config, manifest).compiled_filename
-            == "RootTwoIrrational_isolated.lean"
+            resolve_selection("M", config, manifest).compiled_filename
+            == "M_isolated.lean"
         )
         assert (
-            resolve_selection("RootTwoIrrational.Divisibility", config, manifest).compiled_filename
-            == "RootTwoIrrational_Divisibility_isolated.lean"
+            resolve_selection("M.C", config, manifest).compiled_filename
+            == "M_C_isolated.lean"
         )
         assert (
-            resolve_selection(
-                "RootTwoIrrational.Divisibility.prime_gt_one", config, manifest
-            ).compiled_filename
-            == "RootTwoIrrational_Divisibility_isolated.lean"
+            resolve_selection("M.C.top", config, manifest).compiled_filename
+            == "M_C_isolated.lean"
         )
 
     def test_line_map_attributes_section_lines_to_source_lines(
-        self, demo_state
+        self, chain_state
     ) -> None:
-        config, manifest, root = demo_state
-        selection = resolve_selection("RootTwoIrrational.EuclidLemma", config, manifest)
+        config, manifest, root = chain_state
+        selection = resolve_selection("M.A", config, manifest)
 
         payload = build_payload(selection.payload_nodes(manifest), manifest, root)
 
-        start, end = payload.sections["RootTwoIrrational.EuclidLemma"]
-        mapped = payload.line_map["RootTwoIrrational.EuclidLemma"]
+        start, end = payload.sections["M.A"]
+        mapped = payload.line_map["M.A"]
         assert len(mapped) == end - start + 1
         # The mapping is exact: the section's last line is the file's
         # last line, and positions strictly increase (import lines were
         # skipped, not shifted over).
-        source_lines = (
-            (root / "RootTwoIrrational/EuclidLemma.lean")
-            .read_text(encoding="utf-8")
-            .splitlines()
-        )
+        source_lines = (root / "M/A.lean").read_text(encoding="utf-8").splitlines()
         assert mapped[-1] == len(source_lines)
         assert all(before < after for before, after in zip(mapped, mapped[1:]))
         # The hoisted import header has no source counterpart.
         assert source_position(payload, start - 1) is None
-        assert source_position(payload, start) == (
-            "RootTwoIrrational.EuclidLemma",
-            mapped[0],
-        )
+        assert source_position(payload, start) == ("M.A", mapped[0])

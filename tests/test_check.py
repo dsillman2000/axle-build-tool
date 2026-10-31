@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from axle.types import CheckResponse, Messages
@@ -514,53 +513,65 @@ class TestEnvironmentValidation:
         assert "environments" not in [method for method, _ in fake_axle.calls]
 
 
-class TestDemo:
-    def test_check_runs_the_root_two_irrational_demo_targets(
-        self, demos_dir: Path, fake_axle, monkeypatch
-    ) -> None:
-        """The compile-and-check ritual against the real demo project."""
-        from conftest import DEMO_EXTRACTION_DOCS
+RITUAL_CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+axle:
+  environment: "lean-4.35.0"
+  global_options:
+    maxHeartbeats: 100000
+"""
 
-        demo = demos_dir / "RootTwoIrrational"
-        shutil.rmtree(demo / ".axbt", ignore_errors=True)
-        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
-        monkeypatch.chdir(demo)
-        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+class TestRitual:
+    def test_compile_then_check_ritual(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The full offline ritual — compile then check every target —
+        with the project's config plumbing reaching the API."""
+        root = make_project(tmp_path, RITUAL_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+
+        compile_result = runner.invoke(main, ["compile"])
+        assert compile_result.exit_code == 0, compile_result.output
         fake_axle.calls.clear()
 
         result = runner.invoke(main, ["check"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 3  # the demo's three targets
-        assert "Checked 3 selection(s): all OK" in result.output
-        # The demo pins its environment: validated once, then one check
-        # per target, with the config's global options reaching the API.
-        methods = [method for method, _ in fake_axle.calls]
-        assert methods[0] == "environments"
-        assert methods.count("check") == 3
-        assert fake_axle.calls[1][1]["global_options"] == {"maxHeartbeats": 100000}
+        assert result.output.count("  OK") == 2
+        assert "Checked 2 selection(s): all OK" in result.output
+        # The ritual is incremental: the clean compile makes no API
+        # calls; the check validates the pinned environment, then its
+        # submissions carry the config's global options.
+        assert [method for method, _ in fake_axle.calls] == [
+            "environments",
+            "check",
+            "check",
+        ]
+        assert check_calls(fake_axle)[0]["global_options"] == {"maxHeartbeats": 100000}
 
-    def test_check_demo_declaration_selection(
-        self, demos_dir: Path, fake_axle, monkeypatch
+    def test_check_declaration_selection_ritual(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        from conftest import DEMO_EXTRACTION_DOCS
-
-        demo = demos_dir / "RootTwoIrrational"
-        shutil.rmtree(demo / ".axbt", ignore_errors=True)
-        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
-        monkeypatch.chdir(demo)
+        root = make_project(tmp_path, RITUAL_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
         assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
 
-        result = runner.invoke(
-            main, ["check", "--select", "RootTwoIrrational.EuclidLemma.euclid_lemma"]
-        )
+        result = runner.invoke(main, ["check", "--select", "M.B.t2"])
 
         assert result.exit_code == 0, result.output
         calls = check_calls(fake_axle)
         assert len(calls) == 1
-        assert calls[0]["names"] == ["euclid_lemma"]
-        # The payload inlines the Divisibility dependency.
-        assert "theorem prime_gt_one" in calls[0]["content"]
-        assert status_line(
-            result.output, "RootTwoIrrational.EuclidLemma.euclid_lemma"
-        ) == "RootTwoIrrational.EuclidLemma.euclid_lemma OK"
+        assert calls[0]["names"] == ["t2"]
+        # The payload inlines the dependency.
+        assert "def t1 := 1" in calls[0]["content"]
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
