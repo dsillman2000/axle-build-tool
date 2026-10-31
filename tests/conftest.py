@@ -235,6 +235,33 @@ class FakeAxleClient:
         self.closed = True
 
 
+#: Marker-routed extraction documents matching the RootTwoIrrational demo:
+#: the theorem keyword lines (zero-based payload coordinates) of each file.
+DEMO_EXTRACTION_DOCS = {
+    "theorem prime_gt_one": {
+        "prime_gt_one": make_document(
+            "prime_gt_one",
+            line_pos=11,
+            end_line_pos=12,
+            signature="theorem prime_gt_one (p : ℕ) (hp : Nat.Prime p) : 1 < p",
+        ),
+        "prime_dvd_square": make_document("prime_dvd_square", line_pos=15, end_line_pos=16),
+    },
+    "theorem euclid_lemma": {
+        # Zero-based payload coordinates: the Euclid section starts at
+        # one-based payload line 19 (after the hoisted import header and
+        # the inlined Divisibility source), so the theorem at file line
+        # 12 sits at zero-based payload line 27.
+        "euclid_lemma": make_document("euclid_lemma", line_pos=27, end_line_pos=28),
+    },
+    "theorem sqrt_two_irrational": {
+        # Zero-based payload line 42 == file line 15 (three imports
+        # stripped, section starting at one-based payload line 32).
+        "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=42, end_line_pos=55),
+    },
+}
+
+
 @pytest.fixture
 def fake_axle(monkeypatch):
     """Wire a fresh `FakeAxleClient` into the CLI's service seam.

@@ -324,7 +324,9 @@ class TestExtraction:
     def test_demo_nodes_get_declaration_metadata(
         self, demos_dir: Path, fake_axle, monkeypatch
     ) -> None:
-        fake_axle._extract_documents_by_marker = self.DEMO_DOCS
+        from conftest import DEMO_EXTRACTION_DOCS
+
+        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
         demo = fresh_demo(demos_dir, "RootTwoIrrational")
         monkeypatch.chdir(demo)
 
