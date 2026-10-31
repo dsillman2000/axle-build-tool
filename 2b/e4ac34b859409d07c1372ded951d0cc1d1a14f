@@ -1,0 +1,16 @@
+GEMINI_PLAN.md
+  h_4cc74772b10fd4 159
+demos/small/RootTwoIrrational/axbt_project.yml
+  h_4cc74772b10fd4 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2be4ac34b859409d07c1372ded951d0cc1d1a14f",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
