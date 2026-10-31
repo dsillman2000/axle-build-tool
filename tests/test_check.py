@@ -662,21 +662,27 @@ class TestSorry:
         assert result.exit_code == 1
         assert "not a dependency of any planned selection" in result.output
 
-    def test_sorry_rejects_the_selection_itself(
+    def test_sorry_selection_fully_granted_is_skipped(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """`--select M.A --sorry M.A`: the whole selection is taken as
+        granted — reported SKIP, nothing submitted, exit 0."""
         self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
         result = runner.invoke(
             main, ["check", "--select", "M.A", "--sorry", "M.A"]
         )
 
-        assert result.exit_code == 1
-        assert "never stubbed" in result.output
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A") == "M.A SKIP"
+        assert "taken as granted (--sorry)" in result.output
+        assert check_calls(fake_axle) == []
 
-    def test_sorry_rejects_targets_inside_the_stubbed_subtree(
+    def test_targets_inside_the_stubbed_subtree_are_skipped(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """Config targets inside a `--sorry`'d subtree are taken as
+        granted (skipped); the command line's grant wins for this run."""
         config = NO_TARGETS_CONFIG.replace("targets: []", "targets:\n      - B.middle")
         root = make_project(tmp_path, config, self.SORRY_FILES)
         monkeypatch.chdir(root)
@@ -686,9 +692,11 @@ class TestSorry:
 
         result = runner.invoke(main, ["check", "--sorry", "M.B"])
 
-        assert result.exit_code == 1
-        assert "never stubbed" in result.output
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.B.middle") == "M.B.middle SKIP"
+        assert "taken as granted (--sorry)" in result.output
         assert check_calls(fake_axle) == []
+        assert "Checked 1 selection(s): all OK, 1 skipped" in result.output
 
     def test_sorry_on_own_file_stubs_siblings_for_declaration_selections(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -718,15 +726,20 @@ class TestSorry:
         assert result.exit_code == 1
         assert "never stubbed" in result.output
 
-    def test_sorry_on_own_module_is_rejected_for_module_selections(
+    def test_sorry_on_own_module_judges_the_rest(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """`--select M --sorry M.A`: the module is judged with A's
+        declarations stubbed (a partial grant inside the selection)."""
         self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
         result = runner.invoke(main, ["check", "--select", "M", "--sorry", "M.A"])
 
-        assert result.exit_code == 1
-        assert "never stubbed" in result.output
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base : Nat := sorry" in content
+        assert "theorem top : middle = 2 := by decide" in content  # the rest judged
+        assert "siblings stubbed: 2 declarations" in result.output
 
     def test_sorry_warnings_collapse_into_one_line(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle

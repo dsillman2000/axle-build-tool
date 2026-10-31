@@ -250,16 +250,18 @@ def _acquire_project_state(
 
 def _build_plan(
     select: str | None, config: ProjectConfig, manifest: Manifest
-) -> list[tuple[str, Selection]]:
+) -> list[tuple[str, Selection, bool]]:
     """Resolve the submission plan shared by `check` and `verify`.
 
-    With `--select`, a single selection labelled by the selector.
-    Otherwise every configured `targets` entry of every module, labelled
-    `<module>.<target>`, in declaration order with duplicates removed.
+    With `--select`, a single selection labelled by the selector (and
+    flagged explicit — the user named what to judge). Otherwise every
+    configured `targets` entry of every module, labelled
+    `<module>.<target>`, in declaration order with duplicates removed
+    (not explicit: config-driven, so `--sorry` grants can skip them).
     """
     if select is not None:
-        return [(select, resolve_selection(select, config, manifest))]
-    plan: list[tuple[str, Selection]] = []
+        return [(select, resolve_selection(select, config, manifest), True)]
+    plan: list[tuple[str, Selection, bool]] = []
     for module in config.modules.values():
         seen: set[tuple[str, str | None]] = set()
         for target in module.targets:
@@ -267,7 +269,7 @@ def _build_plan(
             key = (selection.node_name or "", selection.declaration)
             if key not in seen:
                 seen.add(key)
-                plan.append((f"{module.name}.{target}", selection))
+                plan.append((f"{module.name}.{target}", selection, False))
     return plan
 
 
@@ -305,15 +307,17 @@ def _refine_stub_map(
     selection: Selection,
     label: str,
     manifest: Manifest,
+    explicit: bool,
 ) -> dict[str, frozenset[str] | None]:
-    """Validate `--sorry` scoping for one selection and refine it.
+    """Apply `--sorry` grants to one selection, refining as needed.
 
-    A `--sorry` naming the selection's **own node** is allowed for
-    declaration-level selections: every stubbable declaration of that
-    node is stubbed *except the selected one* ("stub my siblings, judge
-    me"). Naming only the selected declaration leaves nothing to stub
-    and is rejected. For file/module-level selections the node *is*
-    the selection, so it stays rejected outright.
+    `--sorry X` *grants* X's declarations this run: their bodies become
+    stubs in the payload and they are not judged. One exception: an
+    explicit `--select` of a declaration carves that declaration out of
+    the grant — the user asked to judge it, so its siblings in the
+    granted node are stubbed instead ("stub my siblings, judge me").
+    Naming only the selected declaration leaves nothing to judge or
+    stub and is rejected as contradictory.
     """
     if not stub_map:
         return stub_map
@@ -323,10 +327,16 @@ def _refine_stub_map(
         if name not in own:
             refined[name] = names
             continue
-        if selection.declaration is None:
-            raise SelectionError(
-                f"--sorry {name!r}: the selection {label!r} is never stubbed."
-            )
+        carve_out = (
+            explicit
+            and selection.declaration is not None
+            and selection.node_name == name
+        )
+        if not carve_out:
+            # The grant stands: this selection is (fully or partially)
+            # taken as granted.
+            refined[name] = names
+            continue
         node = manifest.by_name()[name]
         if names is None:
             remaining = frozenset(
@@ -340,6 +350,39 @@ def _refine_stub_map(
             )
         refined[name] = remaining
     return refined
+
+
+def _granted_skip_reason(
+    selection: Selection,
+    refined: dict[str, frozenset[str] | None],
+    manifest: Manifest,
+    explicit: bool,
+) -> str | None:
+    """The skip reason when `--sorry` grants the whole selection.
+
+    A selection fully covered by a grant has nothing to judge — its
+    declarations are taken as granted (stubbed). Explicit
+    declaration-level selections are exempt (see `_refine_stub_map`).
+    """
+    if not refined:
+        return None
+    by_name = manifest.by_name()
+    if selection.declaration is not None:
+        if explicit:
+            return None  # judged: carved out of the grant
+        if selection.node_name not in refined:
+            return None  # no grant touches this node
+        names = refined[selection.node_name]
+        if names is None or selection.declaration in names:
+            return "taken as granted (--sorry)"
+        return None
+    # File/module-level: skipped only when every own node is fully granted.
+    own = selection.payload_nodes(manifest)
+    if own and all(
+        node.name in refined and refined[node.name] is None for node in own
+    ):
+        return "taken as granted (--sorry)"
+    return None
 
 
 def _resolve_permitted_sorries(
@@ -398,7 +441,7 @@ def _require_stub_application(
     never_applied = sorted(set(stub_map) - applied)
     if not never_applied:
         return
-    labels = ", ".join(label for label, _ in plan)
+    labels = ", ".join(label for label, _, _ in plan)
     raise SelectionError(
         f"--sorry {', '.join(repr(name) for name in never_applied)}: not a "
         f"dependency of any planned selection ({labels}); stubbing applies "
@@ -594,9 +637,17 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         stub_warnings: list[str] = []
         applied: set[str] = set()
-        checks = []
-        for label, selection in plan:
-            refined = _refine_stub_map(stub_map, selection, label, manifest)
+        checks: list[tuple[str, Selection, Payload | None, dict, str | None]] = []
+        for label, selection, explicit in plan:
+            refined = _refine_stub_map(
+                stub_map, selection, label, manifest, explicit
+            )
+            granted = _granted_skip_reason(selection, refined, manifest, explicit)
+            if granted is not None:
+                # Taken as granted: nothing in this selection is judged.
+                checks.append((label, selection, None, refined, granted))
+                applied |= set(refined)
+                continue
             payload = build_payload(
                 selection.payload_nodes(manifest),
                 manifest,
@@ -606,7 +657,7 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
-            checks.append((label, selection, payload, refined))
+            checks.append((label, selection, payload, refined, None))
         _require_stub_application(stub_map, applied, plan)
         for warning in dict.fromkeys(stub_warnings):
             click.secho(f"  warning: {warning}", fg="yellow")
@@ -625,8 +676,8 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             await service.validate_environment()
             semaphore = asyncio.Semaphore(service.max_concurrency)
 
-            async def submit(item: tuple[str, Selection, Payload, dict]) -> Any:
-                label, selection, payload, _refined = item
+            async def submit(item: tuple[str, Selection, Payload, dict, None]) -> Any:
+                label, selection, payload, _refined, _granted = item
                 async with semaphore:
                     # Declaration-level selections focus the check by name;
                     # Axle resolves theorems/lemmas only — defs are rejected
@@ -637,7 +688,8 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
                         names=[selection.declaration] if selection.declaration else None,
                     )
 
-            return list(await asyncio.gather(*(submit(item) for item in checks)))
+            submittable = [item for item in checks if item[2] is not None]
+            return list(await asyncio.gather(*(submit(item) for item in submittable)))
 
     try:
         responses = asyncio.run(submit_all())
@@ -646,7 +698,9 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
 
     if stub_map:
         try:
-            for _, selection, payload, _ in checks:
+            for _, selection, payload, _, _ in checks:
+                if payload is None:
+                    continue
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / selection.compiled_filename_variant("stubbed")).write_text(
@@ -656,9 +710,17 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             raise click.ClickException(str(exc)) from exc
 
     failed = 0
+    skipped = 0
+    responses_iter = iter(responses)
     #: Pad labels so the status column aligns across the report.
-    width = max(len(label) for label, _, _, _ in checks)
-    for (label, selection, payload, refined), response in zip(checks, responses):
+    width = max(len(label) for label, _, _, _, _ in checks)
+    for label, _, payload, refined, granted in checks:
+        if granted is not None:
+            skipped += 1
+            click.echo(f"{label:<{width}}  {click.style('SKIP', dim=True)}")
+            click.secho(f"    {granted}", dim=True)
+            continue
+        response = next(responses_iter)
         if response.okay:
             status = click.style("OK", fg="green")
         else:
@@ -687,13 +749,15 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
                 f"    failed declarations: {', '.join(response.failed_declarations)}"
             )
     total = len(checks)
+    skipped_note = f", {skipped} skipped" if skipped else ""
     if failed:
         click.secho(
-            f"Checked {total} selection(s): {failed} failed, {total - failed} OK",
+            f"Checked {total} selection(s): {failed} failed, {total - failed} OK"
+            f"{skipped_note}",
             fg="red",
         )
         raise click.exceptions.Exit(1)
-    click.secho(f"Checked {total} selection(s): all OK", fg="green")
+    click.secho(f"Checked {total} selection(s): all OK{skipped_note}", fg="green")
 
 
 #: Colors for declaration kinds in `axbt list` (unknown kinds stay plain).
@@ -1087,9 +1151,17 @@ def verify(
         return sig_cache[node_name]
 
     try:
-        items: list[tuple[str, Selection, Payload, dict, _VerifyScope]] = []
-        for label, selection in plan:
-            refined = _refine_stub_map(stub_map, selection, label, manifest)
+        items: list[tuple[str, Selection, Payload | None, dict, str | None, _VerifyScope | None]] = []
+        for label, selection, explicit in plan:
+            refined = _refine_stub_map(
+                stub_map, selection, label, manifest, explicit
+            )
+            granted = _granted_skip_reason(selection, refined, manifest, explicit)
+            if granted is not None:
+                # Taken as granted: nothing in this selection is judged.
+                items.append((label, selection, None, refined, granted, None))
+                applied |= set(refined)
+                continue
             payload = build_payload(
                 selection.payload_nodes(manifest),
                 manifest,
@@ -1117,6 +1189,7 @@ def verify(
                     selection,
                     payload,
                     refined,
+                    None,
                     _verify_scope(
                         selection,
                         payload,
@@ -1136,8 +1209,11 @@ def verify(
 
     submittable = [
         (label, selection, payload, scope)
-        for label, selection, payload, _, scope in items
-        if scope.skip_reason is None and not scope.sorried and scope.to_verify
+        for label, selection, payload, _, _, scope in items
+        if scope is not None
+        and scope.skip_reason is None
+        and not scope.sorried
+        and scope.to_verify
     ]
 
     async def submit_all() -> list[Any]:
@@ -1178,7 +1254,9 @@ def verify(
 
     if stub_map:
         try:
-            for _, selection, payload, _, _ in items:
+            for _, selection, payload, _, _, _ in items:
+                if payload is None:
+                    continue
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / selection.compiled_filename_variant("stubbed")).write_text(
@@ -1194,8 +1272,14 @@ def verify(
     skipped = 0
     cached_count = 0
     #: Pad labels so the status column aligns across the report.
-    width = max(len(label) for label, _, _, _, _ in items)
-    for label, selection, payload, refined, scope in items:
+    width = max(len(label) for label, _, _, _, _, _ in items)
+    for label, selection, payload, refined, granted, scope in items:
+        if granted is not None:
+            skipped += 1
+            click.echo(f"{label:<{width}}  {click.style('SKIP', dim=True)}")
+            click.secho(f"    {granted}", dim=True)
+            continue
+        assert scope is not None and payload is not None
         if scope.skip_reason is not None:
             skipped += 1
             click.echo(f"{label:<{width}}  {click.style('SKIP', dim=True)}")
