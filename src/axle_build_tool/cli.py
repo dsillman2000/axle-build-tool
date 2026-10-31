@@ -158,21 +158,30 @@ def _run_compile(
         raise click.ClickException(str(exc)) from exc
 
     counts = Counter(node.status for node in manifest.nodes)
-    click.echo(
-        f"Compiled {len(manifest.nodes)} file(s) across {len(config.modules)} "
-        f"module(s): {counts.get('new', 0)} new, {counts.get('changed', 0)} changed, "
-        f"{counts.get('clean', 0)} clean"
+    new_count, changed_count, clean_count = (
+        counts.get("new", 0),
+        counts.get("changed", 0),
+        counts.get("clean", 0),
     )
     click.echo(
-        f"Extraction: {len(manifest.nodes) - carried} extracted now, "
-        f"{carried} carried over"
+        f"Compiled {len(manifest.nodes)} file(s) across {len(config.modules)} "
+        f"module(s): {click.style(f'{new_count} new', fg='green')}, "
+        f"{click.style(f'{changed_count} changed', fg='yellow')}, "
+        f"{click.style(f'{clean_count} clean', fg='cyan')}"
+    )
+    click.echo(
+        f"Extraction: {click.style(f'{len(manifest.nodes) - carried} extracted now', fg='green')}, "
+        f"{click.style(f'{carried} carried over', fg='cyan')}"
     )
     represented = {node.module for node in manifest.nodes}
     for module_name in config.modules:
         if module_name not in represented:
-            click.echo(f"  Note: module '{module_name}' has no .lean files")
-    click.echo(f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}")
-    click.echo(f"Wrote {written}")
+            click.secho(f"  Note: module '{module_name}' has no .lean files", dim=True)
+    click.secho(
+        f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}",
+        dim=True,
+    )
+    click.secho(f"Wrote {written}", dim=True)
     return config, manifest
 
 
