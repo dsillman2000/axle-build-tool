@@ -2,20 +2,15 @@ name: Demos
 
 # Integration gate for the demo projects: each demo is compiled,
 # checked, and kernel-verified against the real Axle API in its own
-# stage. Demos are integration-only fixtures — the offline unit suite
-# never touches them — so this workflow is what keeps them healthy.
+# stage, on every PR and every push to main. Demos are integration-only
+# fixtures — the offline unit suite never touches them — so this
+# workflow is what keeps them healthy. (API quota is not a concern.)
 
 on:
   push:
     branches: [main]
-    paths:
-      - "demos/**"
-      - ".github/workflows/demo.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "demos/**"
-      - ".github/workflows/demo.yml"
   workflow_dispatch:
 
 permissions:
