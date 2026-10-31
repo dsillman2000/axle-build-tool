@@ -425,7 +425,7 @@ class TestLiveStubbing:
         )
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.User") == "M.User OK"
+        assert status_line(result.output, "M.User.target") == "M.User.target OK"
 
     def test_stubbed_payload_is_persisted_for_inspection(
         self, make_live_project
@@ -517,6 +517,56 @@ class TestLiveScopedStatements:
         assert "theorem helper : n = n := rfl" in content
 
 
+class TestLiveVerifyCache:
+    """The verification cache: recorded per declaration, keyed on the
+    file-closure content + environment + global options."""
+
+    def test_second_verify_is_cached(self, make_live_project) -> None:
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["Base.base_holds", "User.derived_holds"],
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        first = runner.invoke(main, ["verify"])
+        assert first.exit_code == 0, first.output
+        assert "(cached)" not in first.output
+
+        second = runner.invoke(main, ["verify"])
+
+        assert second.exit_code == 0, second.output
+        assert second.output.count("(cached)") == 2
+        assert "Verified 2 selection(s): all OK (2 cached)" in second.output
+
+    def test_force_reverifies(self, make_live_project) -> None:
+        make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify", "--force"])
+
+        assert result.exit_code == 0, result.output
+        assert "(cached)" not in result.output
+        assert "Verified 1 selection(s): all OK" in result.output
+
+    def test_dependency_edit_invalidates(self, make_live_project) -> None:
+        root = make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["User.derived_holds"],
+        )
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+
+        # Touch Base (the dependency): the closure signature changes.
+        (root / "M" / "Base.lean").write_text(
+            BASE_SOURCE + "\n-- touched\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        assert "(cached)" not in result.output
+        assert "Verified 1 selection(s): all OK" in result.output
+
+
 class TestLiveEnvironmentValidation:
     def test_unknown_pinned_environment_fails_with_hint(
         self, make_live_project
@@ -531,3 +581,21 @@ class TestLiveEnvironmentValidation:
         assert result.exit_code == 1, result.output
         assert "lean-9.9.9" in result.output
         assert "available" in result.output
+
+    def test_permitted_sorries_excuse_a_sorried_declaration(
+        self, make_live_project
+    ) -> None:
+        """The flag's names are matched qualified (observed live)."""
+        make_live_project(
+            {"M/Gap.lean": SORRY_SOURCE}, targets=["Gap.gap"],
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(
+            main, ["verify", "--permitted-sorries", "M.Gap.gap"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap SKIP"
+        assert "excused (--permitted-sorries)" in result.output
+        assert "Verified 1 selection(s): all OK, 1 skipped" in result.output

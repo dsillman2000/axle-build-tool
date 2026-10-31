@@ -30,7 +30,15 @@ class ManifestError(Exception):
 
 
 class ExtractedDecl(BaseModel):
-    """Per-declaration metadata extracted from a node by the Axle API."""
+    """Per-declaration metadata extracted from a node by the Axle API.
+
+    `verified_sig`/`verified_at` record a successful kernel-level
+    verification of this declaration (the `axbt verify` cache): the
+    signature identifies the exact content/config the verification ran
+    against (see `verification_signature`); a declaration is only
+    stamped when it was actually swept — permitted or stubbed
+    declarations are never stamped.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -40,6 +48,8 @@ class ExtractedDecl(BaseModel):
     line_pos: int
     end_line_pos: int
     signature: str = ""
+    verified_sig: str | None = None
+    verified_at: datetime | None = None
 
 
 class ManifestNode(BaseModel):
@@ -296,6 +306,38 @@ def check_targets(config: ProjectConfig, manifest: Manifest) -> None:
                     f"Target '{target}' of module {module_name!r} refers to a "
                     "file that was not found in the module's source directory."
                 )
+
+
+def verification_signature(
+    node: ManifestNode,
+    manifest: Manifest,
+    environment: str,
+    global_options: dict[str, bool | int | str],
+) -> str:
+    """The cache signature of verifying `node` — and of every declaration in it.
+
+    Covers the node's **file dependency closure** (each closure file's
+    name and md5), the resolved environment, and the global options —
+    everything that can change whether the node's proofs verify.
+    Selection-independent by design: a declaration verified through any
+    selection granularity carries the same signature, and any change to
+    the node or one of its (transitive) dependencies invalidates it.
+    """
+    by_name = manifest.by_name()
+    seen: set[str] = set()
+
+    def visit(current: ManifestNode) -> None:
+        if current.name in seen:
+            return
+        seen.add(current.name)
+        for parent in sorted(current.parents):
+            visit(by_name[parent])
+
+    visit(node)
+    payload = "|".join(sorted(f"{name}:{by_name[name].md5}" for name in seen))
+    options = "|".join(f"{k}={v}" for k, v in sorted(global_options.items()))
+    material = f"{payload}#{environment}#{options}"
+    return hashlib.md5(material.encode("utf-8")).hexdigest()
 
 
 def topological_order(nodes: list[ManifestNode]) -> list[ManifestNode]:

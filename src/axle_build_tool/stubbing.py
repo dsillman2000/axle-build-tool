@@ -63,18 +63,59 @@ def _stub_line(declaration: ExtractedDecl) -> str:
     return f"{statement}{separator}"
 
 
+def _span_head_matches(line: str, kind: str) -> bool:
+    """Whether a span's first line looks like the declaration's keyword line.
+
+    Extraction snaps `line_pos` onto the declaration's keyword line, so a
+    healthy span starts there (or, in the rare snap-fallback case, on the
+    declaration's docstring). Anything else means the manifest is out of
+    date with the source.
+    """
+    stripped = line.lstrip()
+    return stripped.startswith(kind) or stripped.startswith("/-")
+
+
+#: The declaration keywords a signature can start (after modifiers).
+_KIND_TOKENS = frozenset(
+    {"theorem", "lemma", "example", "def", "abbrev", "structure", "class", "inductive", "instance"}
+)
+
+
+def bare_name(declaration: ExtractedDecl) -> str:
+    """The declaration's name as written in its file.
+
+    Extraction records the Lean-qualified name (`Scoped.variable_holds`
+    for a declaration inside `namespace Scoped`), while the signature is
+    the in-file text — so the name token after the kind keyword is the
+    bare name. Anonymous declarations (e.g. nameless `instance`s) have
+    none; they fall back to the last segment of the qualified name.
+    """
+    statement = _statement_of(declaration.signature)
+    tokens = statement.replace(":", " : ").split()
+    for index, token in enumerate(tokens):
+        if token in _KIND_TOKENS and index + 1 < len(tokens):
+            candidate = tokens[index + 1]
+            if not candidate.startswith((":", "(", "[", "{", "`")):
+                return candidate
+            break
+    return declaration.name.rsplit(".", 1)[-1]
+
+
 def stubbed_source(
     node: ManifestNode,
     source: str,
     only: frozenset[str] | None = None,
+    warnings: list[str] | None = None,
 ) -> str:
     """`source` with the node's stubbable declarations replaced by stubs.
 
     `only` restricts stubbing to those declaration names; by default
     every stubbable declaration (`STUBBABLE_KINDS`) in the node is
-    stubbed. Spans that overlap, are inverted, or fall outside the
-    current source are left in place (defensive against stale
-    manifests).
+    stubbed. Spans that overlap, are inverted, fall outside the current
+    source, or don't start where the declaration's keyword should be
+    are left in place (defensive against stale manifests) — when
+    `warnings` is given, each skip appends a message there naming the
+    file and the prescription.
     """
     lines = source.splitlines()
     out: list[str] = []
@@ -87,7 +128,19 @@ def stubbed_source(
             continue
         start = declaration.line_pos - 1
         end = declaration.end_line_pos  # exclusive slice bound
-        if start < cursor or start >= end or end > len(lines):
+        stale = (
+            start < cursor
+            or start >= end
+            or end > len(lines)
+            or not _span_head_matches(lines[start], declaration.kind)
+        )
+        if stale:
+            if warnings is not None:
+                warnings.append(
+                    f"{node.path}: declaration '{declaration.name}' could not be "
+                    "stubbed (the manifest is out of date with the source); "
+                    "run `axbt compile` to rebuild it."
+                )
             continue
         out.extend(lines[cursor:start])
         out.append(_stub_line(declaration))

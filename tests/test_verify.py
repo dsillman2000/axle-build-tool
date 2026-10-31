@@ -145,7 +145,10 @@ class TestTargetsDefault:
 
         assert result.exit_code == 0, result.output
         assert not [m for m, _ in fake_axle.calls if m == "extract_decls"]
-        assert len(verify_calls(fake_axle)) == 2
+        # The verifications from the first run are still cached (the
+        # sources and config are unchanged): nothing is re-submitted.
+        assert len(verify_calls(fake_axle)) == 0
+        assert "(cached)" in result.output
 
     def test_full_refresh_conflicts_with_no_compile(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -196,11 +199,11 @@ class TestSelection:
         assert result.exit_code == 0, result.output
         sorry_calls = theorem2sorry_calls(fake_axle)
         assert len(sorry_calls) == 1
-        # No names: the formal statement covers the whole payload, and
-        # nothing is excused — file-level verify is strict over the
-        # payload's every theorem.
-        assert sorry_calls[0]["names"] is None
-        assert verify_calls(fake_axle)[0]["formal_statement"] == "formal[all]"
+        # The formal statement covers exactly the to-verify theorems
+        # (all of them on a first run) — file-level verify is strict
+        # over the payload's every theorem.
+        assert sorry_calls[0]["names"] == ["t1", "t2"]
+        assert verify_calls(fake_axle)[0]["formal_statement"] == "formal[t1,t2]"
         assert verify_calls(fake_axle)[0]["permitted_sorries"] is None
         assert status_line(result.output, "M") == "M OK"
 
@@ -219,7 +222,9 @@ class TestSkipsAndLocalFailures:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 0, result.output
-        assert fake_axle.calls == []
+        assert fake_axle.calls == [] or not [
+            m for m, _ in fake_axle.calls if m in ("theorem2sorry", "verify_proof")
+        ]
         assert status_line(result.output, "M.A.d1") == "M.A.d1 SKIP"
         assert "verify checks theorems/lemmas only" in result.output
         assert "Verified 2 selection(s): all OK, 2 skipped" in result.output
@@ -246,8 +251,9 @@ class TestSkipsAndLocalFailures:
         result = runner.invoke(main, ["verify", "--select", "M.A.t1"])
 
         assert result.exit_code == 1
-        # Failed locally: not even the formal-statement roundtrip ran.
-        assert fake_axle.calls == []
+        # Failed locally: not even the formal-statement roundtrip ran
+        # (only the environment resolution upfront).
+        assert not [m for m, _ in fake_axle.calls if m in ("theorem2sorry", "verify_proof")]
         assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
         assert "declaration 't1' has a `sorry`" in result.output
 
@@ -349,6 +355,192 @@ axle:
   global_options:
     maxHeartbeats: 100000
 """
+
+
+class TestVerificationCache:
+    """Successful verifications are recorded and skipped while valid."""
+
+    def test_second_verify_skips_submissions(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        first = runner.invoke(main, ["verify"])
+        assert first.exit_code == 0, first.output
+        assert len(verify_calls(fake_axle)) == 2
+        # The manifest records the verifications per declaration.
+        manifest = load_manifest(root)
+        stamps = [
+            d.verified_sig
+            for node in manifest.nodes
+            for d in node.declarations
+        ]
+        assert all(sig is not None for sig in stamps)
+        assert all(d.verified_at is not None for node in manifest.nodes for d in node.declarations)
+
+        fake_axle.calls.clear()
+        second = runner.invoke(main, ["verify"])
+
+        assert second.exit_code == 0, second.output
+        # Nothing re-submitted: every target is still validly cached.
+        assert theorem2sorry_calls(fake_axle) == []
+        assert verify_calls(fake_axle) == []
+        assert second.output.count("(cached)") == 2
+        assert "Verified 2 selection(s): all OK (2 cached)" in second.output
+
+    def test_force_reverifies_and_restamps(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify", "--force"])
+
+        assert result.exit_code == 0, result.output
+        assert len(verify_calls(fake_axle)) == 2
+        assert "(cached)" not in result.output
+
+    def test_dependency_edit_invalidates_the_cache(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        # A change anywhere in B's file (even a comment) changes B's md5
+        # and therefore the closure signature of everything downstream.
+        (root / "M/B.lean").write_text(
+            "import A\ntheorem t2 : 1 = 1 := rfl\n-- touched\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        # Both selections re-verify: B changed, and A's signature covers
+        # its dependency closure (B is not A's dependency, so A's stamp
+        # survives — but A.t1's selection re-verifies only if A changed;
+        # here B.t2's selection must re-run).
+        assert len(verify_calls(fake_axle)) == 1
+        assert "(cached)" in result.output  # A.t1 stayed cached
+
+    def test_environment_change_invalidates_the_cache(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, pinned_config("lean-4.35.0"), THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        # Re-point the pin at another served environment: same sources,
+        # different elaboration target — the cache must miss.
+        (root / "axbt_project.yml").write_text(
+            pinned_config("lean-4.34.1"), encoding="utf-8"
+        )
+        fake_axle._environments = [
+            {"name": "lean-4.35.0"},
+            {"name": "lean-4.34.1"},
+        ]
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        # The same sources re-verify under the new environment: the
+        # signature covers it, so the cache misses.
+        assert len(verify_calls(fake_axle)) == 1
+        assert verify_calls(fake_axle)[0]["environment"] == "lean-4.34.1"
+        assert "(cached)" not in result.output
+
+
+class TestPermittedSorry:
+    def test_permitted_sorries_excuse_the_guard_and_the_sweep(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A sorried declaration, explicitly excused, neither fails the
+        run nor gets stamped as verified."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        sorried_docs = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = sorried_docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(
+            main, ["verify", "--permitted-sorries", "M.A.t1"]
+        )
+
+        assert result.exit_code == 0, result.output
+        verify = verify_calls(fake_axle)[0]
+        assert "t1" in verify["permitted_sorries"]
+        # The excused declaration is not recorded as verified.
+        manifest = load_manifest(root)
+        (t1,) = [d for n in manifest.nodes for d in n.declarations if d.name == "t1"]
+        (t2,) = [d for n in manifest.nodes for d in n.declarations if d.name == "t2"]
+        assert t1.verified_sig is None
+        assert t2.verified_sig is not None
+
+    def test_unexcused_sorried_declaration_still_fails(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        sorried_docs = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = sorried_docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 1
+        assert "M.A.t1 FAIL" in " ".join(result.output.split())
+
+    def test_permitted_sorries_outside_the_payload_are_rejected(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.A", "--permitted-sorries", "M.B.t2"]
+        )
+
+        assert result.exit_code == 1
+        assert "not part of 'M.A''s payload" in result.output
 
 
 class TestRitual:
@@ -557,3 +749,24 @@ class TestSorry:
 
         assert result.exit_code == 1
         assert "never stubbed" in result.output
+
+    def test_sorry_warnings_collapse_into_one_line(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        fake_axle.verify_result = make_response(
+            VerifyProofResponse,
+            okay=True,
+            negation=None,
+            lean_messages=Messages(
+                [], ["-:1:1-1:20: warning: declaration uses `sorry`"], []
+            ),
+        )
+
+        result = runner.invoke(
+            main, ["verify", "--select", "M.B", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "upstream stubbed: 2 declarations" in result.output
+        assert "declaration uses" not in result.output

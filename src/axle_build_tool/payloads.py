@@ -56,6 +56,7 @@ def build_payload(
     manifest: Manifest,
     project_root: Path,
     stubbed: dict[str, frozenset[str] | None] | None = None,
+    warnings: list[str] | None = None,
 ) -> Payload:
     """Assemble a standalone payload covering `nodes` plus their full
     transitive dependency closure.
@@ -93,7 +94,9 @@ def build_payload(
     for member in order:
         source = (project_root / member.path).read_text(encoding="utf-8")
         if stubbed and member.name in stubbed:
-            source = stubbed_source(member, source, stubbed[member.name])
+            source = stubbed_source(
+                member, source, stubbed[member.name], warnings=warnings
+            )
         internal_stems = {
             dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
         }

@@ -52,8 +52,8 @@ TWO_FILES = {"M/A.lean": "def t1 := 1\n", "M/B.lean": "import A\ndef t2 := t1\n"
 # (A's single line is inlined first, then a blank separator). Positions
 # are one-based payload coordinates, as the API reports them.
 TWO_FILE_DOCS = {
-    "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)},
-    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3)},
+    "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2")},
 }
 
 
@@ -114,7 +114,7 @@ class TestTargetsDefault:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -164,7 +164,10 @@ class TestSelection:
         assert calls[0]["names"] is None
         assert "def t1 := 1" in calls[0]["content"]
         assert "def t2 := t1" in calls[0]["content"]
-        assert status_line(result.output, "M") == "M OK"
+        # The module selection expands to per-declaration lines.
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        assert "Checked 1 selection(s): all OK" in result.output
 
 
 class TestFailureReporting:
@@ -179,7 +182,13 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def broken := x": {
-                "broken": make_document("broken", kind="def", line_pos=4, end_line_pos=4)
+                "broken": make_document(
+                    "broken",
+                    kind="def",
+                    line_pos=4,
+                    end_line_pos=4,
+                    signature="def broken",
+                )
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -198,7 +207,7 @@ class TestFailureReporting:
         result = runner.invoke(main, ["check", "--select", "M.A"])
 
         assert result.exit_code == 1
-        assert status_line(result.output, "M.A") == "M.A FAIL"
+        assert status_line(result.output, "M.A.broken") == "M.A.broken FAIL"
         # Positions are attributed back to the real source file...
         assert "    M/A.lean:3:15: error: unknown identifier 'x'" in result.output
         # ...while positions with no source counterpart are left alone.
@@ -212,7 +221,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -225,7 +234,7 @@ class TestFailureReporting:
         result = runner.invoke(main, ["check", "--select", "M.A"])
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.A") == "M.A OK"
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert "    M/A.lean:1:4: warning: unused variable" in result.output
 
     def test_failure_without_lean_messages_reports_failed_declarations(
@@ -235,7 +244,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -327,7 +336,7 @@ class TestCompilePrecursor:
         # B's re-extraction now reports both defs (one-based payload
         # coordinates; B's section starts at payload line 3).
         fake_axle._extract_documents_by_marker["def t3 := t2"] = {
-            "t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3),
+            "t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2"),
             "t3": make_document("t3", kind="def", line_pos=4, end_line_pos=4),
         }
 
@@ -623,9 +632,36 @@ class TestSorry:
         assert "def base : Nat := sorry" in content
         assert "theorem base_holds : base = 1 := rfl" in content  # sibling stays real
 
-    def test_sorry_rejects_non_dependencies(
+    def test_sorry_applies_where_relevant_for_default_runs(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """A bare run checks every target; a `--sorry` that is only a
+        dependency of SOME of them applies where relevant and never
+        errors for the rest (the Scoped-style targets don't depend on
+        the stubbed file — nothing to stub there)."""
+        config = NO_TARGETS_CONFIG.replace(
+            "targets: []",
+            "targets:\n      - B.middle\n      - C.top\n",
+        )
+        root = make_project(tmp_path, config, self.SORRY_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.SORRY_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        # B.middle's selection: A is its dependency -> stubbed.
+        # C.top's selection: A is transitive -> stubbed too.
+        assert len(check_calls(fake_axle)) == 2
+        for call in check_calls(fake_axle):
+            assert "def base : Nat := sorry" in call["content"]
+
+    def test_sorry_nowhere_applicable_is_rejected(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A stub relevant to NO planned selection is a mistake."""
         self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
         result = runner.invoke(
@@ -633,23 +669,29 @@ class TestSorry:
         )
 
         assert result.exit_code == 1
-        assert "not a dependency of 'M.A'" in result.output
+        assert "not a dependency of any planned selection" in result.output
 
-    def test_sorry_rejects_the_selection_itself(
+    def test_sorry_selection_fully_granted_is_skipped(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """`--select M.A --sorry M.A`: the whole selection is taken as
+        granted — reported SKIP, nothing submitted, exit 0."""
         self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
         result = runner.invoke(
             main, ["check", "--select", "M.A", "--sorry", "M.A"]
         )
 
-        assert result.exit_code == 1
-        assert "never stubbed" in result.output
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A") == "M.A SKIP"
+        assert "taken as granted (--sorry)" in result.output
+        assert check_calls(fake_axle) == []
 
-    def test_sorry_rejects_targets_inside_the_stubbed_subtree(
+    def test_targets_inside_the_stubbed_subtree_are_skipped(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """Config targets inside a `--sorry`'d subtree are taken as
+        granted (skipped); the command line's grant wins for this run."""
         config = NO_TARGETS_CONFIG.replace("targets: []", "targets:\n      - B.middle")
         root = make_project(tmp_path, config, self.SORRY_FILES)
         monkeypatch.chdir(root)
@@ -659,9 +701,11 @@ class TestSorry:
 
         result = runner.invoke(main, ["check", "--sorry", "M.B"])
 
-        assert result.exit_code == 1
-        assert "never stubbed" in result.output
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.B.middle") == "M.B.middle SKIP"
+        assert "taken as granted (--sorry)" in result.output
         assert check_calls(fake_axle) == []
+        assert "Checked 1 selection(s): all OK, 1 skipped" in result.output
 
     def test_sorry_on_own_file_stubs_siblings_for_declaration_selections(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -691,15 +735,75 @@ class TestSorry:
         assert result.exit_code == 1
         assert "never stubbed" in result.output
 
-    def test_sorry_on_own_module_is_rejected_for_module_selections(
+    def test_sorry_on_own_module_judges_the_rest(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
+        """`--select M --sorry M.A`: the module is judged with A's
+        declarations stubbed (a partial grant inside the selection)."""
         self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
         result = runner.invoke(main, ["check", "--select", "M", "--sorry", "M.A"])
 
-        assert result.exit_code == 1
-        assert "never stubbed" in result.output
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base : Nat := sorry" in content
+        assert "theorem top : middle = 2 := by decide" in content  # the rest judged
+        assert "siblings stubbed: 2 declarations" in result.output
+
+    def test_sorry_warnings_collapse_into_one_line(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The stubs' own sorry-warnings are report noise: collapsed
+        into one line; warnings from outside the stubbed subtree stay."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        fake_axle.check_result = make_response(
+            CheckResponse,
+            okay=True,
+            lean_messages=Messages(
+                [],
+                [
+                    "-:1:1-1:20: warning: declaration uses `sorry`",
+                    "-:2:1-2:20: warning: declaration uses `sorry`",
+                    "-:4:1: warning: something real",
+                ],
+                [],
+            ),
+        )
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.C", "--sorry", "M.A"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "upstream stubbed: 2 declarations" in result.output
+        # The real warning is kept, attributed to its file.
+        assert "    M/B.lean:2:1: warning: something real" in result.output
+        assert "declaration uses" not in result.output
+
+    def test_stale_manifest_warns_with_the_compile_prescription(        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A `--no-compile` run against a file edited since compiling
+        warns that stubs could not be applied — never silently."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        # Shift A's declarations down one line without recompiling.
+        (root / "M/A.lean").write_text(
+            "-- a new comment line\ndef base := 1\n"
+            "theorem base_holds : base = 1 := rfl\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.C", "--sorry", "M.A", "--no-compile"]
+        )
+
+        assert result.exit_code == 0, result.output  # warns, does not fail
+        assert "warning:" in result.output
+        assert "M/A.lean" in result.output
+        assert "could not be stubbed" in result.output
+        assert "run `axbt compile`" in result.output
+        # The un-stubbable code stayed real in the payload.
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base := 1" in content
 
 
 class TestRitual:
