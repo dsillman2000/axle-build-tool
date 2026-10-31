@@ -301,23 +301,23 @@ class TestExtraction:
         "theorem prime_gt_one": {
             "prime_gt_one": make_document(
                 "prime_gt_one",
-                line_pos=11,
-                end_line_pos=12,
+                line_pos=12,
+                end_line_pos=13,
                 signature="theorem prime_gt_one (p : ℕ) (hp : Nat.Prime p) : 1 < p",
             ),
-            "prime_dvd_square": make_document("prime_dvd_square", line_pos=15, end_line_pos=16),
+            "prime_dvd_square": make_document("prime_dvd_square", line_pos=16, end_line_pos=17),
         },
         "theorem euclid_lemma": {
-            # Zero-based payload coordinates: the Euclid section starts at
-            # one-based payload line 19 (after the hoisted import header and
-            # the inlined Divisibility source), so the theorem at file line
-            # 12 sits at zero-based payload line 27.
-            "euclid_lemma": make_document("euclid_lemma", line_pos=27, end_line_pos=28),
+            # One-based payload coordinates (as the API reports them): the
+            # Euclid section starts at one-based payload line 19 (after the
+            # hoisted import header and the inlined Divisibility source), so
+            # the theorem at file line 12 sits at payload line 28.
+            "euclid_lemma": make_document("euclid_lemma", line_pos=28, end_line_pos=29),
         },
         "theorem sqrt_two_irrational": {
-            # Zero-based payload line 42 == file line 15 (three imports
-            # stripped, section starting at one-based payload line 32).
-            "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=42, end_line_pos=55),
+            # Payload line 43 == file line 15 (three imports stripped,
+            # section starting at one-based payload line 32).
+            "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=43, end_line_pos=56),
         },
     }
 
@@ -357,7 +357,7 @@ class TestExtraction:
         from conftest import make_extract_response
 
         fake_axle._extract_documents = {
-            "open_problem": make_document("open_problem", is_sorry=True, line_pos=0, end_line_pos=0)
+            "open_problem": make_document("open_problem", is_sorry=True, line_pos=1, end_line_pos=1)
         }
         root = make_project(tmp_path, SIMPLE_CONFIG, {"M/A.lean": "theorem open_problem : P := by sorry\n"})
         monkeypatch.chdir(root)

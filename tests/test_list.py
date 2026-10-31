@@ -78,7 +78,7 @@ class TestList:
         from conftest import make_document
 
         fake_axle._extract_documents = {
-            "open_problem": make_document("open_problem", is_sorry=True, line_pos=0, end_line_pos=0)
+            "open_problem": make_document("open_problem", is_sorry=True, line_pos=1, end_line_pos=1)
         }
         root = make_project(
             tmp_path,

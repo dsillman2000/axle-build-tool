@@ -52,21 +52,23 @@ def _decl_from_document(
 ) -> ExtractedDecl | None:
     """Map an extracted document to target-file coordinates.
 
-    Axle reports `line_pos` zero-based within the submitted payload;
-    convert to one-based payload coordinates, keep only documents that
-    belong to the node's own file section (documents of inlined
-    dependencies are extracted under their own nodes), and map back into
-    original-file coordinates exactly via the payload's line map (import
-    lines stripped from the section simply have no counterpart).
+    Axle reports `line_pos`/`end_line_pos` one-based and inclusive
+    within the submitted payload (verified live: the start may land on
+    the declaration's docstring rather than on the `theorem`/`def`
+    keyword itself, and the end is the declaration's last line). Keep
+    only documents that belong to the node's own file section (documents
+    of inlined dependencies are extracted under their own nodes), and
+    map back into original-file coordinates exactly via the payload's
+    line map (import lines stripped from the section simply have no
+    counterpart).
 
-    Axle's reported start can land on the declaration's docstring rather
-    than on the `theorem`/`def` keyword itself (observed with multi-line
-    docstrings); scan forward (bounded) to the keyword line so the stored
-    position reliably points at the declaration.
+    Because the reported start can sit on a (multi-line) docstring, scan
+    forward (bounded) to the keyword line so the stored position
+    reliably points at the declaration.
     """
     section_start, section_end = payload.sections[node_name]
     line_map = payload.line_map[node_name]
-    start = doc.line_pos + 1
+    start = doc.line_pos
     if not (section_start <= start <= section_end):
         return None
     keyword_line = start
@@ -80,7 +82,7 @@ def _decl_from_document(
     if scanned > 64 or keyword_line > section_end:
         keyword_line = start  # keep the reported position
     line_pos = line_map[keyword_line - section_start]
-    end = doc.end_line_pos + 1
+    end = doc.end_line_pos
     if section_start <= end <= section_end:
         end_line_pos = line_map[end - section_start]
     else:

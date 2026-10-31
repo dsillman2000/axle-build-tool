@@ -49,10 +49,11 @@ TWO_FILES = {"M/A.lean": "def t1 := 1\n", "M/B.lean": "import A\ndef t2 := t1\n"
 
 # Extraction documents matching the two-file project above: `t1` lives in
 # A (payload line 1); `t2` in B, whose section starts at payload line 3
-# (A's single line is inlined first, then a blank separator).
+# (A's single line is inlined first, then a blank separator). Positions
+# are one-based payload coordinates, as the API reports them.
 TWO_FILE_DOCS = {
-    "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=0, end_line_pos=0)},
-    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=2, end_line_pos=2)},
+    "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)},
+    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3)},
 }
 
 
@@ -113,7 +114,7 @@ class TestTargetsDefault:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=0, end_line_pos=0)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -178,7 +179,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def broken := x": {
-                "broken": make_document("broken", kind="def", line_pos=3, end_line_pos=3)
+                "broken": make_document("broken", kind="def", line_pos=4, end_line_pos=4)
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -211,7 +212,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=0, end_line_pos=0)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -234,7 +235,7 @@ class TestFailureReporting:
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = {
             "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=0, end_line_pos=0)
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1)
             }
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0

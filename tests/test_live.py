@@ -129,6 +129,42 @@ class TestLiveDemoCompile:
         manifest = load_manifest(root)
         assert all(node.status == "clean" for node in manifest.nodes)
 
+    def test_no_import_project_extracts_declarations(self, tmp_path, monkeypatch) -> None:
+        """Regression: files with no import lines extract declarations.
+
+        There was a time when every document was silently dropped for
+        such files (an off-by-one in the reported position semantics),
+        leaving `declarations: []` in the manifest and a confusing
+        "no declarations were extracted" error from `check`.
+        """
+        root = tmp_path / "proj"
+        (root / "M").mkdir(parents=True)
+        (root / "axbt_project.yml").write_text(
+            "project:\n  name: proj\nmodules:\n  M:\n    targets:\n      - A.t1\n",
+            encoding="utf-8",
+        )
+        (root / "M" / "A.lean").write_text(
+            "theorem t1 : 1 = 1 := rfl\n\ntheorem t2 : 2 = 1 + 1 := rfl\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(root)
+
+        result = runner.invoke(main, ["compile"])
+        assert result.exit_code == 0, result.output
+
+        from axle_build_tool.manifest import load_manifest
+
+        node = load_manifest(root).by_name()["M.A"]
+        extracted = {decl.name: decl for decl in node.declarations}
+        assert set(extracted) == {"t1", "t2"}, extracted
+        # Positions point at the declaration keyword lines in the file.
+        assert extracted["t1"].line_pos == 1
+        assert extracted["t2"].line_pos == 3
+
+        check_result = runner.invoke(main, ["check"])
+        assert check_result.exit_code == 0, check_result.output
+        assert "M.A.t1: okay" in check_result.output
+
     def test_compile_failure_reports_the_broken_file(self, in_demo, tmp_path) -> None:
         """A Lean error in a source fails compile with file context."""
         root = in_demo("RootTwoIrrational")
