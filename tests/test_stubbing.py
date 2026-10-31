@@ -195,7 +195,9 @@ class TestStubbedSource:
                 decl("second", "theorem", 2, 4, "theorem second : True"),
             ]
         )
-        source = "line one\nline two\nline three\nline four\n"
+        source = (
+            "theorem first : True := rfl\nline two\nline three\nline four\n"
+        )
 
         result = stubbed_source(node, source)
 
@@ -233,3 +235,65 @@ class TestStubbedSource:
         result = stubbed_source(node, "lemma l : 1 = 1 := rfl\nexample : 2 = 2 := rfl\n")
 
         assert result == "lemma l : 1 = 1 := by sorry\nexample : 2 = 2 := by sorry\n"
+
+
+class TestUnderStubbingWarnings:
+    """A requested stub that can't be applied warns, naming the file and
+    the prescription — it must never silently submit un-stubbed code."""
+
+    def test_misaligned_span_warns_and_is_skipped(self) -> None:
+        """A source edited after compiling: the span no longer starts at
+        the declaration's keyword — the staleness tell."""
+        node = stubbed_node([decl("t", "theorem", 1, 1, "theorem t : 1 = 1")])
+        source = "-- a new comment line\ntheorem t : 1 = 1 := rfl\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert result == source  # untouched: never stub garbage
+        assert len(warnings) == 1
+        assert "M/A.lean" in warnings[0]
+        assert "'t' could not be stubbed" in warnings[0]
+        assert "run `axbt compile`" in warnings[0]
+
+    def test_out_of_range_span_warns(self) -> None:
+        node = stubbed_node([decl("t", "theorem", 9, 10, "theorem t : 1 = 1")])
+        warnings: list[str] = []
+
+        stubbed_source(node, "theorem t : 1 = 1 := rfl\n", warnings=warnings)
+
+        assert len(warnings) == 1
+        assert "run `axbt compile`" in warnings[0]
+
+    def test_healthy_spans_warn_nothing(self) -> None:
+        node = stubbed_node(
+            [decl("t", "theorem", 2, 2, "theorem t : 1 = 1")]
+        )
+        source = "/-- doc -/\ntheorem t : 1 = 1 := rfl\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert warnings == []
+        assert result == "/-- doc -/\ntheorem t : 1 = 1 := by sorry\n"
+
+    def test_snap_fallback_docstring_position_is_accepted(self) -> None:
+        """Rare snap fallback: the recorded position sits ON the
+        docstring — still trusted (it is the extraction's own record)."""
+        node = stubbed_node(
+            [decl("t", "theorem", 1, 2, "/-- doc -/\ntheorem t : 1 = 1")]
+        )
+        source = "/-- doc -/\ntheorem t : 1 = 1 := rfl\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert warnings == []
+        assert result == "theorem t : 1 = 1 := by sorry\n"
+
+    def test_no_warnings_argument_stays_quiet(self) -> None:
+        node = stubbed_node([decl("t", "theorem", 9, 10, "theorem t : 1 = 1")])
+
+        assert stubbed_source(node, "theorem t : 1 = 1 := rfl\n") == (
+            "theorem t : 1 = 1 := rfl\n"
+        )

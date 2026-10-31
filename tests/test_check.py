@@ -701,6 +701,32 @@ class TestSorry:
         assert result.exit_code == 1
         assert "never stubbed" in result.output
 
+    def test_stale_manifest_warns_with_the_compile_prescription(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A `--no-compile` run against a file edited since compiling
+        warns that stubs could not be applied — never silently."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        # Shift A's declarations down one line without recompiling.
+        (root / "M/A.lean").write_text(
+            "-- a new comment line\ndef base := 1\n"
+            "theorem base_holds : base = 1 := rfl\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.C", "--sorry", "M.A", "--no-compile"]
+        )
+
+        assert result.exit_code == 0, result.output  # warns, does not fail
+        assert "warning:" in result.output
+        assert "M/A.lean" in result.output
+        assert "could not be stubbed" in result.output
+        assert "run `axbt compile`" in result.output
+        # The un-stubbable code stayed real in the payload.
+        content = check_calls(fake_axle)[0]["content"]
+        assert "def base := 1" in content
+
 
 class TestRitual:
     def test_compile_then_check_ritual(

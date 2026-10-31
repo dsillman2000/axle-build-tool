@@ -492,6 +492,7 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
         )
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        stub_warnings: list[str] = []
         checks = []
         for label, selection in plan:
             refined = _refine_stub_map(stub_map, selection, label, manifest)
@@ -500,9 +501,12 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
                 manifest,
                 project_root,
                 stubbed=refined or None,
+                warnings=stub_warnings,
             )
             _validate_stub_closure(refined, label, payload)
             checks.append((label, selection, payload))
+        for warning in dict.fromkeys(stub_warnings):
+            click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -934,6 +938,7 @@ def verify(
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
+        stub_warnings: list[str] = []
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -979,6 +984,7 @@ def verify(
                 manifest,
                 project_root,
                 stubbed=refined or None,
+                warnings=stub_warnings,
             )
             _validate_stub_closure(refined, label, payload)
             # User-permitted declarations must belong to this payload.
@@ -1009,6 +1015,8 @@ def verify(
                     ),
                 )
             )
+        for warning in dict.fromkeys(stub_warnings):
+            click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
