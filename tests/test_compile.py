@@ -324,7 +324,9 @@ class TestExtraction:
     def test_demo_nodes_get_declaration_metadata(
         self, demos_dir: Path, fake_axle, monkeypatch
     ) -> None:
-        fake_axle._extract_documents_by_marker = self.DEMO_DOCS
+        from conftest import DEMO_EXTRACTION_DOCS
+
+        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
         demo = fresh_demo(demos_dir, "RootTwoIrrational")
         monkeypatch.chdir(demo)
 
@@ -397,6 +399,7 @@ class TestExtraction:
         assert runner.invoke(main, ["compile"]).exit_code == 0
         first = load_manifest(root)
         calls_after_first = extract_calls(fake_axle)
+        first_node_ids = {node.name: node.request_id for node in first.nodes}
 
         (root / "M/A.lean").write_text("def x := 2\n", encoding="utf-8")
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -404,6 +407,9 @@ class TestExtraction:
         assert extract_calls(fake_axle) == calls_after_first + 1  # only A
         second = load_manifest(root)
         assert second.by_name()["M.A"].status == "changed"
+        # A was re-extracted: fresh request id; B's provenance is untouched.
+        assert second.by_name()["M.A"].request_id != first_node_ids["M.A"]
+        assert second.by_name()["M.B"].request_id == first_node_ids["M.B"]
         # B's data is carried over untouched.
         assert second.by_name()["M.B"].declarations == first.by_name()["M.B"].declarations
 
@@ -461,6 +467,26 @@ class TestExtraction:
         assert "M/A.lean" in result.output
         assert "M/B.lean" in result.output
 
+    def test_extracted_nodes_record_axle_request_ids(
+        self, demos_dir: Path, fake_axle, monkeypatch
+    ) -> None:
+        """Each node's manifest entry carries the request id of the API call
+        that produced its data; carried-over nodes keep their original id."""
+        demo = fresh_demo(demos_dir, "RootTwoIrrational")
+        monkeypatch.chdir(demo)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        first = load_manifest(demo)
+        assert all(node.request_id is not None for node in first.nodes)
+        assert len({node.request_id for node in first.nodes}) == 3  # distinct calls
+        assert set(first_node_ids := {node.request_id for node in first.nodes}) == set(
+            fake_axle.request_ids
+        )
+
+        # A recompile carries the same provenance (no new requests).
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        assert load_manifest(demo).nodes[0].request_id in first_node_ids
+
     def test_stale_version_manifest_is_ignored_and_reextracted(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -482,3 +508,52 @@ class TestExtraction:
         assert extract_calls(fake_axle) == calls_before + 1
         rewritten = load_manifest(root)
         assert rewritten.version == MANIFEST_VERSION
+
+
+class TestCompiledPayloads:
+    """Scope C: compile persists per-file isolated payloads for inspection."""
+
+    def test_compile_writes_isolated_payloads(
+        self, demos_dir: Path, fake_axle, monkeypatch
+    ) -> None:
+        demo = fresh_demo(demos_dir, "RootTwoIrrational")
+        monkeypatch.chdir(demo)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        compiled = demo / ".axbt" / "compiled"
+        assert sorted(p.name for p in compiled.iterdir()) == [
+            "RootTwoIrrational_Divisibility_isolated.lean",
+            "RootTwoIrrational_EuclidLemma_isolated.lean",
+            "RootTwoIrrational_IrrationalSqrtTwo_isolated.lean",
+        ]
+
+        euclid_payload = (compiled / "RootTwoIrrational_EuclidLemma_isolated.lean").read_text(
+            encoding="utf-8"
+        )
+        # Dependencies are inlined before the target file...
+        assert euclid_payload.index("theorem prime_gt_one") < euclid_payload.index(
+            "theorem euclid_lemma"
+        )
+        # ...intra-project imports are replaced by the inlined content...
+        assert "import Divisibility" not in euclid_payload
+        # ...and external imports are hoisted to the top exactly once.
+        assert euclid_payload.count("import Mathlib") == 1
+        assert euclid_payload.splitlines()[0] == "import Mathlib"
+
+    def test_recompile_rewrites_payloads_idempotently(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, SIMPLE_CONFIG, {"M/A.lean": "def x := 1\n"})
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        first = (root / ".axbt" / "compiled" / "M_A_isolated.lean").read_text(
+            encoding="utf-8"
+        )
+
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        assert (
+            root / ".axbt" / "compiled" / "M_A_isolated.lean"
+        ).read_text(encoding="utf-8") == first

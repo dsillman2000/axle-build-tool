@@ -67,7 +67,44 @@ def make_response(cls: type, **overrides: Any):
     return cls(**defaults)
 
 
-def make_extract_response(documents: dict[str, Document]) -> ExtractDeclsResponse:
+def with_declarations(manifest, names_by_node: dict[str, list[str]]):
+    """Stamp a freshly-built manifest with canned extraction data.
+
+    Selection resolution matches declarations against the *extracted*
+    metadata, which only exists after `axbt compile` has run against the
+    API; tests stamp representative declarations directly.
+    """
+    from axle_build_tool.manifest import ExtractedDecl
+
+    return manifest.model_copy(
+        update={
+            "nodes": [
+                node.model_copy(
+                    update={
+                        "declarations": [
+                            ExtractedDecl(
+                                name=name,
+                                kind="theorem",
+                                is_sorry=False,
+                                line_pos=index + 1,
+                                end_line_pos=index + 2,
+                                signature=f"theorem {name}",
+                            )
+                            for index, name in enumerate(
+                                names_by_node.get(node.name, [])
+                            )
+                        ]
+                    }
+                )
+                for node in manifest.nodes
+            ]
+        }
+    )
+
+
+def make_extract_response(
+    documents: dict[str, Document], info: dict[str, Any] | None = None
+) -> ExtractDeclsResponse:
     """Build an `ExtractDeclsResponse` carrying the given documents."""
     return ExtractDeclsResponse(
         content="",
@@ -75,7 +112,7 @@ def make_extract_response(documents: dict[str, Document]) -> ExtractDeclsRespons
         tool_messages=Messages([], [], []),
         documents=documents,
         timings={},
-        info=None,
+        info=info,
     )
 
 
@@ -153,6 +190,8 @@ class FakeAxleClient:
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
         self._extract_lean_errors = list(extract_lean_errors or [])
+        self._request_counter = 0
+        self.request_ids: list[str] = []
 
     async def get_latest_environment(self, **kwargs: Any) -> dict[str, Any] | None:
         self.calls.append(("get_latest_environment", kwargs))
@@ -186,7 +225,12 @@ class FakeAxleClient:
             if position > best_position:
                 best_position = position
                 documents = marker_documents
-        response = make_extract_response(documents)
+        self._request_counter += 1
+        request_id = f"fake-req-{self._request_counter:04d}"
+        self.request_ids.append(request_id)
+        response = make_extract_response(
+            documents, info={"request_id": request_id, "environment": "lean-4.35.0"}
+        )
         response.lean_messages.errors.extend(self._extract_lean_errors)
         return response
 
@@ -198,6 +242,33 @@ class FakeAxleClient:
 
     async def close(self) -> None:
         self.closed = True
+
+
+#: Marker-routed extraction documents matching the RootTwoIrrational demo:
+#: the theorem keyword lines (zero-based payload coordinates) of each file.
+DEMO_EXTRACTION_DOCS = {
+    "theorem prime_gt_one": {
+        "prime_gt_one": make_document(
+            "prime_gt_one",
+            line_pos=11,
+            end_line_pos=12,
+            signature="theorem prime_gt_one (p : ℕ) (hp : Nat.Prime p) : 1 < p",
+        ),
+        "prime_dvd_square": make_document("prime_dvd_square", line_pos=15, end_line_pos=16),
+    },
+    "theorem euclid_lemma": {
+        # Zero-based payload coordinates: the Euclid section starts at
+        # one-based payload line 19 (after the hoisted import header and
+        # the inlined Divisibility source), so the theorem at file line
+        # 12 sits at zero-based payload line 27.
+        "euclid_lemma": make_document("euclid_lemma", line_pos=27, end_line_pos=28),
+    },
+    "theorem sqrt_two_irrational": {
+        # Zero-based payload line 42 == file line 15 (three imports
+        # stripped, section starting at one-based payload line 32).
+        "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=42, end_line_pos=55),
+    },
+}
 
 
 @pytest.fixture

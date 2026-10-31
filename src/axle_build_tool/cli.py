@@ -15,6 +15,7 @@ import click
 
 from axle_build_tool.axle_service import AxleService, AxleServiceError
 from axle_build_tool.config import (
+    CACHE_DIRNAME,
     CONFIG_FILENAME,
     AxleConfig,
     ConfigError,
@@ -29,8 +30,14 @@ from axle_build_tool.manifest import (
     check_targets,
     load_manifest,
     save_manifest,
+    topological_order,
+)
+from axle_build_tool.payloads import (
+    compiled_payload_dir,
+    write_compiled_payloads,
 )
 from axle_build_tool.scanner import ScanError
+from axle_build_tool.selection import SelectionError, resolve_selection
 
 _PLACEHOLDER_SOURCE = """\
 /-!
@@ -123,6 +130,7 @@ def compile() -> None:
                 return await apply_extraction(service, manifest, project_root)
 
         manifest = asyncio.run(extract())
+        payload_paths = write_compiled_payloads(manifest, project_root)
         written = save_manifest(manifest, project_root)
     except (ConfigError, ScanError, ManifestError, AxleServiceError, ExtractionError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -141,4 +149,45 @@ def compile() -> None:
     for module_name in config.modules:
         if module_name not in represented:
             click.echo(f"  Note: module '{module_name}' has no .lean files")
+    click.echo(f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}")
     click.echo(f"Wrote {written}")
+
+
+@main.command("list")
+@click.option(
+    "--select",
+    "select",
+    default=None,
+    help="Filter by <module>[.<file stem>[.<declaration>]].",
+)
+def list_declarations(select: str | None) -> None:
+    """Print the parsed declaration tree in topological order (dependencies first)."""
+    project_root = Path.cwd()
+    try:
+        config = load_config(project_root)
+        manifest = load_manifest(project_root)
+        if manifest.version != MANIFEST_VERSION:
+            raise ManifestError(
+                f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
+                f"axbt version; run `axbt compile` first."
+            )
+        selection = None
+        if select is not None:
+            selection = resolve_selection(select, config, manifest)
+            nodes = selection.payload_nodes(manifest)
+        else:
+            nodes = manifest.nodes
+        ordered = topological_order(nodes)
+    except (ConfigError, ManifestError, SelectionError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    for node in ordered:
+        click.echo(f"{node.name} ({node.path})")
+        if not node.declarations:
+            click.echo("    (no declarations extracted)")
+        for declaration in node.declarations:
+            if selection is not None and selection.declaration is not None:
+                if declaration.name != selection.declaration:
+                    continue
+            sorry = ", sorry" if declaration.is_sorry else ""
+            click.echo(f"    {declaration.kind} {declaration.name} [line {declaration.line_pos}{sorry}]")

@@ -63,6 +63,9 @@ class ManifestNode(BaseModel):
     md5: str
     status: Literal["new", "clean", "changed"]
     declarations: list[ExtractedDecl] = Field(default_factory=list)
+    #: Axle request id that produced this node's extraction data. Carried
+    #: over unchanged with the data itself; `None` for pending nodes.
+    request_id: str | None = None
     last_checked: datetime | None = None
 
 
@@ -255,6 +258,7 @@ def build_manifest(
                 md5=facts.md5,
                 status=_status(name, facts.md5, previous_nodes),
                 declarations=list(prior.declarations) if carry else [],
+                request_id=prior.request_id if carry else None,
                 last_checked=now,
             )
         )
@@ -292,3 +296,29 @@ def check_targets(config: ProjectConfig, manifest: Manifest) -> None:
                     f"Target '{target}' of module {module_name!r} refers to a "
                     "file that was not found in the module's source directory."
                 )
+
+
+def topological_order(nodes: list[ManifestNode]) -> list[ManifestNode]:
+    """Order `nodes` dependencies-first (plan §6's flattening order).
+
+    Parents outside the selected set are treated as satisfied — a filtered
+    view stays well-ordered without pulling its dependencies in. The
+    manifest DAG is acyclic (validated at build time), so the loop always
+    makes progress.
+    """
+    selected = {node.name for node in nodes}
+    remaining = sorted(nodes, key=lambda node: node.name)
+    emitted: list[ManifestNode] = []
+    emitted_names: set[str] = set()
+    while remaining:
+        progress = False
+        for node in list(remaining):
+            if all(parent in emitted_names for parent in node.parents if parent in selected):
+                remaining.remove(node)
+                emitted.append(node)
+                emitted_names.add(node.name)
+                progress = True
+        if not progress:  # pragma: no cover — DAG is cycle-free by construction
+            emitted.extend(remaining)
+            break
+    return emitted

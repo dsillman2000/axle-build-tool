@@ -193,6 +193,24 @@ class TestStatusTracking:
         for node in second.nodes:
             assert [d.name for d in node.declarations] == ["sample_decl"]
 
+    def test_request_id_provenance_is_carried_with_data(self, simple_project: Path) -> None:
+        config = config_of(simple_project)
+        first = build_manifest(simple_project, config)
+        stamped = first.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(update={"request_id": f"req-{node.name}"})
+                    for node in first.nodes
+                ]
+            }
+        )
+
+        second = build_manifest(simple_project, config, previous=stamped)
+
+        for node in second.nodes:
+            # Carried data keeps the request that produced it.
+            assert node.request_id == f"req-{node.name}"
+
     def test_changed_nodes_drop_stale_extraction_data(self, simple_project: Path) -> None:
         config = config_of(simple_project)
         first = self._with_extracted_data(build_manifest(simple_project, config))
@@ -203,6 +221,7 @@ class TestStatusTracking:
         changed = second.by_name()["M.A"]
         assert changed.status == "changed"
         assert changed.declarations == []  # pending: re-extracted by the command
+        assert changed.request_id is None  # fresh provenance after re-extraction
         carried = second.by_name()["M.B"]
         assert [d.name for d in carried.declarations] == ["sample_decl"]
 
