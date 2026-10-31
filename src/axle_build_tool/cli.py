@@ -28,7 +28,9 @@ from axle_build_tool.config import (
 from axle_build_tool.extraction import ExtractionError, apply_extraction
 from axle_build_tool.manifest import (
     MANIFEST_VERSION,
+    ExtractedDecl,
     ManifestError,
+    ManifestNode,
     build_manifest,
     check_targets,
     load_manifest,
@@ -407,6 +409,20 @@ def check(no_compile: bool, incremental: bool, select: str | None) -> None:
     click.secho(f"Checked {total} selection(s): all OK", fg="green")
 
 
+#: Colors for declaration kinds in `axbt list` (unknown kinds stay plain).
+_KIND_COLORS = {
+    "theorem": "green",
+    "lemma": "green",
+    "example": "green",
+    "def": "cyan",
+    "abbrev": "cyan",
+    "structure": "magenta",
+    "class": "magenta",
+    "inductive": "magenta",
+    "instance": "magenta",
+}
+
+
 @main.command("list")
 @click.option(
     "--select",
@@ -435,13 +451,43 @@ def list_declarations(select: str | None) -> None:
     except (ConfigError, ManifestError, SelectionError) as exc:
         raise click.ClickException(str(exc)) from exc
 
+    # Gather the visible rows first so columns can align across the
+    # whole listing (the --select declaration filter is applied here).
+    sections: list[tuple[ManifestNode, list[ExtractedDecl]]] = []
     for node in ordered:
-        click.echo(f"{node.name} ({node.path})")
-        if not node.declarations:
-            click.echo("    (no declarations extracted)")
-        for declaration in node.declarations:
-            if selection is not None and selection.declaration is not None:
-                if declaration.name != selection.declaration:
-                    continue
-            sorry = ", sorry" if declaration.is_sorry else ""
-            click.echo(f"    {declaration.kind} {declaration.name} [line {declaration.line_pos}{sorry}]")
+        declarations = [
+            declaration
+            for declaration in node.declarations
+            if not (
+                selection is not None
+                and selection.declaration is not None
+                and declaration.name != selection.declaration
+            )
+        ]
+        sections.append((node, declarations))
+
+    kind_width = max((len(d.kind) for _, ds in sections for d in ds), default=0)
+    name_width = max((len(d.name) for _, ds in sections for d in ds), default=0)
+    line_width = max(
+        (len(str(d.line_pos)) for _, ds in sections for d in ds), default=1
+    )
+
+    for node, declarations in sections:
+        click.secho(node.name, bold=True, nl=False)
+        click.secho(f" ({node.path})", dim=True)
+        if not declarations:
+            click.secho("    (no declarations extracted)", dim=True)
+            continue
+        for declaration in declarations:
+            kind = click.style(
+                declaration.kind.ljust(kind_width),
+                fg=_KIND_COLORS.get(declaration.kind),
+            )
+            name = declaration.name.ljust(name_width)
+            position = click.style(
+                f"[line {declaration.line_pos:>{line_width}}", dim=True
+            )
+            if declaration.is_sorry:
+                position += ", " + click.style("sorry", fg="yellow")
+            position += click.style("]", dim=True)
+            click.echo(f"    {kind}  {name}  {position}")

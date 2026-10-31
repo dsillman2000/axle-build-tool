@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from axle_build_tool import main
 from axle_build_tool.manifest import MANIFEST_VERSION, manifest_path
+from conftest import normalized_lines
 
 runner = CliRunner()
 
@@ -32,7 +33,7 @@ def fresh_demo(demos_dir: Path, name: str) -> Path:
 @pytest.fixture
 def compiled_demo(demos_dir: Path, fake_axle, monkeypatch) -> Path:
     """The RootTwoIrrational demo, compiled against the fake Axle client."""
-    from conftest import DEMO_EXTRACTION_DOCS
+    from conftest import DEMO_EXTRACTION_DOCS, normalized_lines
 
     demo = fresh_demo(demos_dir, "RootTwoIrrational")
     fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
@@ -67,10 +68,10 @@ class TestList:
             "RootTwoIrrational.EuclidLemma",
             "RootTwoIrrational.IrrationalSqrtTwo",
         ]
-        assert "theorem prime_gt_one [line 11]" in result.output
-        assert "theorem prime_dvd_square [line 15]" in result.output
-        assert "theorem euclid_lemma [line 12]" in result.output
-        assert "theorem sqrt_two_irrational [line 15]" in result.output
+        assert "theorem prime_gt_one [line 11]" in normalized_lines(result.output)
+        assert "theorem prime_dvd_square [line 15]" in normalized_lines(result.output)
+        assert "theorem euclid_lemma [line 12]" in normalized_lines(result.output)
+        assert "theorem sqrt_two_irrational [line 15]" in normalized_lines(result.output)
         # File paths are shown for inspection.
         assert "(RootTwoIrrational/Divisibility.lean)" in result.output
 
@@ -91,7 +92,7 @@ class TestList:
         result = runner.invoke(main, ["list"])
 
         assert result.exit_code == 0, result.output
-        assert "theorem open_problem [line 1, sorry]" in result.output
+        assert "theorem open_problem [line 1, sorry]" in normalized_lines(result.output)
 
     def test_list_without_manifest_fails_with_compile_hint(
         self, make_project, tmp_path: Path, monkeypatch
@@ -133,7 +134,7 @@ class TestListSelection:
 
         assert result.exit_code == 0, result.output
         assert result.output.count("(") == 3  # three file headers
-        assert "theorem euclid_lemma" in result.output
+        assert "theorem euclid_lemma [line 12]" in normalized_lines(result.output)
 
     def test_file_selection_shows_one_file(self, compiled_demo: Path) -> None:
         result = runner.invoke(main, ["list", "--select", "RootTwoIrrational.EuclidLemma"])
@@ -147,7 +148,7 @@ class TestListSelection:
         assert [line.split(" ", 1)[0] for line in file_lines] == [
             "RootTwoIrrational.EuclidLemma"
         ]
-        assert "theorem euclid_lemma [line 12]" in result.output
+        assert "theorem euclid_lemma [line 12]" in normalized_lines(result.output)
         assert "prime_gt_one" not in result.output
 
     def test_declaration_selection_shows_one_declaration(
@@ -159,7 +160,7 @@ class TestListSelection:
 
         assert result.exit_code == 0, result.output
         assert "RootTwoIrrational.Divisibility" in result.output
-        assert "theorem prime_dvd_square [line 15]" in result.output
+        assert "theorem prime_dvd_square [line 15]" in normalized_lines(result.output)
         assert "prime_gt_one" not in result.output
 
     def test_unknown_selection_fails_with_guidance(self, compiled_demo: Path) -> None:
@@ -184,5 +185,5 @@ class TestListSelection:
         result = runner.invoke(main, ["list", "--select", "GaussIntSum.GaussSum.gauss_sum_identity"])
 
         assert result.exit_code == 0, result.output
-        assert "theorem gauss_sum_identity [line 16]" in result.output
+        assert "theorem gauss_sum_identity [line 16]" in normalized_lines(result.output)
         assert "GaussIntSum.GaussSum (GaussIntSum/GaussSum.lean)" in result.output

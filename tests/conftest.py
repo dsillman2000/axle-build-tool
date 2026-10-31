@@ -102,6 +102,15 @@ def with_declarations(manifest, names_by_node: dict[str, list[str]]):
     )
 
 
+def normalized_lines(output: str) -> list[str]:
+    """`output` as whitespace-collapsed, non-empty lines.
+
+    Styled/aligned report lines normalize into comparable text, e.g.
+    `theorem  prime_gt_one   [line 11]` -> `theorem prime_gt_one [line 11]`.
+    """
+    return [" ".join(line.split()) for line in output.splitlines() if line.strip()]
+
+
 def status_line(output: str, label: str) -> str:
     """The check report line for `label`, whitespace-normalized.
 
