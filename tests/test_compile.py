@@ -18,6 +18,7 @@ from click.testing import CliRunner
 from axle_build_tool import main
 from axle_build_tool.manifest import (
     MANIFEST_FILENAME,
+    MANIFEST_VERSION,
     load_manifest,
     manifest_path,
 )
@@ -86,7 +87,6 @@ class TestCompileDemos:
             "RootTwoIrrational.EuclidLemma",
             "RootTwoIrrational.IrrationalSqrtTwo",
         }
-        assert all(node["extraction"] == "ok" for node in raw["nodes"])
         # And it still loads through our own loader.
         assert len(load_manifest(demo).nodes) == 3
 
@@ -333,7 +333,6 @@ class TestExtraction:
         assert result.exit_code == 0, result.output
         manifest = load_manifest(demo)
         divisibility = manifest.by_name()["RootTwoIrrational.Divisibility"]
-        assert divisibility.extraction == "ok"
         assert [d.name for d in divisibility.declarations] == [
             "prime_gt_one",
             "prime_dvd_square",
@@ -385,7 +384,6 @@ class TestExtraction:
         assert "0 extracted now, 2 carried over" in result.output
         second = load_manifest(root)
         assert second.by_name()["M.A"].declarations == first.by_name()["M.A"].declarations
-        assert second.by_name()["M.A"].extraction == "ok"
 
     def test_edit_reextracts_only_the_changed_file(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -406,7 +404,6 @@ class TestExtraction:
         assert extract_calls(fake_axle) == calls_after_first + 1  # only A
         second = load_manifest(root)
         assert second.by_name()["M.A"].status == "changed"
-        assert second.by_name()["M.A"].extraction == "ok"
         # B's data is carried over untouched.
         assert second.by_name()["M.B"].declarations == first.by_name()["M.B"].declarations
 
@@ -464,26 +461,24 @@ class TestExtraction:
         assert "M/A.lean" in result.output
         assert "M/B.lean" in result.output
 
-    def test_v1_manifest_is_upgraded_and_reextracted(
+    def test_stale_version_manifest_is_ignored_and_reextracted(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
         root = make_project(tmp_path, SIMPLE_CONFIG, {"M/A.lean": "def x := 1\n"})
         monkeypatch.chdir(root)
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
-        # Downgrade the on-disk manifest to the pre-extraction v1 shape.
+        # A manifest written by an incompatible schema version carries no
+        # usable contract: it must be ignored (fully re-extracted), not
+        # partially trusted.
         raw = json.loads(manifest_path(root).read_text(encoding="utf-8"))
-        raw["version"] = 1
-        for node in raw["nodes"]:
-            node.pop("extraction", None)
-            node.pop("declarations", None)
+        raw["version"] = MANIFEST_VERSION + 99
         manifest_path(root).write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
         calls_before = extract_calls(fake_axle)
         result = runner.invoke(main, ["compile"])
 
         assert result.exit_code == 0, result.output
-        assert extract_calls(fake_axle) == calls_before + 1  # v1 nodes have no data
-        upgraded = load_manifest(root)
-        assert upgraded.version == 2
-        assert upgraded.by_name()["M.A"].extraction == "ok"
+        assert extract_calls(fake_axle) == calls_before + 1
+        rewritten = load_manifest(root)
+        assert rewritten.version == MANIFEST_VERSION

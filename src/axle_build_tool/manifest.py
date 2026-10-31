@@ -45,12 +45,11 @@ class ExtractedDecl(BaseModel):
 class ManifestNode(BaseModel):
     """One `.lean` file in the project DAG.
 
-    `status` is the pure MD5-diff verdict on the source (`new`, `clean`,
-    `changed`). `extraction` records the outcome of Axle's
-    `extract_decls` for this file: `"ok"`, `"failed"`, or `None` when no
-    extraction data exists yet (fresh nodes, or nodes carried over from a
-    pre-v2 manifest). `declarations` holds the extracted metadata and is
-    only populated when `extraction == "ok"`.
+    `status` is the MD5-diff verdict on the source against the previous
+    manifest (`new`, `clean`, `changed`). `declarations` holds the
+    Axle-extracted metadata; compile is all-or-nothing, so a *persisted*
+    manifest always carries valid extraction data for every node — a
+    clean node's data is carried over, anything else is re-extracted.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -63,7 +62,6 @@ class ManifestNode(BaseModel):
     children: list[str] = Field(default_factory=list)
     md5: str
     status: Literal["new", "clean", "changed"]
-    extraction: Literal["ok", "failed"] | None = None
     declarations: list[ExtractedDecl] = Field(default_factory=list)
     last_checked: datetime | None = None
 
@@ -241,14 +239,11 @@ def build_manifest(
     nodes = []
     for name, facts in sorted(scanned.items()):
         # Unchanged files carry their previous extraction data forward, so
-        # they are not re-extracted (plan §3's incremental promise). Nodes
-        # whose prior extraction is missing or failed are re-extracted.
+        # they are not re-extracted (plan §3's incremental promise). A
+        # persisted manifest only ever contains valid extraction data:
+        # compile saves nothing unless every node extracted cleanly.
         prior = previous_nodes.get(name)
-        carry = (
-            prior is not None
-            and prior.md5 == facts.md5
-            and prior.extraction == "ok"
-        )
+        carry = prior is not None and prior.md5 == facts.md5
         nodes.append(
             ManifestNode(
                 name=facts.name,
@@ -259,7 +254,6 @@ def build_manifest(
                 children=sorted(children[name]),
                 md5=facts.md5,
                 status=_status(name, facts.md5, previous_nodes),
-                extraction=prior.extraction if carry else None,
                 declarations=list(prior.declarations) if carry else [],
                 last_checked=now,
             )

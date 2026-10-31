@@ -216,7 +216,7 @@ async def _extract_node(
         if (declaration := _decl_from_document(document, payload)) is not None
     ]
     return (
-        node.model_copy(update={"extraction": "ok", "declarations": declarations}),
+        node.model_copy(update={"declarations": declarations}),
         None,
     )
 
@@ -226,15 +226,16 @@ async def apply_extraction(
     manifest: Manifest,
     project_root: Path,
 ) -> Manifest:
-    """Extract declarations for every node lacking valid extraction data.
+    """Extract declarations for every node that isn't carried over.
 
-    Nodes whose `extraction` is already `"ok"` are skipped (their data was
-    carried over by `build_manifest`). Calls are fanned out concurrently,
+    Nodes with `status == "clean"` already hold valid extraction data
+    (carried over by `build_manifest` — compile persists nothing unless
+    every node extracted cleanly). Calls are fanned out concurrently,
     bounded by the client's `max_concurrency`. Raises `ExtractionError`
     listing all failures if any node failed; the returned manifest is only
     meant to be persisted when extraction fully succeeds.
     """
-    pending = [node for node in manifest.nodes if node.extraction != "ok"]
+    pending = [node for node in manifest.nodes if node.status != "clean"]
     if not pending:
         return manifest
 

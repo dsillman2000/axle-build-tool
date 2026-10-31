@@ -23,6 +23,7 @@ from axle_build_tool.config import (
 )
 from axle_build_tool.extraction import ExtractionError, apply_extraction
 from axle_build_tool.manifest import (
+    MANIFEST_VERSION,
     ManifestError,
     build_manifest,
     check_targets,
@@ -104,14 +105,17 @@ def compile() -> None:
     try:
         config = load_config(project_root)
         try:
-            # A missing or damaged manifest simply means we start fresh.
+            # A missing, damaged, or stale-versioned manifest simply means
+            # we start fresh (everything gets re-extracted).
             previous = load_manifest(project_root)
+            if previous.version != MANIFEST_VERSION:
+                previous = None
         except ManifestError:
             previous = None
         manifest = build_manifest(project_root, config, previous)
         check_targets(config, manifest)
 
-        carried = sum(1 for node in manifest.nodes if node.extraction == "ok")
+        carried = sum(1 for node in manifest.nodes if node.status == "clean")
         service = make_axle_service(config.axle)
 
         async def extract() -> Manifest:
