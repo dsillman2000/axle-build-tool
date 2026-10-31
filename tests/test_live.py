@@ -251,6 +251,21 @@ class TestLiveDemoCheck:
         assert "Failed to extract declarations" in result.output
         assert "Divisibility.lean" in result.output
 
+    def test_full_refresh_reextracts_and_rechecks_unchanged_files(
+        self, in_demo
+    ) -> None:
+        """--full-refresh on a clean tree: everything re-extracted and
+        re-checked, even though nothing changed."""
+        in_demo("RootTwoIrrational")
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--full-refresh"])
+
+        assert result.exit_code == 0, result.output
+        assert "3 new, 0 changed, 0 clean" in result.output
+        assert result.output.count(": okay") == 3
+        assert "Checked 3 selection(s): all okay" in result.output
+
 
 class TestLiveEnvironmentValidation:
     def test_unknown_pinned_environment_fails_with_hint(self, tmp_path, monkeypatch) -> None:

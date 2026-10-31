@@ -110,29 +110,35 @@ def make_axle_service(config: AxleConfig) -> AxleService:
     return AxleService(config)
 
 
-def _run_compile(project_root: Path) -> tuple[ProjectConfig, Manifest]:
+def _run_compile(
+    project_root: Path, full_refresh: bool = False
+) -> tuple[ProjectConfig, Manifest]:
     """Compile the project in place; shared by `compile` and `check`.
 
-    Scans modules, updates the manifest (MD5 change detection with
-    carry-over of clean nodes), extracts pending declarations via Axle,
-    persists payloads, and writes `.axbt/manifest.json`. Prints the
-    usual compile summary. Returns the loaded config and the fresh
-    manifest.
+    Scans modules, updates the manifest, extracts pending declarations
+    via Axle, persists payloads, and writes `.axbt/manifest.json`.
+    Prints the usual compile summary. Returns the loaded config and the
+    fresh manifest.
 
-    Fully incremental: a project whose files are all clean makes no API
-    calls at all (including environment validation — there is nothing
-    to submit it would guard).
+    Two run modes: **incremental** (the default) re-extracts only new
+    and changed files, carrying clean nodes' extraction data over by
+    MD5; **full refresh** ignores the previous manifest entirely and
+    re-extracts every file. A fully incremental project whose files are
+    all clean makes no API calls at all (including environment
+    validation — there is nothing to submit it would guard).
     """
     try:
         config = load_config(project_root)
-        try:
-            # A missing, damaged, or stale-versioned manifest simply means
-            # we start fresh (everything gets re-extracted).
-            previous = load_manifest(project_root)
-            if previous.version != MANIFEST_VERSION:
+        previous = None
+        if not full_refresh:
+            try:
+                # A missing, damaged, or stale-versioned manifest simply
+                # means we start fresh (everything gets re-extracted).
+                previous = load_manifest(project_root)
+                if previous.version != MANIFEST_VERSION:
+                    previous = None
+            except ManifestError:
                 previous = None
-        except ManifestError:
-            previous = None
         manifest = build_manifest(project_root, config, previous)
         check_targets(config, manifest)
 
@@ -171,9 +177,20 @@ def _run_compile(project_root: Path) -> tuple[ProjectConfig, Manifest]:
 
 
 @main.command()
-def compile() -> None:
+@click.option(
+    "--incremental/--full-refresh",
+    "incremental",
+    default=True,
+    help=(
+        "Run mode. Incremental (default) re-extracts only new and changed "
+        "files, carrying clean files' extraction data over by content hash. "
+        "--full-refresh ignores the previous manifest and re-extracts "
+        "everything, even unchanged files."
+    ),
+)
+def compile(incremental: bool) -> None:
     """Scan modules, extract declarations via Axle, and write .axbt/manifest.json."""
-    _run_compile(Path.cwd())
+    _run_compile(Path.cwd(), full_refresh=not incremental)
 
 
 #: Leading position of a Lean diagnostic message, e.g. `-:28:8-28:24: error: …`
@@ -222,6 +239,18 @@ def _rewrite_message_position(
     help="Use the existing manifest at face value instead of recompiling first.",
 )
 @click.option(
+    "--incremental/--full-refresh",
+    "incremental",
+    default=True,
+    help=(
+        "Run mode of the precursor compile. Incremental (default) "
+        "re-extracts only new and changed files. --full-refresh ignores "
+        "the previous manifest and re-extracts everything, even unchanged "
+        "files, so checks run on freshly extracted data. The check step "
+        "itself always re-submits its selection."
+    ),
+)
+@click.option(
     "--select",
     "select",
     default=None,
@@ -232,15 +261,16 @@ def _rewrite_message_position(
         "file or module to check definitions."
     ),
 )
-def check(no_compile: bool, select: str | None) -> None:
+def check(no_compile: bool, incremental: bool, select: str | None) -> None:
     """Typecheck targets or a selection via the Axle API.
 
     By default, check runs `axbt compile` first — scanning modules,
     detecting changes, and re-extracting whatever moved — so the
     manifest (and the selection metadata built from it) is never stale.
     The precursor is fully incremental: when every file is already
-    clean it makes no API calls. Pass --no-compile to skip it and take
-    the existing manifest at face value.
+    clean it makes no API calls. Pass --full-refresh to make the
+    precursor re-extract everything, or --no-compile to skip it and
+    take the existing manifest at face value.
 
     Without --select, checks every configured `targets` entry of every
     module (one Axle `check` call per target). Submissions are standalone
@@ -254,6 +284,11 @@ def check(no_compile: bool, select: str | None) -> None:
     definitions must be checked via file- or module-level selections.
     """
     project_root = Path.cwd()
+    if no_compile and not incremental:
+        raise click.UsageError(
+            "--full-refresh conflicts with --no-compile: skipping "
+            "compilation leaves nothing to refresh."
+        )
     if no_compile:
         try:
             config = load_config(project_root)
@@ -266,7 +301,7 @@ def check(no_compile: bool, select: str | None) -> None:
         except (ConfigError, ManifestError) as exc:
             raise click.ClickException(str(exc)) from exc
     else:
-        config, manifest = _run_compile(project_root)
+        config, manifest = _run_compile(project_root, full_refresh=not incremental)
 
     try:
         if select is not None:

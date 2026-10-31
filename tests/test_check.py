@@ -378,6 +378,75 @@ class TestCompilePrecursor:
         assert fake_axle.calls == []
 
 
+class TestRunModes:
+    """--full-refresh ignores the manifest's carry-over entirely."""
+
+    def test_full_refresh_compile_reextracts_everything(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["compile", "--full-refresh"])
+
+        assert result.exit_code == 0, result.output
+        # Nothing changed, yet every file was re-extracted.
+        assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 2
+        assert "2 new, 0 changed, 0 clean" in result.output
+        assert "Extraction: 2 extracted now, 0 carried over" in result.output
+
+    def test_full_refresh_check_reextracts_and_rechecks_unchanged_files(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The user-facing promise: even on a clean tree, --full-refresh
+        re-compiles and re-checks everything."""
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--full-refresh"])
+
+        assert result.exit_code == 0, result.output
+        assert len([m for m, _ in fake_axle.calls if m == "extract_decls"]) == 2
+        assert len(check_calls(fake_axle)) == 2
+        assert "M.A.t1: okay" in result.output
+        assert "Checked 2 selection(s): all okay" in result.output
+
+    def test_explicit_incremental_matches_the_default(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--incremental"])
+
+        assert result.exit_code == 0, result.output
+        # Clean tree: the incremental precursor makes no API calls.
+        assert [m for m, _ in fake_axle.calls if m == "extract_decls"] == []
+        assert len(check_calls(fake_axle)) == 2
+
+    def test_full_refresh_conflicts_with_no_compile(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--full-refresh", "--no-compile"])
+
+        assert result.exit_code != 0
+        assert "conflicts with --no-compile" in result.output
+
+
 class TestEnvironmentValidation:
     def test_unknown_pinned_environment_fails_fast_with_hint(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
