@@ -1,0 +1,22 @@
+.gitignore
+  h_4cc74772b10fd4 1-33
+.python-version
+  h_4cc74772b10fd4 1
+GEMINI_PLAN.md
+  h_4cc74772b10fd4 1-114
+pyproject.toml
+  h_4cc74772b10fd4 1-17
+src/axle_build_tool/__init__.py
+  h_4cc74772b10fd4 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c49c441acd09c605b21bcff90d500afd89a56de8",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
