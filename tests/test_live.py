@@ -599,3 +599,22 @@ class TestLiveEnvironmentValidation:
         assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap SKIP"
         assert "excused (--permitted-sorries)" in result.output
         assert "Verified 1 selection(s): all OK, 1 skipped" in result.output
+
+
+class TestLiveShare:
+    def test_check_share_mints_a_real_link(self, make_live_project) -> None:
+        """--share mints a platform share link for the submission."""
+        base_url = os.environ.get("AXLE_API_URL", "https://axle.axiommath.ai").rstrip(
+            "/"
+        )
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["User.derived_holds"],
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--select", "M.User", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert f"share: {base_url}/check#r=" in result.output
+        assert "Share link(s) minted: 1" in result.output

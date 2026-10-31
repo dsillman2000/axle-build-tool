@@ -583,6 +583,79 @@ def _printed_lines(
     return expanded or [(label, None, None)]
 
 
+def _mint_share_urls(
+    service: Any, ids: list[str]
+) -> dict[str, str | AxleServiceError]:
+    """Mint share links for request ids, deduplicated and concurrently.
+
+    Maps each id to its share URL, or to the `AxleServiceError` when
+    that mint failed. Sharing is a convenience: callers warn on errors
+    and never fail the run over them.
+    """
+    if not ids:
+        return {}
+
+    async def mint_all() -> list[tuple[str, str | AxleServiceError]]:
+        async with service:
+
+            async def one(request_id: str) -> tuple[str, str | AxleServiceError]:
+                try:
+                    return request_id, await service.share_link(request_id)
+                except AxleServiceError as exc:
+                    return request_id, exc
+
+            return list(await asyncio.gather(*(one(rid) for rid in ids)))
+
+    try:
+        return dict(asyncio.run(mint_all()))
+    except AxleServiceError as exc:
+        return {rid: exc for rid in ids}
+
+
+def _print_share_line(
+    links: dict[str, str | AxleServiceError],
+    request_id: str | None,
+    *,
+    earlier_run: bool = False,
+) -> None:
+    """The indented share line for one selection's request id, if any."""
+    if not request_id or request_id not in links:
+        return
+    entry = links[request_id]
+    if isinstance(entry, AxleServiceError):
+        click.secho(f"    share: unavailable ({entry})", dim=True)
+        return
+    suffix = click.style(" (from the earlier run)", dim=True) if earlier_run else ""
+    click.echo(f"    {click.style('share:', dim=True)} {entry}{suffix}")
+
+
+def _print_share_summary(links: dict[str, str | AxleServiceError]) -> None:
+    """The run-summary mention of how many links were minted."""
+    minted = sum(1 for entry in links.values() if not isinstance(entry, AxleServiceError))
+    if minted:
+        click.secho(f"Share link(s) minted: {minted}", dim=True)
+
+
+def _latest_verified_request_id(manifest: Manifest, names: list[str]) -> str | None:
+    """The most recent verification's request id among `names`.
+
+    Cached selections mint their share link from the request id
+    recorded when the verification originally succeeded, so `--share`
+    works without re-submitting; old manifests have no recorded ids.
+    """
+    best: tuple[datetime, str] | None = None
+    for node in manifest.nodes:
+        for decl in node.declarations:
+            if (
+                decl.name in names
+                and decl.verified_request_id is not None
+                and decl.verified_at is not None
+            ):
+                if best is None or decl.verified_at > best[0]:
+                    best = (decl.verified_at, decl.verified_request_id)
+    return best[1] if best else None
+
+
 def _rewrite_message_position(
     message: str, payload: Payload, paths: dict[str, str]
 ) -> str:
@@ -656,7 +729,23 @@ def _rewrite_message_position(
         "file or module to check definitions."
     ),
 )
-def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: str | None) -> None:
+@click.option(
+    "--share",
+    "share",
+    is_flag=True,
+    default=False,
+    help=(
+        "Print a share link for every submission — the API's web view "
+        "of that exact check run."
+    ),
+)
+def check(
+    no_compile: bool,
+    incremental: bool,
+    sorry: tuple[str, ...],
+    select: str | None,
+    share: bool,
+) -> None:
     """Typecheck targets or a selection via the Axle API.
 
     By default, check runs `axbt compile` first — scanning modules,
@@ -759,6 +848,17 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
 
+    #: --share: one link per submission, keyed by the response's request
+    #: id. Mints once, before the report prints.
+    share_links: dict[str, str | AxleServiceError] = {}
+    if share:
+        ids: list[str] = []
+        for response in responses:
+            rid = (response.info or {}).get("request_id")
+            if rid and rid not in ids:
+                ids.append(rid)
+        share_links = _mint_share_urls(service, ids)
+
     failed = 0
     skipped = 0
     responses_iter = iter(responses)
@@ -813,6 +913,8 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             click.echo(
                 f"    failed declarations: {', '.join(response.failed_declarations)}"
             )
+        rid = (response.info or {}).get("request_id")
+        _print_share_line(share_links, rid)
     total = len(checks)
     skipped_note = f", {skipped} skipped" if skipped else ""
     if failed:
@@ -821,8 +923,10 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             f"{skipped_note}",
             fg="red",
         )
+        _print_share_summary(share_links)
         raise click.exceptions.Exit(1)
     click.secho(f"Checked {total} selection(s): all OK{skipped_note}", fg="green")
+    _print_share_summary(share_links)
 
 
 #: Colors for declaration kinds in `axbt list` (unknown kinds stay plain).
@@ -1143,6 +1247,16 @@ def _verify_scope(
         "theorem/lemma — definitions have no proof to verify."
     ),
 )
+@click.option(
+    "--share",
+    "share",
+    is_flag=True,
+    default=False,
+    help=(
+        "Print a share link for every verification submission, and for "
+        "each selection's most recent cached verification."
+    ),
+)
 def verify(
     no_compile: bool,
     incremental: bool,
@@ -1150,6 +1264,7 @@ def verify(
     permitted_sorries: tuple[str, ...],
     force: bool,
     select: str | None,
+    share: bool,
 ) -> None:
     """Verify proofs at kernel level via the Axle API.
 
@@ -1330,8 +1445,28 @@ def verify(
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
 
+    #: --share: links for every submission, plus each cached selection's
+    #: most recent recorded verification. Mints once, keyed by request
+    #: id so an id shared across selections mints once.
+    share_links: dict[str, str | AxleServiceError] = {}
+    if share:
+        ids: list[str] = []
+        for response in responses:
+            rid = (response.info or {}).get("request_id")
+            if rid and rid not in ids:
+                ids.append(rid)
+        for label, selection, payload, refined, granted, scope in items:
+            if granted is not None or scope is None or scope.to_verify:
+                continue
+            if not scope.cached:
+                continue
+            rid = _latest_verified_request_id(manifest, scope.cached)
+            if rid and rid not in ids:
+                ids.append(rid)
+        share_links = _mint_share_urls(service, ids)
+
     # Record successful verifications per declaration.
-    stamps: dict[str, tuple[str, datetime]] = {}
+    stamps: dict[str, tuple[str, datetime, str | None]] = {}
     responses_iter = iter(responses)
     failed = 0
     skipped = 0
@@ -1363,6 +1498,9 @@ def verify(
             cached_count += 1
             note = "cached" if scope.cached else "nothing to submit"
             click.echo(f"{label:<{width}}  {click.style('OK', fg='green')} ({note})")
+            if scope.cached:
+                rid = _latest_verified_request_id(manifest, scope.cached)
+                _print_share_line(share_links, rid, earlier_run=True)
             continue
         response = next(responses_iter)
         # A provable negation means the statement is vacuous — the
@@ -1370,8 +1508,9 @@ def verify(
         vacuous = response.negation is not None and response.negation.okay
         if response.okay and not vacuous:
             now = datetime.now(timezone.utc)
+            rid = (response.info or {}).get("request_id")
             for name in scope.to_verify:
-                stamps[name] = (sig_of(node_of_decl[name]), now)
+                stamps[name] = (sig_of(node_of_decl[name]), now, rid)
             cached_note = f", {len(scope.cached)} cached" if scope.cached else ""
             click.echo(f"{label:<{width}}  {click.style('OK', fg='green')}{cached_note}")
         else:
@@ -1400,6 +1539,8 @@ def verify(
             click.echo(
                 f"    failed declarations: {', '.join(response.failed_declarations)}"
             )
+        rid = (response.info or {}).get("request_id")
+        _print_share_line(share_links, rid)
 
     if stamps:
         stamped = set(stamps)
@@ -1409,9 +1550,15 @@ def verify(
             if not node_stamps:
                 nodes.append(node)
                 continue
-            sig, now = next(stamps[n] for n in node_stamps)
+            sig, now, rid = next(stamps[n] for n in node_stamps)
             declarations = [
-                d.model_copy(update={"verified_sig": sig, "verified_at": now})
+                d.model_copy(
+                    update={
+                        "verified_sig": sig,
+                        "verified_at": now,
+                        "verified_request_id": rid,
+                    }
+                )
                 if d.name in node_stamps
                 else d
                 for d in node.declarations
@@ -1433,10 +1580,12 @@ def verify(
             f"Verified {total} selection(s): {failed} failed, {ok} OK{skipped_note}",
             fg="red",
         )
+        _print_share_summary(share_links)
         raise click.exceptions.Exit(1)
     click.secho(
         f"Verified {total} selection(s): all OK{skipped_note}{cached_note}", fg="green"
     )
+    _print_share_summary(share_links)
 
 
 @main.command("list")

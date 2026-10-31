@@ -8,6 +8,8 @@ depends on the repository's `demos/`.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import json as jsonlib
 from pathlib import Path
 from typing import Any
 
@@ -172,6 +174,51 @@ def make_document(
     )
 
 
+class _FakeShareResponse:
+    def __init__(self, status: int, body: str) -> None:
+        self.status = status
+        self._body = body
+
+    async def text(self) -> str:
+        return self._body
+
+
+class _FakeSharePost:
+    """Async context manager standing in for the POST response."""
+
+    def __init__(self, status: int, body: str) -> None:
+        self._response = _FakeShareResponse(status, body)
+
+    async def __aenter__(self) -> _FakeShareResponse:
+        return self._response
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
+class _FakeShareSession:
+    """Session stand-in that records share mints.
+
+    `FakeAxleClient.share_status` decides the outcome: an int status
+    (201 mints, anything else fails), or an exception to raise from the
+    POST itself (a network-level failure).
+    """
+
+    def __init__(self, client: FakeAxleClient) -> None:
+        self._client = client
+        self.closed = False
+
+    def post(self, url: str, json: dict[str, Any] | None = None) -> _FakeSharePost:
+        request_id = (json or {}).get("request_id", "")
+        self._client.share_requests.append((url, request_id))
+        status = self._client.share_status
+        if isinstance(status, Exception):
+            raise status
+        return _FakeSharePost(
+            status, jsonlib.dumps({"request_id": request_id, "saved_at": "now"})
+        )
+
+
 class FakeAxleClient:
     """Offline stand-in for `AxleClient`.
 
@@ -212,6 +259,30 @@ class FakeAxleClient:
         )
         self._request_counter = 0
         self.request_ids: list[str] = []
+        self.url = "https://axle.test"
+        #: Share-mint outcome: an HTTP status (201 mints) or an
+        #: exception raised from the POST itself.
+        self.share_status: int | Exception = 201
+        self.share_requests: list[tuple[str, str]] = []
+        self._session: _FakeShareSession | None = None
+
+    def _get_session(self) -> _FakeShareSession:
+        self._session = _FakeShareSession(self)
+        return self._session
+
+    def _with_request_id(self, response: Any) -> Any:
+        """A copy of the canned response carrying this call's request id.
+
+        The real API stamps every response with one; `--share` keys
+        off it the same way it keys off extraction provenance.
+        """
+        self._request_counter += 1
+        request_id = f"fake-req-{self._request_counter:04d}"
+        self.request_ids.append(request_id)
+        return dataclasses.replace(
+            response,
+            info={"request_id": request_id, "environment": "lean-4.35.0"},
+        )
 
     async def get_latest_environment(self, **kwargs: Any) -> dict[str, Any] | None:
         self.calls.append(("get_latest_environment", kwargs))
@@ -223,13 +294,13 @@ class FakeAxleClient:
         self.calls.append(("check", kwargs))
         if self._error:
             raise self._error
-        return self.check_result
+        return self._with_request_id(self.check_result)
 
     async def verify_proof(self, **kwargs: Any) -> VerifyProofResponse:
         self.calls.append(("verify_proof", kwargs))
         if self._error:
             raise self._error
-        return self.verify_result
+        return self._with_request_id(self.verify_result)
 
     async def theorem2sorry(self, **kwargs: Any) -> Theorem2SorryResponse:
         self.calls.append(("theorem2sorry", kwargs))

@@ -74,6 +74,19 @@ Run modes (shared by `compile`, `check`, `verify`):
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
 * `--no-compile` (check/verify) — take the existing manifest at face value.
 
+### Sharing a run
+
+`axbt check --share` / `axbt verify --share` print a share link for every submission — a URL to the Axle web app showing that exact run (source, messages, verdict):
+
+```text
+M.User.derived_holds  OK
+    share: https://axle.axiommath.ai/check#r=e00f26e7-b2b6-47b2-9197-0dd5518434ec
+```
+
+* Sharing is best-effort: a failed mint prints a dim warning and never changes the exit code.
+* `verify --share` also links each cached selection to its most recent recorded verification (marked "(from the earlier run)") — no re-submission.
+* Nothing is written to the manifest; links live in the transcript where you copy them from.
+
 ### Selecting what to check
 
 ```bash

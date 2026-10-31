@@ -770,3 +770,99 @@ class TestSorry:
         assert result.exit_code == 0, result.output
         assert "upstream stubbed: 2 declarations" in result.output
         assert "declaration uses" not in result.output
+
+
+class TestShare:
+    """`--share` mints links for submissions and cached verifications."""
+
+    def test_share_prints_links_and_stamps_request_ids(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert len(verify_calls(fake_axle)) == 2
+        assert result.output.count("share: https://axle.test/check#r=fake-req-") == 2
+        assert "Share link(s) minted: 2" in result.output
+        # Successful verifications record their run's request id.
+        manifest = load_manifest(root)
+        stamped = {
+            d.name: d.verified_request_id
+            for n in manifest.nodes
+            for d in n.declarations
+        }
+        assert set(stamped.values()) <= set(fake_axle.request_ids)
+        assert all(stamped.values())
+
+    def test_share_on_cached_run_mints_from_the_recorded_run(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        assert runner.invoke(main, ["verify", "--share"]).exit_code == 0
+        manifest = load_manifest(root)
+        recorded = {
+            d.verified_request_id for n in manifest.nodes for d in n.declarations
+        }
+        minted_before = len(fake_axle.share_requests)
+        verify_calls_before = len(verify_calls(fake_axle))
+
+        # Second run: everything cached — the links reference the
+        # original verification, no re-submission.
+        result = runner.invoke(main, ["verify", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert len(verify_calls(fake_axle)) == verify_calls_before
+        assert "(from the earlier run)" in result.output
+        minted_ids = [
+            rid for _, rid in fake_axle.share_requests[minted_before:]
+        ]
+        assert set(minted_ids) == recorded
+
+    def test_share_failure_warns_but_leaves_the_exit_code(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.share_status = 404
+
+        result = runner.invoke(main, ["verify", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert "share: unavailable (" in result.output
+        assert "Share link(s) minted" not in result.output
+
+    def test_share_sorried_selections_get_no_link(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        sorried_docs = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = sorried_docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify", "--share"])
+
+        # t1's guard failure fails the run; only the sibling t2
+        # submitted, so exactly one link exists.
+        assert result.exit_code == 1
+        assert result.output.count("share: https://axle.test/check#r=") == 1

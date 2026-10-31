@@ -37,7 +37,9 @@ class ExtractedDecl(BaseModel):
     signature identifies the exact content/config the verification ran
     against (see `verification_signature`); a declaration is only
     stamped when it was actually swept — permitted or stubbed
-    declarations are never stamped.
+    declarations are never stamped. `verified_request_id` is the API
+    request id of that verification run, so `--share` can mint a link
+    to a cached verification without re-submitting it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -50,6 +52,7 @@ class ExtractedDecl(BaseModel):
     signature: str = ""
     verified_sig: str | None = None
     verified_at: datetime | None = None
+    verified_request_id: str | None = None
 
 
 class ManifestNode(BaseModel):

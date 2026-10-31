@@ -23,6 +23,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+import aiohttp
 from axle.client import AxleClient
 from axle.exceptions import (
     AxleApiError,
@@ -236,6 +237,34 @@ class AxleService:
             raise AxleServiceError(
                 describe_axle_error(exc, self._config, context)
             ) from exc
+
+    async def share_link(self, request_id: str) -> str:
+        """Mint a share link for a previously served request.
+
+        The platform's share route lives outside the versioned `api/v1`
+        surface the SDK wraps, and answers 201 — which the SDK's own
+        `_call` rejects as an error — so the POST goes through the
+        client's session directly, reusing its auth headers and
+        connection pool. The API only accepts ids of requests it has
+        actually served (it keeps its own log); the caller is expected
+        to treat failures as a warning, not a run failure.
+        """
+        url = f"{self.client.url}/v1/shared-links"
+        session = self.client._session
+        if session is None or session.closed:
+            session = self.client._get_session()
+            self.client._session = session
+        try:
+            async with session.post(url, json={"request_id": request_id}) as resp:
+                body = await resp.text()
+                if resp.status not in (200, 201):
+                    raise AxleServiceError(
+                        f"the API could not share this run "
+                        f"(HTTP {resp.status}): {body.strip()[:200]}"
+                    )
+        except aiohttp.ClientError as exc:
+            raise AxleServiceError(f"the share request failed: {exc}") from exc
+        return f"{self.client.url}/check#r={request_id}"
 
     async def theorem2sorry(
         self, content: str, *, context: str = "", **kwargs: Any
