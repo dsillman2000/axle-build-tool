@@ -753,7 +753,7 @@ class TestSorry:
         )
 
         assert result.exit_code == 0, result.output
-        assert "upstream stubbed: 2 declarations (sorry warnings hidden)" in result.output
+        assert "upstream stubbed: 2 declarations" in result.output
         # The real warning is kept, attributed to its file.
         assert "    M/B.lean:2:1: warning: something real" in result.output
         assert "declaration uses" not in result.output

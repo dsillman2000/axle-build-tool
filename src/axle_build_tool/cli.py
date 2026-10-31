@@ -416,6 +416,43 @@ _MESSAGE_POSITION = re.compile(r"^-:(\d+):(\d+)(?:-(\d+):(\d+))?(?=:)")
 _SORRY_WARNING = re.compile(r"declaration uses [`']sorry[`']")
 
 
+def _stub_context_line(
+    stub_map: dict[str, frozenset[str] | None],
+    selection: Selection,
+    manifest: Manifest,
+) -> str | None:
+    """A dim report line describing a payload's stubs — always shown
+    when stubs are present, so stubbing is never invisible."""
+    if not stub_map:
+        return None
+    by_name = manifest.by_name()
+    own = {node.name for node in selection.payload_nodes(manifest)}
+    upstream = siblings = 0
+    for name, names in stub_map.items():
+        node = by_name.get(name)
+        if node is None:
+            continue
+        count = (
+            len([d for d in node.declarations if d.kind in STUBBABLE_KINDS])
+            if names is None
+            else len(names)
+        )
+        if name in own:
+            siblings += count
+        else:
+            upstream += count
+    parts = []
+    if upstream:
+        parts.append(
+            f"upstream stubbed: {upstream} declaration{'s' if upstream != 1 else ''}"
+        )
+    if siblings:
+        parts.append(
+            f"siblings stubbed: {siblings} declaration{'s' if siblings != 1 else ''}"
+        )
+    return "; ".join(parts) or None
+
+
 def _split_stub_warnings(
     messages: list[str],
     payload: Payload,
@@ -569,7 +606,7 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
-            checks.append((label, selection, payload))
+            checks.append((label, selection, payload, refined))
         _require_stub_application(stub_map, applied, plan)
         for warning in dict.fromkeys(stub_warnings):
             click.secho(f"  warning: {warning}", fg="yellow")
@@ -588,8 +625,8 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
             await service.validate_environment()
             semaphore = asyncio.Semaphore(service.max_concurrency)
 
-            async def submit(item: tuple[str, Selection, Payload]) -> Any:
-                label, selection, payload = item
+            async def submit(item: tuple[str, Selection, Payload, dict]) -> Any:
+                label, selection, payload, _refined = item
                 async with semaphore:
                     # Declaration-level selections focus the check by name;
                     # Axle resolves theorems/lemmas only — defs are rejected
@@ -609,7 +646,7 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
 
     if stub_map:
         try:
-            for _, selection, payload in checks:
+            for _, selection, payload, _ in checks:
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / selection.compiled_filename_variant("stubbed")).write_text(
@@ -620,15 +657,15 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
 
     failed = 0
     #: Pad labels so the status column aligns across the report.
-    width = max(len(label) for label, _, _ in checks)
-    for (label, _, payload), response in zip(checks, responses):
+    width = max(len(label) for label, _, _, _ in checks)
+    for (label, selection, payload, refined), response in zip(checks, responses):
         if response.okay:
             status = click.style("OK", fg="green")
         else:
             failed += 1
             status = click.style("FAIL", fg="red")
         click.echo(f"{label:<{width}}  {status}")
-        kept, collapsed = _split_stub_warnings(
+        kept, _ = _split_stub_warnings(
             [
                 *response.lean_messages.errors,
                 *response.lean_messages.warnings,
@@ -638,12 +675,9 @@ def check(no_compile: bool, incremental: bool, sorry: tuple[str, ...], select: s
         )
         for message in kept:
             click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
-        if collapsed:
-            click.secho(
-                f"    upstream stubbed: {collapsed} declaration"
-                f"{'s' if collapsed != 1 else ''} (sorry warnings hidden)",
-                dim=True,
-            )
+        stub_line = _stub_context_line(refined, selection, manifest)
+        if stub_line:
+            click.secho(f"    {stub_line}", dim=True)
         if (
             not response.okay
             and not response.lean_messages.errors
@@ -1053,7 +1087,7 @@ def verify(
         return sig_cache[node_name]
 
     try:
-        items: list[tuple[str, Selection, Payload, _VerifyScope]] = []
+        items: list[tuple[str, Selection, Payload, dict, _VerifyScope]] = []
         for label, selection in plan:
             refined = _refine_stub_map(stub_map, selection, label, manifest)
             payload = build_payload(
@@ -1082,6 +1116,7 @@ def verify(
                     label,
                     selection,
                     payload,
+                    refined,
                     _verify_scope(
                         selection,
                         payload,
@@ -1101,7 +1136,7 @@ def verify(
 
     submittable = [
         (label, selection, payload, scope)
-        for label, selection, payload, scope in items
+        for label, selection, payload, _, scope in items
         if scope.skip_reason is None and not scope.sorried and scope.to_verify
     ]
 
@@ -1143,7 +1178,7 @@ def verify(
 
     if stub_map:
         try:
-            for _, selection, payload, _ in items:
+            for _, selection, payload, _, _ in items:
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / selection.compiled_filename_variant("stubbed")).write_text(
@@ -1159,8 +1194,8 @@ def verify(
     skipped = 0
     cached_count = 0
     #: Pad labels so the status column aligns across the report.
-    width = max(len(label) for label, _, _, _ in items)
-    for label, _, payload, scope in items:
+    width = max(len(label) for label, _, _, _, _ in items)
+    for label, selection, payload, refined, scope in items:
         if scope.skip_reason is not None:
             skipped += 1
             click.echo(f"{label:<{width}}  {click.style('SKIP', dim=True)}")
@@ -1195,7 +1230,7 @@ def verify(
             click.echo(f"{label:<{width}}  {click.style('FAIL', fg='red')}")
             if vacuous:
                 click.echo("    the negation is also provable; the statement is vacuous")
-        kept, collapsed = _split_stub_warnings(
+        kept, _ = _split_stub_warnings(
             [
                 *response.lean_messages.errors,
                 *response.lean_messages.warnings,
@@ -1205,12 +1240,9 @@ def verify(
         )
         for message in kept:
             click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
-        if collapsed:
-            click.secho(
-                f"    upstream stubbed: {collapsed} declaration"
-                f"{'s' if collapsed != 1 else ''} (sorry warnings hidden)",
-                dim=True,
-            )
+        stub_line = _stub_context_line(refined, selection, manifest)
+        if stub_line:
+            click.secho(f"    {stub_line}", dim=True)
         if (
             not response.okay
             and not response.lean_messages.errors

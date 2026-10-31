@@ -768,5 +768,5 @@ class TestSorry:
         )
 
         assert result.exit_code == 0, result.output
-        assert "upstream stubbed: 1 declaration (sorry warnings hidden)" in result.output
+        assert "upstream stubbed: 2 declarations" in result.output
         assert "declaration uses" not in result.output
