@@ -1,0 +1,24 @@
+demos/RootTwoIrrational/RootTwoIrrational/Scoped.lean
+  h_4cc74772b10fd4 1-35
+demos/RootTwoIrrational/axbt_project.yml
+  h_4cc74772b10fd4 12-14
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 301,306-315,317,319-335,339-353,470,475,477,836,841,843,849
+tests/test_check.py
+  h_4cc74772b10fd4 666-703
+tests/test_live.py
+  h_4cc74772b10fd4 447-519
+tests/test_verify.py
+  h_4cc74772b10fd4 497-559
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "724c812d99a25bc8305ff18b7b7aa4623629b6bc",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
