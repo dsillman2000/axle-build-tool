@@ -4,9 +4,9 @@ version = "0.1.0"
 description = "dbt-inspired build/orchestration tool for Lean 4 projects, executed via the Axle (Axiom Lean Engine) API"
 readme = "README.md"
 authors = [
-    { name = "dsillman2000", email = "dsillman2000@yahoo.com" }
+    { name = "David Sillman", email = "dsillman2000@yahoo.com" }
 ]
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "click>=8.5.0",
     "pyyaml>=6.0.3",
