@@ -1,7 +1,8 @@
 """File-system scanning of module source directories.
 
 A pure function that lists the `.lean` files of a resolved module
-directory (§2 / Phase 1). No import parsing happens here — that is Phase 2.
+directory. Import parsing and dependency tracking are not this module's
+concern; they build on the file list it produces.
 """
 
 from __future__ import annotations

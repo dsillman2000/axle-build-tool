@@ -1,8 +1,8 @@
 """The `axbt` command-line interface.
 
-Command-line mechanics are implemented with `click` (plan §6). Phase 1
-ships exactly one subcommand, `axbt init [PATH]`; later phases add
-`compile` / `check` / `verify`.
+Command-line mechanics are implemented with `click`. The CLI currently
+ships a single subcommand, `axbt init [PATH]`; build and verification
+commands (`compile` / `check` / `verify`) will follow.
 """
 
 from __future__ import annotations

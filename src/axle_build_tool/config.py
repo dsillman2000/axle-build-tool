@@ -1,8 +1,7 @@
-"""Loading and validation of `axbt_project.yml` files (Pydantic variant).
+"""Loading and validation of `axbt_project.yml` files.
 
-The configuration schema is defined in `GEMINI_PLAN.md` §2. The cache
-directory `.axbt/` is intentionally **not** part of the schema: it is fixed
-and cannot be overridden (see §2, "Notes on configuration behavior").
+The cache directory `.axbt/` is intentionally **not** part of the schema:
+it is fixed and cannot be overridden.
 """
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ class AxleConfig(BaseModel):
 class ModuleConfig(BaseModel):
     """One module: a named directory of `.lean` files.
 
-    `dir` is stored already defaulted to the module's own name, per §2.
+    `dir` is stored already defaulted to the module's own name.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -83,7 +82,7 @@ class ProjectConfig(BaseModel):
 
 
 class _ProjectMeta(BaseModel):
-    """The optional `project` section (§2)."""
+    """The optional `project` metadata section."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -175,7 +174,7 @@ def scaffold_config(project_name: str) -> str:
     """Return the initial `axbt_project.yml` contents for a new project.
 
     The starter module is named after the project and omits `dir`,
-    exercising the default-dir rule (§2). The `axle` section is written out
+    exercising the default-dir rule. The `axle` section is written out
     with the default values from `AxleConfig`.
     """
     defaults = AxleConfig()
