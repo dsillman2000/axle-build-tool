@@ -115,6 +115,11 @@ class AxleService:
             self._client = self._client_factory()
         return self._client
 
+    @property
+    def max_concurrency(self) -> int:
+        """Max concurrent in-flight requests (from the client; default 4)."""
+        return int(getattr(self.client, "max_concurrency", 4))
+
     async def _effective_environment(self) -> str:
         """Resolve the environment for an API call.
 
@@ -200,13 +205,20 @@ class AxleService:
     async def extract_decls(
         self, content: str, *, context: str = "", **kwargs: Any
     ) -> ExtractDeclsResponse:
-        """Extract per-declaration metadata from Lean code."""
+        """Extract per-declaration metadata from Lean code.
+
+        `ignore_imports=False` is forced: axbt's payloads carry their own
+        (hoisted) import lines, and letting the API replace them with its
+        default header would both change what is evaluated and shift the
+        reported line positions.
+        """
         try:
             return await self.client.extract_decls(
                 content=content,
                 environment=await self._effective_environment(),
                 timeout_seconds=self._config.timeout_seconds,
                 global_options=dict(self._config.global_options),
+                ignore_imports=False,
                 **kwargs,
             )
         except AxleError as exc:
