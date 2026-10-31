@@ -1,0 +1,24 @@
+demos/GaussIntSum/GaussIntSum/GaussSum.lean
+  h_4cc74772b10fd4 1-15
+demos/GaussIntSum/axbt_project.yml
+  h_4cc74772b10fd4 1-13
+demos/RootTwoIrrational/RootTwoIrrational/Divisibility.lean
+  h_4cc74772b10fd4 1-19
+demos/RootTwoIrrational/RootTwoIrrational/EuclidLemma.lean
+  h_4cc74772b10fd4 1-13
+demos/RootTwoIrrational/RootTwoIrrational/IrrationalSqrtTwo.lean
+  h_4cc74772b10fd4 1-16
+demos/RootTwoIrrational/axbt_project.yml
+  h_4cc74772b10fd4 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "24d1a12e79d0fa80aa918802960ea0b8d5a2241c",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
