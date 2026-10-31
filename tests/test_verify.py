@@ -336,54 +336,67 @@ class TestFailureReporting:
         assert "the statement is vacuous" in result.output
 
 
-class TestDemo:
-    def test_verify_runs_the_root_two_irrational_demo_targets(
-        self, demos_dir: Path, fake_axle, monkeypatch
-    ) -> None:
-        """The compile-and-verify ritual against the real demo project."""
-        from conftest import DEMO_EXTRACTION_DOCS
+RITUAL_CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+axle:
+  environment: "lean-4.35.0"
+  global_options:
+    maxHeartbeats: 100000
+"""
 
-        demo = demos_dir / "RootTwoIrrational"
-        shutil.rmtree(demo / ".axbt", ignore_errors=True)
-        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
-        monkeypatch.chdir(demo)
-        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+class TestRitual:
+    def test_compile_then_verify_ritual(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The full offline ritual — compile then verify every target —
+        with the project's config plumbing reaching the API."""
+        root = make_project(tmp_path, RITUAL_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+
+        compile_result = runner.invoke(main, ["compile"])
+        assert compile_result.exit_code == 0, compile_result.output
         fake_axle.calls.clear()
 
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 3  # the demo's three targets
-        assert "Verified 3 selection(s): all OK" in result.output
-        # Each target got a formal statement roundtrip + a verify call.
-        assert len(theorem2sorry_calls(fake_axle)) == 3
-        assert len(verify_calls(fake_axle)) == 3
-        # The demo's config plumbing reaches the API.
-        assert verify_calls(fake_axle)[0]["global_options"] == {
-            "maxHeartbeats": 100000
-        }
+        assert result.output.count("  OK") == 2
+        assert "Verified 2 selection(s): all OK" in result.output
+        # The ritual is incremental: the clean compile makes no API
+        # calls; each verification is a formal-statement roundtrip plus
+        # a verify call carrying the config's global options.
+        assert [method for method, _ in fake_axle.calls] == [
+            "environments",
+            "theorem2sorry",
+            "verify_proof",
+            "theorem2sorry",
+            "verify_proof",
+        ]
+        assert verify_calls(fake_axle)[0]["global_options"] == {"maxHeartbeats": 100000}
 
-    def test_verify_demo_declaration_selection(
-        self, demos_dir: Path, fake_axle, monkeypatch
+    def test_verify_declaration_selection_ritual(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        from conftest import DEMO_EXTRACTION_DOCS
-
-        demo = demos_dir / "RootTwoIrrational"
-        shutil.rmtree(demo / ".axbt", ignore_errors=True)
-        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
-        monkeypatch.chdir(demo)
+        root = make_project(tmp_path, RITUAL_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
         assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
 
-        result = runner.invoke(
-            main, ["verify", "--select", "RootTwoIrrational.EuclidLemma.euclid_lemma"]
-        )
+        result = runner.invoke(main, ["verify", "--select", "M.B.t2"])
 
         assert result.exit_code == 0, result.output
         verify = verify_calls(fake_axle)
         assert len(verify) == 1
-        assert verify[0]["formal_statement"] == "formal[euclid_lemma]"
-        # The payload inlines the Divisibility dependency.
-        assert "theorem prime_gt_one" in verify[0]["content"]
-        assert "RootTwoIrrational.EuclidLemma.euclid_lemma OK" in " ".join(
-            result.output.split()
-        )
+        assert verify[0]["formal_statement"] == "formal[t2]"
+        # The payload inlines the dependency.
+        assert "theorem t1 : 1 = 1 := rfl" in verify[0]["content"]
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"

@@ -45,11 +45,7 @@ def extract_calls(fake) -> int:
     return sum(1 for method, _ in fake.calls if method == "extract_decls")
 
 
-def fresh_demo(demos_dir: Path, name: str) -> Path:
-    """Return a demo project directory with no cache from earlier runs."""
-    demo = demos_dir / name
-    shutil.rmtree(demo / ".axbt", ignore_errors=True)
-    return demo
+SIMPLE_FILES = {"M/A.lean": "def x := 1\n", "M/B.lean": "import A\ndef y := x\n"}
 
 
 class TestHelp:
@@ -60,77 +56,81 @@ class TestHelp:
         assert "compile" in result.output
 
 
-class TestCompileDemos:
-    def test_compile_creates_manifest_for_root_two_demo(
-        self, demos_dir: Path, monkeypatch
+class TestCompileProject:
+    def test_compile_creates_manifest(
+        self, make_project, tmp_path: Path, monkeypatch
     ) -> None:
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        assert not (demo / ".axbt").exists()
-        monkeypatch.chdir(demo)
+        root = make_project(tmp_path, SIMPLE_CONFIG, SIMPLE_FILES)
+        monkeypatch.chdir(root)
+        assert not (root / ".axbt").exists()
 
         result = runner.invoke(main, ["compile"])
 
         assert result.exit_code == 0, result.output
-        assert manifest_path(demo).is_file()
+        assert manifest_path(root).is_file()
 
-    def test_demo_manifest_shape(self, demos_dir: Path, monkeypatch) -> None:
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        monkeypatch.chdir(demo)
+    def test_manifest_shape(self, make_project, tmp_path: Path, monkeypatch) -> None:
+        root = make_project(tmp_path, SIMPLE_CONFIG, SIMPLE_FILES)
+        monkeypatch.chdir(root)
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
-        raw = json.loads(manifest_path(demo).read_text(encoding="utf-8"))
+        raw = json.loads(manifest_path(root).read_text(encoding="utf-8"))
         assert set(raw) == {"version", "generated_at", "nodes"}
         assert raw["version"] == 2
         names = {node["name"] for node in raw["nodes"]}
-        assert names == {
-            "RootTwoIrrational.Divisibility",
-            "RootTwoIrrational.EuclidLemma",
-            "RootTwoIrrational.IrrationalSqrtTwo",
-        }
+        assert names == {"M.A", "M.B"}
         # And it still loads through our own loader.
-        assert len(load_manifest(demo).nodes) == 3
+        assert len(load_manifest(root).nodes) == 2
 
-    def test_demo_dag_edges(self, demos_dir: Path, monkeypatch) -> None:
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        monkeypatch.chdir(demo)
+    def test_diamond_dag_edges(self, make_project, tmp_path: Path, monkeypatch) -> None:
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {
+                "M/A.lean": "def x := 1\n",
+                "M/B.lean": "import A\ndef y := x\n",
+                "M/C.lean": "import A\nimport B\ndef z := y + x\n",
+            },
+        )
+        monkeypatch.chdir(root)
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
-        by_name = load_manifest(demo).by_name()
-        divisibility = by_name["RootTwoIrrational.Divisibility"]
-        euclid = by_name["RootTwoIrrational.EuclidLemma"]
-        irrational = by_name["RootTwoIrrational.IrrationalSqrtTwo"]
+        by_name = load_manifest(root).by_name()
+        a, b, c = by_name["M.A"], by_name["M.B"], by_name["M.C"]
 
-        assert divisibility.parents == []
-        assert euclid.parents == ["RootTwoIrrational.Divisibility"]
-        assert irrational.parents == [
-            "RootTwoIrrational.Divisibility",
-            "RootTwoIrrational.EuclidLemma",
-        ]
+        assert a.parents == []
+        assert b.parents == ["M.A"]
+        assert c.parents == ["M.A", "M.B"]
         # children are the inverse of parents
-        assert divisibility.children == [
-            "RootTwoIrrational.EuclidLemma",
-            "RootTwoIrrational.IrrationalSqrtTwo",
-        ]
-        assert irrational.children == []
+        assert a.children == ["M.B", "M.C"]
+        assert c.children == []
 
-    def test_demo_md5_fingerprints(self, demos_dir: Path, monkeypatch) -> None:
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        monkeypatch.chdir(demo)
+    def test_md5_fingerprints(self, make_project, tmp_path: Path, monkeypatch) -> None:
+        root = make_project(tmp_path, SIMPLE_CONFIG, SIMPLE_FILES)
+        monkeypatch.chdir(root)
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
-        for node in load_manifest(demo).nodes:
-            data = (demo / node.path).read_bytes()
+        for node in load_manifest(root).nodes:
+            data = (root / node.path).read_bytes()
             assert node.md5 == hashlib.md5(data).hexdigest()
 
-    def test_compile_gauss_demo_via_default_dir(self, demos_dir: Path, monkeypatch) -> None:
-        demo = fresh_demo(demos_dir, "GaussIntSum")
-        monkeypatch.chdir(demo)
+    def test_default_dir_rule(self, make_project, tmp_path: Path, monkeypatch) -> None:
+        """A module without `dir` scans the module-name directory."""
+        config = """\
+project:
+  name: proj
+modules:
+  Solo:
+    targets: []
+"""
+        root = make_project(tmp_path, config, {"Solo/Solo.lean": "def x := 1\n"})
+        monkeypatch.chdir(root)
 
         result = runner.invoke(main, ["compile"])
 
         assert result.exit_code == 0, result.output
-        manifest = load_manifest(demo)
-        assert [node.name for node in manifest.nodes] == ["GaussIntSum.GaussSum"]
+        manifest = load_manifest(root)
+        assert [node.name for node in manifest.nodes] == ["Solo.Solo"]
         assert manifest.nodes[0].parents == []
 
 
@@ -297,61 +297,58 @@ class TestExtraction:
     """Scope B: compile enriches the manifest with Axle-extracted
     declaration metadata, incrementally."""
 
-    DEMO_DOCS = {
-        "theorem prime_gt_one": {
-            "prime_gt_one": make_document(
-                "prime_gt_one",
-                line_pos=12,
-                end_line_pos=13,
-                signature="theorem prime_gt_one (p : ℕ) (hp : Nat.Prime p) : 1 < p",
-            ),
-            "prime_dvd_square": make_document("prime_dvd_square", line_pos=16, end_line_pos=17),
-        },
-        "theorem euclid_lemma": {
-            # One-based payload coordinates (as the API reports them): the
-            # Euclid section starts at one-based payload line 19 (after the
-            # hoisted import header and the inlined Divisibility source), so
-            # the theorem at file line 12 sits at payload line 28.
-            "euclid_lemma": make_document("euclid_lemma", line_pos=28, end_line_pos=29),
-        },
-        "theorem sqrt_two_irrational": {
-            # Payload line 43 == file line 15 (three imports stripped,
-            # section starting at one-based payload line 32).
-            "sqrt_two_irrational": make_document("sqrt_two_irrational", line_pos=43, end_line_pos=56),
-        },
-    }
-
-    def test_demo_nodes_get_declaration_metadata(
-        self, demos_dir: Path, fake_axle, monkeypatch
+    def test_nodes_get_declaration_metadata(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        from conftest import DEMO_EXTRACTION_DOCS
-
-        fake_axle._extract_documents_by_marker = DEMO_EXTRACTION_DOCS
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        monkeypatch.chdir(demo)
+        """Positions are attributed back to file coordinates: A's files
+        carry a hoisted import and docstring shift; B's declaration maps
+        through the inlined dependency geometry."""
+        files = {
+            "M/A.lean": (
+                "import Mathlib\n\n/-! Base. -/\n\ndef base := 1\n"
+                "theorem base_thm : base = 1 := rfl\n"
+            ),
+            "M/B.lean": "import A\ntheorem middle_thm : base = 1 := rfl\n",
+        }
+        docs = {
+            "def base := 1": {
+                "base": make_document("base", kind="def", line_pos=6, end_line_pos=6),
+                "base_thm": make_document(
+                    "base_thm",
+                    kind="theorem",
+                    line_pos=7,
+                    end_line_pos=7,
+                    signature="theorem base_thm : base = 1 := rfl",
+                ),
+            },
+            "theorem middle_thm": {
+                "middle_thm": make_document(
+                    "middle_thm", kind="theorem", line_pos=9, end_line_pos=9
+                )
+            },
+        }
+        fake_axle._extract_documents_by_marker = docs
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
 
         result = runner.invoke(main, ["compile"])
 
         assert result.exit_code == 0, result.output
-        manifest = load_manifest(demo)
-        divisibility = manifest.by_name()["RootTwoIrrational.Divisibility"]
-        assert [d.name for d in divisibility.declarations] == [
-            "prime_gt_one",
-            "prime_dvd_square",
-        ]
-        assert divisibility.declarations[0].kind == "theorem"
-        assert divisibility.declarations[0].is_sorry is False
-        assert divisibility.declarations[0].line_pos == 11
-        assert divisibility.declarations[0].end_line_pos == 12
-        assert divisibility.declarations[0].signature.startswith("theorem prime_gt_one")
-        euclid = manifest.by_name()["RootTwoIrrational.EuclidLemma"]
-        assert [d.name for d in euclid.declarations] == ["euclid_lemma"]
-        # EuclidLemma.lean has one intra-project import stripped from its
-        # payload; the recorded position is shifted back into file coordinates.
-        assert euclid.declarations[0].line_pos == 12
-        irrational = manifest.by_name()["RootTwoIrrational.IrrationalSqrtTwo"]
-        assert [d.name for d in irrational.declarations] == ["sqrt_two_irrational"]
-        assert irrational.declarations[0].line_pos == 15
+        manifest = load_manifest(root)
+        a = manifest.by_name()["M.A"]
+        assert [d.name for d in a.declarations] == ["base", "base_thm"]
+        assert a.declarations[0].kind == "def"
+        assert a.declarations[0].is_sorry is False
+        # def base sits at file line 5: payload line 6 mapped back
+        # through the hoisted import header and docstring shift.
+        assert a.declarations[0].line_pos == 5
+        assert a.declarations[1].line_pos == 6
+        assert a.declarations[1].signature.startswith("theorem base_thm")
+        b = manifest.by_name()["M.B"]
+        assert [d.name for d in b.declarations] == ["middle_thm"]
+        # middle_thm is file line 2 (its import was stripped from the
+        # payload; A's five kept lines and a separator sit above it).
+        assert b.declarations[0].line_pos == 2
 
     def test_sorry_flag_is_recorded(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
         from conftest import make_extract_response
@@ -468,15 +465,32 @@ class TestExtraction:
         assert "M/B.lean" in result.output
 
     def test_extracted_nodes_record_axle_request_ids(
-        self, demos_dir: Path, fake_axle, monkeypatch
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
         """Each node's manifest entry carries the request id of the API call
         that produced its data; carried-over nodes keep their original id."""
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        monkeypatch.chdir(demo)
+        files = {
+            "M/A.lean": "def x := 1\n",
+            "M/B.lean": "import A\ndef y := x\n",
+            "M/C.lean": "import B\ndef z := y\n",
+        }
+        docs = {
+            "def x := 1": {
+                "x": make_document("x", kind="def", line_pos=1, end_line_pos=1)
+            },
+            "def y := x": {
+                "y": make_document("y", kind="def", line_pos=3, end_line_pos=3)
+            },
+            "def z := y": {
+                "z": make_document("z", kind="def", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = docs
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
-        first = load_manifest(demo)
+        first = load_manifest(root)
         assert all(node.request_id is not None for node in first.nodes)
         assert len({node.request_id for node in first.nodes}) == 3  # distinct calls
         assert set(first_node_ids := {node.request_id for node in first.nodes}) == set(
@@ -485,7 +499,7 @@ class TestExtraction:
 
         # A recompile carries the same provenance (no new requests).
         assert runner.invoke(main, ["compile"]).exit_code == 0
-        assert load_manifest(demo).nodes[0].request_id in first_node_ids
+        assert load_manifest(root).nodes[0].request_id in first_node_ids
 
     def test_stale_version_manifest_is_ignored_and_reextracted(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -514,33 +528,45 @@ class TestCompiledPayloads:
     """Scope C: compile persists per-file isolated payloads for inspection."""
 
     def test_compile_writes_isolated_payloads(
-        self, demos_dir: Path, fake_axle, monkeypatch
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        demo = fresh_demo(demos_dir, "RootTwoIrrational")
-        monkeypatch.chdir(demo)
+        fake_axle._extract_documents_by_marker = {
+            "def base := 1": {
+                "base": make_document("base", kind="def", line_pos=3, end_line_pos=3)
+            },
+            "def middle := base": {
+                "middle": make_document(
+                    "middle", kind="def", line_pos=5, end_line_pos=5
+                )
+            },
+        }
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {
+                "M/A.lean": "import Mathlib\ndef base := 1\n",
+                "M/B.lean": "import A\nimport Mathlib\ndef middle := base + 1\n",
+            },
+        )
+        monkeypatch.chdir(root)
 
         result = runner.invoke(main, ["compile"])
 
         assert result.exit_code == 0, result.output
-        compiled = demo / ".axbt" / "compiled"
+        compiled = root / ".axbt" / "compiled"
         assert sorted(p.name for p in compiled.iterdir()) == [
-            "RootTwoIrrational_Divisibility_isolated.lean",
-            "RootTwoIrrational_EuclidLemma_isolated.lean",
-            "RootTwoIrrational_IrrationalSqrtTwo_isolated.lean",
+            "M_A_isolated.lean",
+            "M_B_isolated.lean",
         ]
 
-        euclid_payload = (compiled / "RootTwoIrrational_EuclidLemma_isolated.lean").read_text(
-            encoding="utf-8"
-        )
+        b_payload = (compiled / "M_B_isolated.lean").read_text(encoding="utf-8")
         # Dependencies are inlined before the target file...
-        assert euclid_payload.index("theorem prime_gt_one") < euclid_payload.index(
-            "theorem euclid_lemma"
-        )
+        assert b_payload.index("def base := 1") < b_payload.index("def middle")
         # ...intra-project imports are replaced by the inlined content...
-        assert "import Divisibility" not in euclid_payload
+        assert "import A" not in b_payload
         # ...and external imports are hoisted to the top exactly once.
-        assert euclid_payload.count("import Mathlib") == 1
-        assert euclid_payload.splitlines()[0] == "import Mathlib"
+        assert b_payload.count("import Mathlib") == 1
+        assert b_payload.splitlines()[0] == "import Mathlib"
 
     def test_recompile_rewrites_payloads_idempotently(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
