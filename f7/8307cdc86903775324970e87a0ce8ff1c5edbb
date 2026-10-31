@@ -1,0 +1,22 @@
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 18,33,40,154-193
+src/axle_build_tool/manifest.py
+  h_4cc74772b10fd4 295-320
+tests/conftest.py
+  h_4cc74772b10fd4 238-264
+tests/test_compile.py
+  h_4cc74772b10fd4 327-329
+tests/test_list.py
+  h_4cc74772b10fd4 1-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f78307cdc86903775324970e87a0ce8ff1c5edbb",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
