@@ -1,0 +1,16 @@
+src/axle_build_tool/extraction.py
+  h_4cc74772b10fd4 22-29,116-137,210-227,229-234,236
+tests/test_compile.py
+  h_4cc74772b10fd4 50-74,321-378
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d487a3883134ec831d75a8448d1203c75d349ce9",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
