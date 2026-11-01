@@ -1,0 +1,16 @@
+src/axle_build_tool/graph.py
+  h_4cc74772b10fd4 162-242,337-339,554-556,568-570,592-595
+tests/test_graph.py
+  h_4cc74772b10fd4 20-26,503-593
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a79131ff77740da6e3af283b40349d9a9a9473ee",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
