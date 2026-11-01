@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -105,7 +106,10 @@ class TestTargetsDefault:
         # One theorem2sorry + one verify_proof per target.
         assert len(theorem2sorry_calls(fake_axle)) == 2
         assert len(verify_calls(fake_axle)) == 2
-        first, second = verify_calls(fake_axle)
+        # Submissions stream in completion order, so identify calls by
+        # their formal statement rather than by log position.
+        by_formal = {c["formal_statement"]: c for c in verify_calls(fake_axle)}
+        first, second = by_formal["formal[t1]"], by_formal["formal[t2]"]
         # The formal statement is the theorem2sorry output; the content
         # is the standalone payload (dependencies inlined).
         assert first["formal_statement"] == "formal[t1]"
@@ -866,3 +870,44 @@ class TestShare:
         # submitted, so exactly one link exists.
         assert result.exit_code == 1
         assert result.output.count("share: https://axle.test/check#r=") == 1
+
+
+class TestStreaming:
+    def test_results_print_in_completion_order_with_timing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Each result prints as its submission completes, with timing.
+
+        B's submission finishes first, so its report line prints before
+        A's — completion order, not selection order — and every result
+        line carries its progress counter and elapsed time, with the
+        total in the summary.
+        """
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        # A's own-file marker routes the delay to A only; the marker
+        # routing picks the one occurring latest in a payload, and B's
+        # payload (dependencies inlined) ends with `theorem t2`.
+        fake_axle.verify_delays = {"theorem t1 : 1 = 1": 0.15, "theorem t2 : 1 = 1": 0.0}
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        # B completes first and streams first, each line numbered and timed.
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
+        for position, line in enumerate(streamed, 1):
+            assert re.match(rf"\[\s*{position}/2\] ", line), line
+            assert re.search(r"\d+\.\d{3}s$", line), line
+        def _delay(line: str) -> float:
+            return float(line.split()[-1].removesuffix("s"))
+        # A carried the artificial delay; the timing is per item, not
+        # the whole run.
+        assert _delay(streamed[1]) > _delay(streamed[0])
+        assert re.search(r"Verified 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)

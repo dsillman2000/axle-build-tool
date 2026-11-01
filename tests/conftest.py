@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json as jsonlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -108,15 +109,21 @@ def normalized_lines(output: str) -> list[str]:
     return [" ".join(line.split()) for line in output.splitlines() if line.strip()]
 
 
+_DOCUMENT_COUNTER = re.compile(r"^\[\s*\d+/\d+\] +")
+_ITEM_TIMING = re.compile(r" +\d+\.\d{3}s$")
+
+
 def status_line(output: str, label: str) -> str:
     """The check report line for `label`, whitespace-normalized.
 
-    Report lines pad labels so the status column aligns; this helper
-    erases that padding so tests can assert on `label + status`.
+    Report lines pad labels so the status column aligns, lead with the
+    streaming progress counter, and end with the item's elapsed time;
+    this helper erases all three so tests can assert on `label + status`.
     """
     for line in output.splitlines():
-        if line.startswith(label):
-            return " ".join(line.split())
+        body = _DOCUMENT_COUNTER.sub("", line)
+        if body.startswith(label):
+            return _ITEM_TIMING.sub("", " ".join(body.split()))
     raise AssertionError(f"no report line for {label!r} in:\n{output}")
 
 
@@ -253,6 +260,13 @@ class FakeAxleClient:
         self._extract_documents_by_marker = extract_documents_by_marker or {}
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
+        #: Artificial per-submission delays, letting tests control the
+        #: order submissions complete in (and so the streaming report's
+        #: completion-order lines). Keyed by a content marker, routed to
+        #: whichever payload contains the marker latest — the target's
+        #: own file is inlined last.
+        self.check_delays: dict[str, float] = {}
+        self.verify_delays: dict[str, float] = {}
         self._extract_lean_errors = list(extract_lean_errors or [])
         self._environments = (
             environments if environments is not None else [{"name": "lean-4.35.0"}]
@@ -290,16 +304,32 @@ class FakeAxleClient:
             raise self._ping_error
         return self._latest
 
+    @staticmethod
+    def _delay_for(delays: dict[str, float], content: str) -> float:
+        """The delay routed to a payload by its latest-occurring marker."""
+        best_position, delay = -1, 0.0
+        for marker, value in delays.items():
+            position = content.rfind(marker)
+            if position > best_position:
+                best_position, delay = position, value
+        return delay
+
     async def check(self, **kwargs: Any) -> CheckResponse:
         self.calls.append(("check", kwargs))
         if self._error:
             raise self._error
+        delay = self._delay_for(self.check_delays, kwargs.get("content", ""))
+        if delay:
+            await asyncio.sleep(delay)
         return self._with_request_id(self.check_result)
 
     async def verify_proof(self, **kwargs: Any) -> VerifyProofResponse:
         self.calls.append(("verify_proof", kwargs))
         if self._error:
             raise self._error
+        delay = self._delay_for(self.verify_delays, kwargs.get("content", ""))
+        if delay:
+            await asyncio.sleep(delay)
         return self._with_request_id(self.verify_result)
 
     async def theorem2sorry(self, **kwargs: Any) -> Theorem2SorryResponse:

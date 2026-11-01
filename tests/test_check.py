@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from axle.types import CheckResponse, Messages
@@ -78,7 +79,10 @@ class TestTargetsDefault:
         # check call per configured target.
         methods = [method for method, _ in fake_axle.calls]
         assert methods == ["get_latest_environment", "check", "check"]
-        first, second = check_calls(fake_axle)
+        # Submissions stream in completion order, so identify calls by
+        # their focused declaration rather than by log position.
+        by_names = {c["names"][0]: c for c in check_calls(fake_axle)}
+        first, second = by_names["t1"], by_names["t2"]
         # Each target is a standalone payload: dependencies are inlined,
         # the target's own section is present, unrelated files are not.
         assert "def t1 := 1" in first["content"]
@@ -956,3 +960,44 @@ class TestShare:
 
         assert result.exit_code == 0, result.output
         assert manifest_path(root).read_bytes() == before
+
+
+class TestStreaming:
+    def test_results_print_in_completion_order_with_timing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Each result prints as its submission completes, with timing.
+
+        B's submission finishes first, so its report line prints before
+        A's — completion order, not selection order — and every result
+        line carries its progress counter and elapsed time, with the
+        total in the summary.
+        """
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["check"]).exit_code == 0
+        # A's own-file marker routes the delay to A only; the marker
+        # routing picks the one occurring latest in a payload, and B's
+        # payload (dependencies inlined) ends with `def t2 := t1`.
+        fake_axle.check_delays = {"def t1 := 1": 0.15, "def t2 := t1": 0.0}
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        # B completes first and streams first, each line numbered and timed.
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
+        for position, line in enumerate(streamed, 1):
+            assert re.match(rf"\[\s*{position}/2\] ", line), line
+            assert re.search(r"\d+\.\d{3}s$", line), line
+        def _delay(line: str) -> float:
+            return float(line.split()[-1].removesuffix("s"))
+        # A carried the artificial delay; the timing is per item, not
+        # the whole run.
+        assert _delay(streamed[1]) > _delay(streamed[0])
+        assert re.search(r"Checked 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)
