@@ -43,6 +43,7 @@ from typing import Any
 from axle_build_tool.config import CACHE_DIRNAME
 from axle_build_tool.manifest import Manifest, ManifestNode
 from axle_build_tool.payloads import dotted_stem_of
+from axle_build_tool.stubbing import PROOF_KINDS as _VERIFIABLE_KINDS
 from axle_build_tool.stubbing import bare_name
 
 #: Generated graph artifacts live in the cache alongside the payloads.
@@ -73,12 +74,16 @@ FCOSE_INTEGRITY = (
 )
 
 #: weakest -> strongest; containers roll up to the weakest constituent.
-_STATES = ["unchecked", "checked", "verified"]
+#: `done` ranks after `verified`: it is a never-verifiable kind's
+#: terminal state (green), and a container with any kernel-pending
+#: member still reads yellow.
+_STATES = ["unchecked", "checked", "verified", "done"]
 _EMPTY_STATE = "empty"
 
 _LEGEND_TEXT = {
     "verified": "verified — has a kernel verification stamp",
     "checked": "checked — passed typecheck, awaiting kernel verification",
+    "done": "done — checked clean, and this kind is never verifiable",
     "unchecked": "unchecked — never judged by a full, unstubbed check",
     _EMPTY_STATE: "empty — a file/module with no declarations extracted",
 }
@@ -93,11 +98,18 @@ def graph_path(project_root: Path) -> Path:
 
 
 def state_of(declaration: Any) -> str:
-    """A declaration's pipeline state, keyed strictly on its stamps."""
+    """A declaration's pipeline state, keyed strictly on its stamps.
+
+    Never-verifiable kinds (defs, instances, structures, ...) have no
+    kernel tier: a clean check is their terminal state, recorded as
+    `done` (green) rather than `checked` (yellow — reserved for
+    declarations still awaiting kernel verification). Colors key only
+    on the stamps, never inferred.
+    """
     if declaration.verified_sig or declaration.verified_at:
         return "verified"
     if declaration.checked_sig or declaration.checked_at:
-        return "checked"
+        return "checked" if declaration.kind in _VERIFIABLE_KINDS else "done"
     return "unchecked"
 
 
@@ -165,7 +177,8 @@ def _decl_counts_row(declarations: list[Any]) -> str:
     for declaration in declarations:
         counts[state_of(declaration)] += 1
     return (
-        f"{counts['verified']} verified, {counts['checked']} checked (unverified), "
+        f"{counts['verified']} verified, {counts['done']} done, "
+        f"{counts['checked']} checked (unverified), "
         f"{counts['unchecked']} unchecked"
     )
 
@@ -606,6 +619,7 @@ _HTML_TEMPLATE = """<!doctype html>
   #legend .star { color: #c92a2a; }
   .chip { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -.5px; }
   .chip.verified { background: #2f9e44; }
+  .chip.done { background: #2f9e44; }
   .chip.checked { background: #f2b705; }
   .chip.unchecked { background: #e8590c; }
   .chip.empty { background: #c8c3bc; }
@@ -664,6 +678,7 @@ __AXBT_LEGEND__
         shape: "ellipse" } },
       { selector: "node[group='file']", style: { shape: "roundrectangle", width: 26, height: 26, "font-size": 12 } },
       { selector: "node[state='verified']", style: { "background-color": "#2f9e44", "border-color": "#237032", "border-width": 1 } },
+      { selector: "node[state='done']", style: { "background-color": "#2f9e44", "border-color": "#237032", "border-width": 1 } },
       { selector: "node[state='checked']", style: { "background-color": "#f2b705", "border-color": "#c58a00", "border-width": 1 } },
       { selector: "node[state='unchecked']", style: { "background-color": "#e8590c", "border-color": "#b03a00", "border-width": 1 } },
       { selector: "node[state='empty']", style: { "background-color": "#c8c3bc", "border-color": "#9b958c", "border-width": 1, color: "#55504a" } },
@@ -676,6 +691,7 @@ __AXBT_LEGEND__
         "background-color": "#eae4da", "background-opacity": 0.4, "border-color": "#cdc5b8", "border-width": 1,
         "text-valign": "top", "text-halign": "left", "text-margin-x": 10, "text-margin-y": 4 } },
       { selector: "node:parent[state='verified']", style: { "background-color": "#2f9e44", "background-opacity": 0.14, "border-color": "#2f9e44" } },
+      { selector: "node:parent[state='done']", style: { "background-color": "#2f9e44", "background-opacity": 0.14, "border-color": "#2f9e44" } },
       { selector: "node:parent[state='checked']", style: { "background-color": "#f2b705", "background-opacity": 0.18, "border-color": "#c58a00" } },
       { selector: "node:parent[state='unchecked']", style: { "background-color": "#e8590c", "background-opacity": 0.14, "border-color": "#e8590c" } },
       { selector: "node:parent[state='empty']", style: { "background-color": "#c8c3bc", "background-opacity": 0.25, "border-color": "#9b958c" } },
