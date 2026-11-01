@@ -17,7 +17,13 @@ from click.testing import CliRunner
 
 from axle_build_tool import main
 from axle_build_tool.graph import rollup_state, state_of
-from axle_build_tool.manifest import MANIFEST_VERSION, ExtractedDecl, load_manifest
+from axle_build_tool.graph import _layout_positions
+from axle_build_tool.manifest import (
+    MANIFEST_VERSION,
+    ExtractedDecl,
+    ManifestNode,
+    load_manifest,
+)
 from axle_build_tool.manifest import manifest_path
 from conftest import make_document
 
@@ -494,3 +500,94 @@ class TestRollup:
         """A def-only file checked clean: all members are `checked`,
         and the container reads yellow — its terminal on that tier."""
         assert rollup_state(["checked", "checked"]) == "checked"
+
+
+class TestLayout:
+    """The build-time module-column layout (no JS layout at all)."""
+
+    @staticmethod
+    def node(name: str, parents: tuple[str, ...], declarations: list[str] = ()) -> ManifestNode:
+        return ManifestNode(
+            name=name,
+            module=name.split(".", 1)[0],
+            path=f"{name.replace('.', '/')}.lean",
+            md5="0" * 32,
+            status="clean",
+            parents=list(parents),
+            declarations=[
+                ExtractedDecl(
+                    name=decl,
+                    kind="theorem",
+                    is_sorry=False,
+                    line_pos=index + 1,
+                    end_line_pos=index + 1,
+                )
+                for index, decl in enumerate(declarations, start=1)
+            ],
+        )
+
+    def test_modules_order_left_to_right_by_dependency_depth(self) -> None:
+        files = [
+            self.node("Core.CoreFile", (), ["one"]),
+            self.node("App.AppFile", ("Core.CoreFile",), ["two"]),
+            self.node("Zoom.ZoomFile", ("Core.CoreFile",), ["three"]),
+        ]
+        positions = _layout_positions(files)
+
+        core_x = positions["file:Core.CoreFile"]["x"]
+        app_x = positions["file:App.AppFile"]["x"]
+        zoom_x = positions["file:Zoom.ZoomFile"]["x"]
+        # The dependency-importing modules sit right of their dependency.
+        assert core_x < app_x and core_x < zoom_x
+        assert [app_x, zoom_x] == sorted([app_x, zoom_x])
+
+    def test_declarations_stack_top_to_bottom_inside_their_file(self) -> None:
+        files = [self.node("Core.CoreFile", (), ["beta", "alpha"])]
+        positions = _layout_positions(files)
+
+        alpha, beta = positions["decl:Core.CoreFile:alpha"], positions["decl:Core.CoreFile:beta"]
+        assert alpha["y"] < beta["y"]  # sorted by declaration name
+        assert alpha["x"] == beta["x"]  # one aligned dot-list
+
+    def test_cluster_stacking_leaves_declaration_free_files_in_place(
+        self,
+    ) -> None:
+        files = [self.node("Core.CoreFile", ()), self.node("Core.Empty", ("Core.CoreFile",))]
+        positions = _layout_positions(files)
+
+        # Both files share their module column; the declaration-free one
+        # is placed below its importing sibling without overlapping it.
+        assert positions["file:Core.Empty"]["y"] > positions["file:Core.CoreFile"]["y"]
+
+    def test_positions_cover_every_element(self) -> None:
+        files = [
+            self.node("Core.CoreFile", ()),
+            self.node("Core.Empty", ("Core.CoreFile",)),
+        ]
+        positions = _layout_positions(files)
+        assert set(positions) == {
+            "file:Core.CoreFile",
+            "file:Core.Empty",
+            "module:Core",
+        }
+        for position in positions.values():
+            assert isinstance(position["x"], int)
+            assert isinstance(position["y"], int)
+
+    def test_repeated_renders_are_byte_identical(self, graph_project: Path) -> None:
+        output, first = run_graph(graph_project)
+        output, second = run_graph(graph_project)
+        assert first == second
+
+    def test_positions_are_embedded_for_preset_layout(
+        self, graph_project: Path
+    ) -> None:
+        output, html_text = run_graph(graph_project)
+
+        data = graph_data(html_text)
+        for node in data["nodes"]:
+            assert isinstance(node["position"]["x"], int)
+            assert isinstance(node["position"]["y"], int)
+        # No JS-graph-layout markers left: positions come from the data.
+        assert "preset" in html_text
+        assert "breadthfirst" not in html_text

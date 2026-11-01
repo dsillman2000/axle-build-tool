@@ -159,6 +159,87 @@ def _status_text(node: ManifestNode) -> str:
     return f"{node.status} {_STAR}" if node.status in ("new", "changed") else node.status
 
 
+#: Layout constants (pixels). Columns per module: `_CELL_W` is the
+#: reserved per-module width (labels may bleed into the `_COLUMN_GAP`
+#: gutter), `_DOT_X` the declaration dot's inset, `_HEADER_H` the
+#: space above the first declaration row of a file cluster.
+_CELL_W = 280
+_COLUMN_GAP = 110
+_COLUMN_PAD = 10
+_LAYOUT_TOP = 40
+_DOT_X = 26
+_DECL_ROW = 26
+_HEADER_H = 34
+_CLUSTER_GAP = 42
+
+
+def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
+    """Deterministic module-column positions, computed at build time.
+
+    Cytoscape's generic graph layouts place every leaf on the canvas and
+    ignore compound containment, which scatters declarations away from
+    their files. So the page skips JS layout entirely: each module is a
+    column (modules ordered left-to-right by dependency depth, so
+    cross-module import/dependency edges always flow left-to-right),
+    files stack top-to-bottom within their module ordered by
+    internal import depth, and the file's declarations form an aligned
+    dot-list inside the file's cluster box.
+    """
+    by_name = {node.name: node for node in files}
+    modules = sorted({node.module for node in files})
+
+    def file_level(name: str) -> int:
+        """Longest import path above the file, within its column."""
+        parents = by_name[name].parents
+        return 1 + max((file_level(p) for p in parents if p in by_name), default=-1)
+
+    # Column order: longest-path layering of the module DAG induced by
+    # the files' imports (dependencies first, left to right).
+    module_parents: dict[str, set[str]] = {module: set() for module in modules}
+    for node in files:
+        for parent in node.parents:
+            if parent in by_name:
+                module_parents[node.module].add(by_name[parent].module)
+
+    def module_level(module: str) -> int:
+        return 1 + max(
+            (
+                module_level(parent)
+                for parent in module_parents[module]
+                if parent != module
+            ),
+            default=-1,
+        )
+
+    positions: dict[str, dict[str, int]] = {}
+    x = 0
+    for module in sorted(modules, key=lambda name: (module_level(name), name)):
+        column_x = x
+        y = _LAYOUT_TOP
+        members = sorted(
+            (node for node in files if node.module == module),
+            key=lambda node: (file_level(node.name), node.name),
+        )
+        for member in members:
+            members_decls = sorted(member.declarations, key=lambda decl: decl.name)
+            cluster_h = _HEADER_H + _DECL_ROW * max(1, len(members_decls))
+            dot_x = column_x + _DOT_X
+            dot_y = y + _HEADER_H
+            positions[f"file:{member.name}"] = {"x": dot_x, "y": dot_y}
+            for index, decl in enumerate(members_decls):
+                positions[f"decl:{member.name}:{decl.name}"] = {
+                    "x": dot_x,
+                    "y": dot_y + _DECL_ROW * index,
+                }
+            y += cluster_h + _CLUSTER_GAP
+        # Module compounds' positions are derived from their files by
+        # the renderer; an (impossible) empty module column would still
+        # need a coordinate.
+        positions[f"module:{module}"] = {"x": column_x + _DOT_X, "y": _LAYOUT_TOP}
+        x += _CELL_W + _COLUMN_GAP
+    return positions
+
+
 def build_graph_data(manifest: Manifest, files: list[ManifestNode]) -> dict[str, Any]:
     """Assemble the graph's data: compound nodes, edges, and counts.
 
@@ -253,6 +334,9 @@ def build_graph_data(manifest: Manifest, files: list[ManifestNode]) -> dict[str,
     ]
     #: Cytoscape requires compound parents to precede their children.
     nodes = [*module_nodes, *file_nodes, *decl_nodes]
+    layout = _layout_positions(files)
+    for node in nodes:
+        node["position"] = layout[node["id"]]
 
     # --- file-level import edges ----------------------------------------
     file_names = {node.name for node in files}
@@ -467,7 +551,9 @@ __AXBT_LEGEND__
     boxSelectionEnabled: false,
     autoungrabify: true,
     elements: payload.nodes
-      .map(function (node) { return { data: node, classes: node.state }; })
+      .map(function (node) {
+        return { data: node, classes: node.state, position: node.position };
+      })
       .concat(
         payload.edges.map(function (edge) {
           return { data: edge, classes: edge.kind };
@@ -479,7 +565,9 @@ __AXBT_LEGEND__
         color: "#212529", "text-background-color": "#ffffff", "text-background-opacity": 0.75,
         "text-background-padding": "2px", "text-background-shape": "roundrectangle",
         "font-family": "ui-sans-serif, system-ui, sans-serif", shape: "ellipse" } },
-      { selector: "node[group='declaration']", style: { width: 12, height: 12, "font-size": 11 } },
+      { selector: "node[group='declaration']", style: {
+        width: 12, height: 12, "font-size": 11,
+        "text-valign": "center", "text-halign": "right", "text-margin-x": 12 } },
       { selector: "node[group='file']", style: { shape: "roundrectangle", width: 26, height: 26, "font-size": 12 } },
       { selector: "node[state='verified']", style: { "background-color": "#2f9e44", "border-color": "#237032", "border-width": 1 } },
       { selector: "node[state='checked']", style: { "background-color": "#f2b705", "border-color": "#c58a00", "border-width": 1 } },
@@ -501,7 +589,10 @@ __AXBT_LEGEND__
       { selector: "edge.highlighted", style: { width: 2.4, "line-color": "#1c7ed6", "target-arrow-color": "#1c7ed6", opacity: 1 } }
     ],
     layout: {
-      name: "breadthfirst", directed: true, padding: 40, spacingFactor: 1.2
+      // Positions are computed at build time (module columns, dependency
+      // depth stacking) — the generic JS layouts ignore compound
+      // containment and scatter declarations away from their files.
+      name: "preset", padding: 40, fit: true
     }
   });
 
