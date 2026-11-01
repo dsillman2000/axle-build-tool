@@ -1,0 +1,24 @@
+GEMINI_PLAN.md
+  h_4cc74772b10fd4 126-128
+README.md
+  h_4cc74772b10fd4 77-91,97
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 591-607,610-614,616-619,622-641,842-864,869-871,877-878,883-894,897-940,942,944,962-964,966-967,972-975,1436-1441,1444-1450,1452-1465,1469-1475,1481,1488,1494-1539,1541-1590,1592-1596,1641-1645,1647-1648,1654-1656
+tests/conftest.py
+  h_4cc74772b10fd4 13,112-115,119-121,124-126,263-269,307-316,321-323,330-332
+tests/test_check.py
+  h_4cc74772b10fd4 5,82-85,963-1003
+tests/test_verify.py
+  h_4cc74772b10fd4 5,109-112,873-913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b8dd33957f20b7c689beaac3c125301d65249e80",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
