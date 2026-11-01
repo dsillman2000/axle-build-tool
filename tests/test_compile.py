@@ -520,7 +520,7 @@ class TestExtraction:
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
         # Re-extract just B (A stays clean): B's payload now inlines A
-        # *stubbed to its signature* (`def base := sorry`), the very
+        # with base's real body (def bodies survive stubbing), the very
         # situation the manifest's dependency names must stay true to.
         (root / "M/B.lean").write_text(
             "import A\ntheorem derived : base = 1 := rfl\n-- touched\n",

@@ -75,6 +75,7 @@ Run modes (shared by `compile`, `check`, `verify`):
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
 * `--no-compile` (check/verify) — take the existing manifest at face value.
 * `--fail-fast` / `-x` (check/verify) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`).
+* `--sorry <selector>` (repeatable) — grant a dependency subtree: theorem proof bodies become `sorry` stubs in the submitted payload (signatures intact), and the granted declarations are excused — skipped under check, auto-permitted under verify. Def/abbrev bodies stay real: they are definitional content that downstream proofs unfold (anonymous constructors, projections, `rfl`), so stubbing them would break the very elaboration the grants are meant to leave working. Verify theorems against trusted dependency signatures, or check without paying for slow or broken upstream proofs.
 
 ### Streaming results
 

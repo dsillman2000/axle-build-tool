@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from axle_build_tool.manifest import ExtractedDecl, ManifestNode
-from axle_build_tool.stubbing import STUBBABLE_KINDS, stubbed_source
+from axle_build_tool.stubbing import GRANTED_KINDS, stubbed_source
 
 NODE = ManifestNode(
     name="M.A",
@@ -87,7 +87,7 @@ class TestStubbedSource:
             "namespace Algebra\n"
             "\n"
             "/-- doc for base -/\n"
-            "def base : Nat := sorry\n"          # def body -> `:= sorry`
+            "def base : Nat := 1\n"              # defs keep their real body
             "\n"
             "theorem uses_base : base = 1 := by sorry\n"  # proof -> `:= by sorry`
             "\n"
@@ -159,21 +159,23 @@ class TestStubbedSource:
         assert "theorem uses_base : base = 1 := by sorry" in result
         assert "theorem gap : 2 + 2 = 5 := by sorry" in result  # untouched (already sorry)
 
-    def test_default_stubs_every_stubvable_declaration(self) -> None:
+    def test_default_stubs_every_granted_proof_declaration(self) -> None:
         node = stubbed_node(DECLS)
 
         result = stubbed_source(node, SOURCE)
 
-        assert "def base : Nat := sorry" in result
+        assert "def base : Nat := 1" in result  # def bodies stay real
         assert "theorem uses_base : base = 1 := by sorry" in result
         assert "theorem gap : 2 + 2 = 5 := by sorry" in result
 
-    def test_abbrev_is_stubbed_with_definition_form(self) -> None:
-        node = stubbed_node([decl("my Nat", "abbrev", 1, 1, "abbrev myNat : Nat")])
+    def test_abbrev_keeps_its_real_body(self) -> None:
+        """Definitional bodies are content downstream proofs unfold;
+        grants excuse abbrevs without touching them."""
+        node = stubbed_node([decl("myNat", "abbrev", 1, 1, "abbrev myNat : Nat")])
 
         result = stubbed_source(node, "abbrev myNat : Nat := 1\n")
 
-        assert result == "abbrev myNat : Nat := sorry\n"
+        assert result == "abbrev myNat : Nat := 1\n"
 
     def test_stale_spans_are_left_in_place(self) -> None:
         """Spans beyond the current source (or inverted) are skipped —
@@ -215,8 +217,10 @@ class TestStubbedSource:
             "axiom ax : True := True.intro\n"
         )
 
-    def test_stubvable_kinds_are_exactly_the_body_bearing_ones(self) -> None:
-        assert STUBBABLE_KINDS == {
+    def test_granted_kinds_are_exactly_the_body_bearing_ones(self) -> None:
+        """Grants cover proof kinds (stubbed) plus the definitional
+        kinds (excused with their real bodies)."""
+        assert GRANTED_KINDS == {
             "theorem",
             "lemma",
             "example",

@@ -1,10 +1,10 @@
 """Stubbing of declaration bodies for isolated payloads (`--sorry`).
 
 Passing `--sorry <selector>` trades upstream completeness for speed:
-the selected dependency subtree's proof and definition bodies are
-replaced with `sorry` stubs, keeping every signature intact, so
-downstream code still elaborates against the stubbed declarations'
-types without paying for their (possibly slow or broken) proofs.
+the selected dependency subtree's proof bodies are replaced with
+`sorry` stubs, keeping every signature intact, so downstream code still
+elaborates against the stubbed declarations' types without paying for
+their (possibly slow or broken) proofs.
 
 Stubbing is **local span replacement**: each stubbed declaration's
 recorded line span (exact file coordinates from extraction) is
@@ -16,10 +16,17 @@ construction — no code is moved out of its scope.
 Which kinds are stubbed:
 
 - `theorem` / `lemma` / `example` — proof bodies become `:= by sorry`.
-- `def` / `abbrev` — definition bodies become `:= sorry`.
-- `structure` / `class` / `inductive` / `instance` (and anything else)
-  stay real: their bodies are structural (constructors, instances),
-  not proofs, and removing them would break downstream elaboration.
+- everything else — `def`, `abbrev`, `structure` / `class` /
+  `inductive` / `instance`, and any other kind — stays real.
+
+Definitional bodies are kept deliberately: a def's body is content,
+not proof. Downstream proofs routinely unfold it (anonymous
+constructors against the type, projections, `rfl`), so replacing a
+body with `sorry` makes the declaration opaque and breaks exactly the
+elaboration the stubs were meant to leave working. A granted def or
+abbrev keeps its body and still counts as granted (excused) — which
+also covers the placeholder case of a def whose source body is a
+`sorry`.
 
 A declaration's extracted signature may carry its docstring (observed:
 multi-line docstrings are prepended to the signature text). The stub
@@ -39,8 +46,10 @@ from axle_build_tool.manifest import ExtractedDecl, ManifestNode
 
 #: Kinds whose bodies are proofs — stubbed with `:= by sorry`.
 PROOF_KINDS = frozenset({"theorem", "lemma", "example"})
-#: Kinds with a stubbable body — proof kinds plus definitional kinds.
-STUBBABLE_KINDS = PROOF_KINDS | {"def", "abbrev"}
+#: Kinds a `--sorry` grant covers: proof kinds get stubbed bodies; def
+#: and abbrev keep their real bodies (they are unfolded definitionally
+#: downstream) but count as granted — excused from verify's sweep.
+GRANTED_KINDS = PROOF_KINDS | {"def", "abbrev"}
 
 
 def _statement_of(signature: str) -> str:
@@ -107,22 +116,22 @@ def stubbed_source(
     only: frozenset[str] | None = None,
     warnings: list[str] | None = None,
 ) -> str:
-    """`source` with the node's stubbable declarations replaced by stubs.
+    """`source` with the node's granted proof declarations replaced by stubs.
 
     `only` restricts stubbing to those declaration names; by default
-    every stubbable declaration (`STUBBABLE_KINDS`) in the node is
-    stubbed. Spans that overlap, are inverted, fall outside the current
-    source, or don't start where the declaration's keyword should be
-    are left in place (defensive against stale manifests) — when
-    `warnings` is given, each skip appends a message there naming the
-    file and the prescription.
+    every proof declaration (`PROOF_KINDS`) in the node is stubbed —
+    def/abbrev grants keep their real bodies. Spans that overlap, are
+    inverted, fall outside the current source, or don't start where the
+    declaration's keyword should be are left in place (defensive
+    against stale manifests) — when `warnings` is given, each skip
+    appends a message there naming the file and the prescription.
     """
     lines = source.splitlines()
     out: list[str] = []
     cursor = 0  # 0-based index of the next unconsumed line
 
     for declaration in sorted(node.declarations, key=lambda d: d.line_pos):
-        if declaration.kind not in STUBBABLE_KINDS:
+        if declaration.kind not in PROOF_KINDS:
             continue
         if only is not None and declaration.name not in only:
             continue

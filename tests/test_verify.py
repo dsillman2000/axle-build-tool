@@ -873,7 +873,7 @@ class TestSorry:
         persisted = root / ".axbt" / "compiled" / "M_B_stubbed.lean"
         assert persisted.is_file()
         content = persisted.read_text(encoding="utf-8")
-        assert "def base : Nat := sorry" in content
+        assert "def base := 1" in content  # def bodies stay real
         assert "theorem base_holds : base = 1 := by sorry" in content
         # The selection itself is never stubbed.
         assert "theorem middle : base = 1 := rfl" in content

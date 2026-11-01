@@ -52,7 +52,7 @@ from axle_build_tool.payloads import (
     write_compiled_payloads,
 )
 from axle_build_tool.scanner import ScanError, scan_module
-from axle_build_tool.stubbing import STUBBABLE_KINDS, bare_name
+from axle_build_tool.stubbing import GRANTED_KINDS, bare_name
 from axle_build_tool.selection import Selection, SelectionError, resolve_selection
 
 _PLACEHOLDER_SOURCE = """\
@@ -346,7 +346,7 @@ def _refine_stub_map(
         node = manifest.by_name()[name]
         if names is None:
             remaining = frozenset(
-                d.name for d in node.declarations if d.kind in STUBBABLE_KINDS
+                d.name for d in node.declarations if d.kind in GRANTED_KINDS
             ) - {selection.declaration}
         else:
             remaining = names - {selection.declaration}
@@ -482,7 +482,7 @@ def _stub_context_line(
         if node is None:
             continue
         count = (
-            len([d for d in node.declarations if d.kind in STUBBABLE_KINDS])
+            len([d for d in node.declarations if d.kind in GRANTED_KINDS])
             if names is None
             else len(names)
         )
@@ -785,9 +785,10 @@ def _rewrite_message_position(
     "sorry",
     multiple=True,
     help=(
-        "Stub the given dependency subtree's proof/definition bodies "
-        "(signatures preserved; repeatable). The selection itself is "
-        "never stubbed."
+        "Stub the given dependency subtree's theorem proof bodies "
+        "(signatures preserved; def/abbrev bodies stay real because "
+        "downstream proofs unfold them; repeatable). The selection "
+        "itself is never stubbed."
     ),
 )
 @click.option(
@@ -1336,7 +1337,7 @@ def _verify_scope(
             continue
         if names is None:
             stubbed_names |= {
-                d.name for d in node.declarations if d.kind in STUBBABLE_KINDS
+                d.name for d in node.declarations if d.kind in GRANTED_KINDS
             }
         else:
             stubbed_names |= names
@@ -1444,10 +1445,11 @@ def _verify_scope(
     "sorry",
     multiple=True,
     help=(
-        "Stub the given dependency subtree's proof/definition bodies "
-        "(signatures preserved; repeatable); the stubbed declarations "
-        "are automatically permitted in the verification. The selection "
-        "itself is never stubbed."
+        "Stub the given dependency subtree's theorem proof bodies "
+        "(signatures preserved; def/abbrev bodies stay real because "
+        "downstream proofs unfold them; repeatable); the stubbed "
+        "declarations are automatically permitted in the verification. "
+        "The selection itself is never stubbed."
     ),
 )
 @click.option(

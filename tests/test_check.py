@@ -607,7 +607,7 @@ class TestSorry:
         assert result.exit_code == 0, result.output
         content = check_calls(fake_axle)[0]["content"]
         # A's bodies are stubbed (signatures preserved)...
-        assert "def base : Nat := sorry" in content
+        assert "def base := 1" in content  # def bodies stay real
         assert "theorem base_holds : base = 1 := by sorry" in content
         # ...B (not stubbed) is real...
         assert "def middle := base + 1" in content
@@ -629,8 +629,8 @@ class TestSorry:
 
         assert result.exit_code == 0, result.output
         content = check_calls(fake_axle)[0]["content"]
-        assert "def base : Nat := sorry" in content
-        assert "def middle : Nat := sorry" in content
+        assert "def base := 1" in content  # def bodies stay real
+        assert "def middle := base + 1" in content  # def bodies stay real
         assert "theorem top : middle = 2 := by decide" in content
 
     def test_sorry_declaration_level_stubs_one_declaration(
@@ -644,7 +644,7 @@ class TestSorry:
 
         assert result.exit_code == 0, result.output
         content = check_calls(fake_axle)[0]["content"]
-        assert "def base : Nat := sorry" in content
+        assert "def base := 1" in content  # def bodies stay real
         assert "theorem base_holds : base = 1 := rfl" in content  # sibling stays real
 
     def test_sorry_applies_where_relevant_for_default_runs(
@@ -671,7 +671,7 @@ class TestSorry:
         # C.top's selection: A is transitive -> stubbed too.
         assert len(check_calls(fake_axle)) == 2
         for call in check_calls(fake_axle):
-            assert "def base : Nat := sorry" in call["content"]
+            assert "def base := 1" in call["content"]  # def bodies stay real
 
     def test_sorry_nowhere_applicable_is_rejected(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -735,7 +735,7 @@ class TestSorry:
 
         assert result.exit_code == 0, result.output
         content = check_calls(fake_axle)[0]["content"]
-        assert "def base : Nat := sorry" in content  # sibling stubbed
+        assert "def base := 1" in content  # defs keep their real bodies
         assert "theorem base_holds : base = 1 := rfl" in content  # selection real
 
     def test_sorry_naming_only_the_selected_declaration_is_rejected(
@@ -761,7 +761,7 @@ class TestSorry:
 
         assert result.exit_code == 0, result.output
         content = check_calls(fake_axle)[0]["content"]
-        assert "def base : Nat := sorry" in content
+        assert "def base := 1" in content  # def bodies stay real
         assert "theorem top : middle = 2 := by decide" in content  # the rest judged
         assert "siblings stubbed: 2 declarations" in result.output
 
