@@ -979,7 +979,7 @@ class TestShare:
 
         assert result.exit_code == 0, result.output
         assert len(verify_calls(fake_axle)) == 2
-        assert result.output.count("share: https://axle.test/check#r=fake-req-") == 2
+        assert result.output.count("share: https://axle.test/verify#r=fake-req-") == 2
         assert "Share link(s) minted: 2" in result.output
         # Successful verifications record their run's request id.
         manifest = load_manifest(root)
@@ -990,6 +990,27 @@ class TestShare:
         }
         assert set(stamped.values()) <= set(fake_axle.request_ids)
         assert all(stamped.values())
+
+    def test_share_links_open_the_verify_route_check_stays_check(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The two tiers mint differently: a check run's share link
+        opens the platform's check UI, a verify run's the verify UI —
+        the stored request id already knows what was served; the route
+        steers the web page."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        check_result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+        assert check_result.exit_code == 0, check_result.output
+        assert "share: https://axle.test/check#r=" in check_result.output
+
+        fake_axle.calls.clear()
+        verify_result = runner.invoke(main, ["verify", "--select", "M.A", "--share"])
+        assert verify_result.exit_code == 0, verify_result.output
+        assert "share: https://axle.test/verify#r=" in verify_result.output
 
     def test_share_on_cached_run_mints_from_the_recorded_run(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1056,7 +1077,7 @@ class TestShare:
         # t1's guard failure fails the run; only the sibling t2
         # submitted, so exactly one link exists.
         assert result.exit_code == 1
-        assert result.output.count("share: https://axle.test/check#r=") == 1
+        assert result.output.count("share: https://axle.test/verify#r=") == 1
 
 
 class TestStreaming:

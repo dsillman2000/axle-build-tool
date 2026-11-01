@@ -651,14 +651,18 @@ async def _mint_share_link(
     links: dict[str, str | AxleServiceError],
     *,
     enabled: bool = True,
+    kind: str = "check",
 ) -> None:
     """Conditionally mint one `--share` link into `links`.
 
     Best-effort and deduplicated: maps the id to its share URL, or to
     the `AxleServiceError` when that mint failed; a request id shared
-    across selections mints once. Sharing is a convenience: callers
-    warn on errors and never fail the run over them. Nothing is minted
-    when `enabled` is false (`--share` was not passed).
+    across selections mints once (with the first `kind` that reached
+    it). Sharing is a convenience: callers warn on errors and never
+    fail the run over them. Nothing is minted when `enabled` is false
+    (`--share` was not passed). `kind` selects the web route the link
+    opens (`check` or `verify`) — it must match the tier of the run
+    that produced the request id.
 
     The mint retries briefly because it streams in the moment the
     response arrives — ahead of batch minting, the share service may
@@ -671,7 +675,7 @@ async def _mint_share_link(
             if wait:
                 await asyncio.sleep(wait)
             try:
-                links[request_id] = await service.share_link(request_id)
+                links[request_id] = await service.share_link(request_id, kind=kind)
                 error = None
                 break
             except AxleServiceError as exc:
@@ -1662,6 +1666,7 @@ def verify(
                         _latest_verified_request_id(manifest, scope.cached),
                         share_links,
                         enabled=share,
+                        kind="verify",
                     )
             #: Selections judged without a submission report first; the
             #: streamed verdicts print the moment each submission
@@ -1836,7 +1841,7 @@ def verify(
                                 f"    failed declarations: {', '.join(response.failed_declarations)}"
                             )
                         await _mint_share_link(
-                            service, rid, share_links, enabled=share
+                            service, rid, share_links, enabled=share, kind="verify"
                         )
                         _print_share_line(share_links, rid)
                         #: --fail-fast: the first failed selection cancels

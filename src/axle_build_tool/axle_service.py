@@ -238,7 +238,7 @@ class AxleService:
                 describe_axle_error(exc, self._config, context)
             ) from exc
 
-    async def share_link(self, request_id: str) -> str:
+    async def share_link(self, request_id: str, *, kind: str = "check") -> str:
         """Mint a share link for a previously served request.
 
         The platform's share route lives outside the versioned `api/v1`
@@ -248,6 +248,11 @@ class AxleService:
         connection pool. The API only accepts ids of requests it has
         actually served (it keeps its own log); the caller is expected
         to treat failures as a warning, not a run failure.
+
+        `kind` selects the web route the link opens: `check` for
+        typecheck runs and `verify` for kernel-level runs (the stored
+        request itself knows what was served; the route only steers the
+        web UI).
         """
         url = f"{self.client.url}/v1/shared-links"
         session = self.client._session
@@ -264,7 +269,7 @@ class AxleService:
                     )
         except aiohttp.ClientError as exc:
             raise AxleServiceError(f"the share request failed: {exc}") from exc
-        return f"{self.client.url}/check#r={request_id}"
+        return f"{self.client.url}/{kind}#r={request_id}"
 
     async def theorem2sorry(
         self, content: str, *, context: str = "", **kwargs: Any
