@@ -673,11 +673,12 @@ class TestLiveTierSplit:
 
         from axle_build_tool.manifest import load_manifest
 
-        (base_holds,) = [
-            decl
+        decls = {
+            decl.name: decl
             for node in load_manifest(root).nodes
             for decl in node.declarations
-        ]
+        }
+        base_holds = decls["base_holds"]
         assert base_holds.checked_sig is not None
         assert base_holds.verified_sig is not None
         assert base_holds.checked_sig == base_holds.verified_sig
