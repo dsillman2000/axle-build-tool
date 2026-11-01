@@ -94,6 +94,16 @@ class TestBuildSequencing:
         # single-tier reports produce (the tag is suffix-only).
         assert status_line(output, "M.A.t1") == "M.A.t1 OK"
         assert status_line(output, "M.B.t2") == "M.B.t2 OK"
+        # One shared task space: checks number 1..N of 2N, verifies
+        # N+1..2N — the two passes never both say [1/2].
+        check_counters = sorted(
+            line.split()[1].strip("[]") for line in check_rows
+        )
+        verify_counters = sorted(
+            line.split()[1].strip("[]") for line in verify_rows
+        )
+        assert check_counters == ["1/4", "2/4"]
+        assert verify_counters == ["3/4", "4/4"]
 
     def test_the_verify_pass_presents_each_selection_on_request(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle

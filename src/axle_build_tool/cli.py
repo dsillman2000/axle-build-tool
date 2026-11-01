@@ -679,6 +679,10 @@ class _BuildState:
     failed_labels: set[str] = field(default_factory=set)
     #: Selection count, set by the check pass as it builds its report.
     item_total: int = 0
+    #: The build-wide task count: every selection occupies two slots
+    #: (its check, then its verify), numbered in one shared space —
+    #: checks at 1..N, verifies at N+1..2N.
+    task_total: int = 0
     #: A fail-fast in the check pass stops the build before verifying.
     stopped: bool = False
     cancelled: int = 0
@@ -693,6 +697,31 @@ def _report_tier_tag() -> str:
     if _build_state is None:
         return ""
     return f"  [{_build_state.tier}]"
+
+
+def _task_total(pass_total: int) -> int:
+    """The task counter's denominator.
+
+    Outside of build mode it is the pass's own selection total; under
+    `build` every selection occupies two slots (its check and its
+    verify) in one shared task space, so checks are 1..N and verifies
+    N+1..2N — a single queue of 2N tasks.
+    """
+    if _build_state is None:
+        return pass_total
+    if not _build_state.task_total:
+        _build_state.task_total = 2 * pass_total
+    return _build_state.task_total
+
+
+def _task_offset(pass_total: int) -> int:
+    """The numerator's offset for this pass's items.
+
+    The check pass numbers 1..N; the verify pass continues at N+1.
+    """
+    if _build_state is None or _build_state.tier == "check":
+        return 0
+    return pass_total
 
 
 async def _mint_share_link(
@@ -1034,7 +1063,7 @@ def check(
                     # moment the semaphore actually dispatches it, so
                     # its reported timing runs from its own START.
                     click.echo(
-                        f"{_clock()} {_item_counter(headline[label], report.item_total)} "
+                        f"{_clock()} {_item_counter(headline[label] + _task_offset(report.item_total), _task_total(report.item_total))} "
                         f"{label:<{width}}  {click.style('START', fg='white')}  [RUN]"
                     )
                     # Declaration-level selections focus the check by name;
@@ -1055,7 +1084,7 @@ def check(
                 report.skipped += 1
                 report.mark()
                 click.echo(
-                    f"{_clock()} {_item_counter(headline[label], report.item_total)} "
+                    f"{_clock()} {_item_counter(headline[label] + _task_offset(report.item_total), _task_total(report.item_total))} "
                     f"{label:<{width}}  "
                     f"{click.style('SKIP', dim=True)}"
                 )
@@ -1083,7 +1112,10 @@ def check(
                         if _build_state is not None:
                             _build_state.failed_labels.add(label)
                             _build_state.skip_verify.add(label)
-                    counter = _item_counter(headline[label], report.item_total)
+                    counter = _item_counter(
+                        headline[label] + _task_offset(report.item_total),
+                        _task_total(report.item_total),
+                    )
                     for printed, node, decl in _printed_lines(label, selection, manifest):
                         if node is None:
                             status = (
@@ -1782,7 +1814,10 @@ def verify(
             #: streamed verdicts print the moment each submission
             #: completes, in completion order, with its elapsed time.
             stopped = False
-            counter_of = lambda label: _item_counter(headline[label], report.item_total)  # noqa: E731 - small inline formatter
+            counter_of = lambda label: _item_counter(  # noqa: E731 - small inline formatter
+                headline[label] + _task_offset(report.item_total),
+                _task_total(report.item_total),
+            )
             for label, _selection, payload, _refined, granted, scope in items:
                 if granted is not None:
                     report.skipped += 1

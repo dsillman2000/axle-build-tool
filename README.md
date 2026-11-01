@@ -93,18 +93,18 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 
 ### Building both tiers
 
-`axbt build` runs the two tiers over the same selections in one invocation — dbt's combined "run + test": the check tier streams first, then the verify tier, then the run exits nonzero if either tier failed. Selections whose check failed are skipped (without a submission) in the verify pass — re-verifying them would only repeat the failure — and a fail-fast in the check pass abandons the build before verifying anything. Every build-mode verdict row carries its tier as a suffix so the two reports tell apart:
+`axbt build` runs the two tiers over the same selections in one invocation — dbt's combined "run + test": the check tier streams first, then the verify tier, then the run exits nonzero if either tier failed. Selections whose check failed are skipped (without a submission) in the verify pass — re-verifying them would only repeat the failure — and a fail-fast in the check pass abandons the build before verifying anything. Every build-mode verdict row carries its tier as a suffix so the two reports tell apart, and the counters enumerate one task list — checks own slots 1..N, their verifies N+1..2N (24 tasks for 12 selections):
 
 ```text
-18:44:29.123 [ 1/2] M.A.t1  START  [RUN]
-18:44:29.530 [ 1/2] M.A.t1  OK  0.407s  [check]
-18:44:29.531 [ 2/2] M.B.t2  START  [RUN]
-18:44:29.533 [ 2/2] M.B.t2  FAIL  0.002s  [check]
+18:44:29.123 [ 1/4] M.A.t1  START  [RUN]
+18:44:29.530 [ 1/4] M.A.t1  OK  0.407s  [check]
+18:44:29.531 [ 2/4] M.B.t2  START  [RUN]
+18:44:29.533 [ 2/4] M.B.t2  FAIL  0.002s  [check]
 18:44:29.540 Checked 2 selection(s): 1 failed, 1 OK in 0.412s
-18:44:29.601 [ 2/2] M.B.t2  SKIP  [verify]
+18:44:29.601 [ 4/4] M.B.t2  SKIP  [verify]
     the check pass failed this selection above; verify skipped
-18:44:29.602 [ 1/2] M.A.t1  START  [RUN]
-18:44:29.602 [ 1/2] M.A.t1  OK  0.712s  [verify]
+18:44:29.602 [ 3/4] M.A.t1  START  [RUN]
+18:44:29.602 [ 3/4] M.A.t1  OK  0.712s  [verify]
 18:44:29.715 Built 2 selection(s): 1 failed, 1 OK in 0.592s
 ```
 
