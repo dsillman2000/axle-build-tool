@@ -141,12 +141,14 @@ def normalized_lines(output: str) -> list[str]:
 _DOCUMENT_COUNTER = re.compile(r"^\[\s*\d+/\d+\] +")
 _TIMESTAMP = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3} +")
 _ITEM_TIMING = re.compile(r" +\d+\.\d{3}s$")
+_TIER_TAG = re.compile(r" +\[(?:check|verify)\]$")
 
 
 def _strip_prefixes(line: str) -> str:
     """A report line minus its timestamp and progress counter."""
     body = _TIMESTAMP.sub("", line, count=1)
-    return _DOCUMENT_COUNTER.sub("", body, count=1)
+    body = _DOCUMENT_COUNTER.sub("", body, count=1)
+    return _TIER_TAG.sub("", body, count=1)
 
 
 def stripped_lines(output: str) -> list[str]:
@@ -362,6 +364,10 @@ class FakeAxleClient:
         self._extract_documents_by_marker = extract_documents_by_marker or {}
         self.check_result = make_response(CheckResponse)
         self.verify_result = make_response(VerifyProofResponse, negation=None)
+        #: Content markers whose payloads are failed by `check` (routing
+        #: like `check_delays`: a set of substrings; when any occurs in
+        #: the submitted content the call's response is okay=False).
+        self.check_failures: set[str] = set()
         #: Artificial per-submission delays, letting tests control the
         #: order submissions complete in (and so the streaming report's
         #: completion-order lines). Keyed by a content marker, routed to
@@ -421,9 +427,12 @@ class FakeAxleClient:
         self.calls.append(("check", kwargs))
         if self._error:
             raise self._error
-        delay = self._delay_for(self.check_delays, kwargs.get("content", ""))
+        content = kwargs.get("content", "")
+        delay = self._delay_for(self.check_delays, content)
         if delay:
             await asyncio.sleep(delay)
+        if self.check_failures and any(marker in content for marker in self.check_failures):
+            return self._with_request_id(dataclasses.replace(self.check_result, okay=False))
         return self._with_request_id(self.check_result)
 
     async def verify_proof(self, **kwargs: Any) -> VerifyProofResponse:

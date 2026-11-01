@@ -65,18 +65,38 @@ axle:
 | `axbt compile` | Scan modules, extract declarations via the API, write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/`. |
 | `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every configured target — or a `--select`ion — as a standalone payload with dependencies inlined. Clean outcomes are recorded per declaration in the manifest. |
 | `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
+| `axbt build` | Both tiers in one run, dbt-style: the check tier streams first, then the verify tier — skipping the selections whose check failed — and the run exits nonzero if either tier failed. Verdict rows carry a `[check]`/`[verify]` tier suffix so the two passes tell apart. |
 | `axbt list` | Print the parsed declaration tree — kinds, file-accurate positions, `sorry` markers — dependencies first. Offline and read-only. |
 | `axbt graph` | Render the manifest as an offline, interactive Cytoscape.js HTML graph (default `.axbt/graph.html`; `--select` filters the subgraph). Colors key on outcome stamps only. No API calls. |
 | `axbt debug` | Verify `AXLE_API_KEY` is set and accepted by the API; print the project's configuration and `.axbt/` cache state. |
 
-Run modes (shared by `compile`, `check`, `verify`):
+Run modes (shared by `compile`, `check`, `verify`, `build`):
 
 * `--incremental` (default) — re-extract only new and changed files; a clean tree makes no API calls.
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
-* `--no-compile` (check/verify) — take the existing manifest at face value.
-* `--fail-fast` / `-x` (check/verify) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`).
+* `--no-compile` (check/verify/build) — take the existing manifest at face value.
+* `--fail-fast` / `-x` (check/verify/build) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`); under `build`, a fail-fast in the check pass ends the build before the verify pass.
 * `--sorry <selector>` (repeatable) — grant a dependency subtree: theorem proof bodies become `sorry` stubs in the submitted payload (signatures intact), and the granted declarations are excused — skipped under check, auto-permitted under verify. Def/abbrev bodies stay real: they are definitional content that downstream proofs unfold (anonymous constructors, projections, `rfl`), so stubbing them would break the very elaboration the grants are meant to leave working. Verify theorems against trusted dependency signatures, or check without paying for slow or broken upstream proofs.
-* `--minify/--no-minify` (check/verify) — payload minification is on by default: comments and blank lines are stripped from the submitted content (declaration docstrings and indentation stay put), shrinking request bodies and the `.axbt/compiled/` inspection artifacts. Attribution is unaffected — line maps are built from the surviving lines' original numbers, and files that don't track cleanly are submitted unminified. `--no-minify` opts a run out; set `minify: false` under `project:` in `axbt_project.yml` to change the default. The cached/stamped signature material includes the effective setting, so flipping the mode re-verifies once under the new payload shape.
+* `--minify/--no-minify` (check/verify/build) — payload minification is on by default: comments and blank lines are stripped from the submitted content (declaration docstrings and indentation stay put), shrinking request bodies and the `.axbt/compiled/` inspection artifacts. Attribution is unaffected — line maps are built from the surviving lines' original numbers, and files that don't track cleanly are submitted unminified. `--no-minify` opts a run out; set `minify: false` under `project:` in `axbt_project.yml` to change the default. The cached/stamped signature material includes the effective setting, so flipping the mode re-verifies once under the new payload shape.
+
+### Building both tiers
+
+`axbt build` runs the two tiers over the same selections in one invocation — dbt's combined "run + test": the check tier streams first, then the verify tier, then the run exits nonzero if either tier failed. Selections whose check failed are skipped (without a submission) in the verify pass — re-verifying them would only repeat the failure — and a fail-fast in the check pass abandons the build before verifying anything. Every build-mode verdict row carries its tier as a suffix so the two reports tell apart:
+
+```text
+18:44:29.123 [ 1/2] M.A.t1  START  [RUN]
+18:44:29.530 [ 1/2] M.A.t1  OK  0.407s  [check]
+18:44:29.531 [ 2/2] M.B.t2  START  [RUN]
+18:44:29.533 [ 2/2] M.B.t2  FAIL  0.002s  [check]
+18:44:29.540 Checked 2 selection(s): 1 failed, 1 OK in 0.412s
+18:44:29.601 [ 2/2] M.B.t2  SKIP  [verify]
+    the check pass failed this selection above; verify skipped
+18:44:29.602 [ 1/2] M.A.t1  START  [RUN]
+18:44:29.602 [ 1/2] M.A.t1  OK  0.712s  [verify]
+18:44:29.715 Built 2 selection(s): 1 failed, 1 OK in 0.592s
+```
+
+`build` shares every run mode: `--sorry` grants apply in the check pass, `--permitted-sorries`/`--force` shape the verify pass, and `--select`, `--share`, `--fail-fast`, and the minification settings apply to both.
 
 ### Streaming results
 

@@ -659,6 +659,42 @@ class _StreamingReport:
         self.printed += 1
 
 
+@dataclass
+class _BuildState:
+    """Context of an `axbt build` run: check then verify in one pass.
+
+    The two tier commands keep their own streaming reports; under
+    `build` they carry metadata through this context instead of
+    returning it. Each pass tags its answer rows with its tier (see
+    `_report_tier_tag`), the check pass feeds back the labels whose
+    check failed (the verify pass skips them without submitting), and a
+    fail-fast stop in the check pass ends the whole build.
+    """
+
+    #: Which pass's rows are being tagged (`check` or `verify`).
+    tier: str = "check"
+    #: Selection labels whose check-tier submission failed.
+    skip_verify: set[str] = field(default_factory=set)
+    #: Selection labels that failed either tier (the build summary).
+    failed_labels: set[str] = field(default_factory=set)
+    #: Selection count, set by the check pass as it builds its report.
+    item_total: int = 0
+    #: A fail-fast in the check pass stops the build before verifying.
+    stopped: bool = False
+    cancelled: int = 0
+
+
+_build_state: _BuildState | None = None
+
+
+def _report_tier_tag() -> str:
+    """The verdict-row suffix naming the pass (`check`/`verify`).
+    Empty string outside of build mode."""
+    if _build_state is None:
+        return ""
+    return f"  [{_build_state.tier}]"
+
+
 async def _mint_share_link(
     service: Any,
     request_id: str | None,
@@ -957,6 +993,8 @@ def check(
         )
     )
     report = _StreamingReport(item_total=len(checks))
+    if _build_state is not None:
+        _build_state.item_total = len(checks)
     headline = {item[0]: index for index, item in enumerate(checks, start=1)}
     share_links: dict[str, str | AxleServiceError] = {}
     #: Check stamps ride the submission completion loop: declaration
@@ -1042,6 +1080,9 @@ def check(
                     label, selection, payload, refined, _granted = item
                     if not response.okay:
                         report.failed += 1
+                        if _build_state is not None:
+                            _build_state.failed_labels.add(label)
+                            _build_state.skip_verify.add(label)
                     counter = _item_counter(headline[label], report.item_total)
                     for printed, node, decl in _printed_lines(label, selection, manifest):
                         if node is None:
@@ -1054,7 +1095,7 @@ def check(
                             status = _decl_verdict(node, decl, response, payload)
                         click.echo(
                             f"{_clock()} {counter} {printed:<{width}}  {status}"
-                            f"  {_timing_text(elapsed)}"
+                            f"  {_timing_text(elapsed)}{_report_tier_tag()}"
                         )
                     report.mark()
                     kept, _ = _split_stub_warnings(
@@ -1108,6 +1149,11 @@ def check(
                     #: tasks to the cancelled count.
                     if fail_fast and not response.okay:
                         report.cancelled = len(pending) + len(done) - processed_in_batch
+                        if _build_state is not None:
+                            #: The whole build stops here: nothing
+                            #: verifies after an abandoned check pass.
+                            _build_state.stopped = True
+                            _build_state.cancelled = report.cancelled
                         click.secho(
                             f"    fail-fast: cancelled {report.cancelled} "
                             "remaining selection(s)",
@@ -1631,6 +1677,20 @@ def verify(
     try:
         items: list[tuple[str, Selection, Payload | None, dict, str | None, _VerifyScope | None]] = []
         for label, selection, explicit in plan:
+            if _build_state is not None and label in _build_state.skip_verify:
+                #: The build's check pass already failed this selection;
+                #: verifying it would only repeat the same failure.
+                items.append(
+                    (
+                        label,
+                        selection,
+                        None,
+                        refined,
+                        "the check pass failed this selection above; verify skipped",
+                        None,
+                    )
+                )
+                continue
             refined = _refine_stub_map(
                 stub_map, selection, label, manifest, explicit
             )
@@ -1729,7 +1789,7 @@ def verify(
                     report.mark()
                     click.echo(
                         f"{_clock()} {counter_of(label)} {label:<{width}}  "
-                        f"{click.style('SKIP', dim=True)}"
+                        f"{click.style('SKIP', dim=True)}{_report_tier_tag()}"
                     )
                     click.secho(f"    {granted}", dim=True)
                     continue
@@ -1739,16 +1799,18 @@ def verify(
                     report.mark()
                     click.echo(
                         f"{_clock()} {counter_of(label)} {label:<{width}}  "
-                        f"{click.style('SKIP', dim=True)}"
+                        f"{click.style('SKIP', dim=True)}{_report_tier_tag()}"
                     )
                     click.secho(f"    {scope.skip_reason}", dim=True)
                     continue
                 if scope.sorried:
                     report.failed += 1
                     report.mark()
+                    if _build_state is not None:
+                        _build_state.failed_labels.add(label)
                     click.echo(
                         f"{_clock()} {counter_of(label)} {label:<{width}}  "
-                        f"{click.style('FAIL', fg='red')}"
+                        f"{click.style('FAIL', fg='red')}{_report_tier_tag()}"
                     )
                     for name in scope.sorried:
                         click.echo(
@@ -1773,7 +1835,7 @@ def verify(
                     note = "cached" if scope.cached else "nothing to submit"
                     click.echo(
                         f"{_clock()} {counter_of(label)} {label:<{width}}  "
-                        f"{click.style('OK', fg='green')} ({note})"
+                        f"{click.style('OK', fg='green')} ({note}){_report_tier_tag()}"
                     )
                     if scope.cached:
                         rid = _latest_verified_request_id(manifest, scope.cached)
@@ -1854,13 +1916,16 @@ def verify(
                             click.echo(
                                 f"{_clock()} {counter_of(label)} {label:<{width}}  "
                                 f"{click.style('OK', fg='green')}{cached_note}"
-                                f"  {_timing_text(elapsed)}"
+                                f"  {_timing_text(elapsed)}{_report_tier_tag()}"
                             )
                         else:
                             report.failed += 1
+                            if _build_state is not None:
+                                _build_state.failed_labels.add(label)
                             click.echo(
                                 f"{_clock()} {counter_of(label)} {label:<{width}}  "
                                 f"{click.style('FAIL', fg='red')}  {_timing_text(elapsed)}"
+                                f"{_report_tier_tag()}"
                             )
                             if vacuous:
                                 click.echo(
@@ -1985,6 +2050,181 @@ def verify(
         fg="green",
     )
     _print_share_summary(share_links)
+
+
+@main.command("build")
+@click.option(
+    "--no-compile",
+    "no_compile",
+    is_flag=True,
+    default=False,
+    help="Use the existing manifest at face value in both passes.",
+)
+@click.option(
+    "--incremental/--full-refresh",
+    "incremental",
+    default=True,
+    help="Run mode of the precursor compile. Incremental (default) "
+    "re-extracts only new and changed files; --full-refresh re-extracts "
+    "everything.",
+)
+@click.option(
+    "--sorry",
+    "sorry",
+    multiple=True,
+    help=(
+        "Stub the given dependency subtree's theorem proof bodies in the "
+        "check pass (signatures preserved; def/abbrev bodies stay real; "
+        "repeatable). The selections themselves are never stubbed."
+    ),
+)
+@click.option(
+    "--permitted-sorries",
+    "permitted_sorries",
+    multiple=True,
+    help=(
+        "Excuse the named incomplete declarations in the verify pass "
+        "(selector grammar; repeatable) instead of failing on them."
+    ),
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Re-verify in the verify pass even when the cache is still valid.",
+)
+@click.option(
+    "--select",
+    "select",
+    default=None,
+    help="Run both passes over a single selection instead of all targets.",
+)
+@click.option(
+    "--share", "share", is_flag=True, default=False,
+    help="Print a share link for every submission in both passes.",
+)
+@click.option(
+    "--fail-fast", "-x", "fail_fast", is_flag=True, default=False,
+    help=(
+        "Stop at the first failure in the pass that produced it; the "
+        "check pass stopping abandons the build before verifying."
+    ),
+)
+@click.option(
+    "--minify/--no-minify",
+    "minify_flag",
+    default=None,
+    help=(
+        "Best-effort minification of the submitted payloads in both "
+        "passes. Defaults to the project config's `project.minify` "
+        "setting (on)."
+    ),
+)
+@click.pass_context
+def build(
+    ctx: click.Context,
+    no_compile: bool,
+    incremental: bool,
+    sorry: tuple[str, ...],
+    permitted_sorries: tuple[str, ...],
+    force: bool,
+    select: str | None,
+    share: bool,
+    fail_fast: bool,
+    minify_flag: bool | None,
+) -> None:
+    """Typecheck and then kernel-verify targets or a selection in one run.
+
+    The dbt `build` analogue: the check tier streams first, then the
+    verify tier runs over the same selections — skipping the ones whose
+    check failed (re-running verify would only repeat the failure) — and
+    the run exits nonzero if either tier failed. Selections answered
+    locally (grants, stalls, cached verifications) stream without
+    submissions, as in the individual commands.
+
+    The two passes share every run mode: --sorry grants the check pass;
+    --permitted-sorries and --force shape the verify pass; --select,
+    --share, --fail-fast, and the minification settings apply to both.
+    Both passes tag their verdict rows with the tier suffix
+    (`[check]`/`[verify]`) so the two reports tell apart.
+
+    A --fail-fast in the check pass stops the whole build before the
+    verify pass runs (nothing verifies under an abandoned check).
+    """
+    global _build_state
+    _build_state = _BuildState()
+    started = time.monotonic()
+    tiers_failed = False
+    try:
+        try:
+            ctx.invoke(
+                check,
+                no_compile=no_compile,
+                incremental=incremental,
+                sorry=sorry,
+                select=select,
+                share=share,
+                fail_fast=fail_fast,
+                minify_flag=minify_flag,
+            )
+        except (click.exceptions.Exit, SystemExit) as exc:
+            code = getattr(exc, "exit_code", getattr(exc, "code", None))
+            if code in (None, 0):
+                pass
+            else:
+                tiers_failed = True
+                if fail_fast and _build_state.stopped:
+                    click.secho(
+                        f"{_clock()} Build stopped by fail-fast in the check "
+                        "pass; verify not run",
+                        dim=True,
+                    )
+                    #: The check summary above carries the cancelled
+                    #: accounting; end the build here, nonzero.
+                    _build_state = None
+                    raise click.exceptions.Exit(1)
+        _build_state.tier = "verify"
+        try:
+            ctx.invoke(
+                verify,
+                no_compile=no_compile,
+                incremental=incremental,
+                sorry=sorry,
+                permitted_sorries=permitted_sorries,
+                force=force,
+                select=select,
+                share=share,
+                fail_fast=fail_fast,
+                minify_flag=minify_flag,
+            )
+        except (click.exceptions.Exit, SystemExit) as exc:
+            code = getattr(exc, "exit_code", getattr(exc, "code", None))
+            if code not in (None, 0):
+                tiers_failed = True
+    finally:
+        state, _build_state = _build_state, None
+
+    total = state.item_total
+    if total:
+        failed = len(state.failed_labels)
+        ok = total - failed - state.cancelled
+        cancelled_note = (
+            f", {state.cancelled} cancelled by fail-fast" if state.cancelled else ""
+        )
+        if failed:
+            click.secho(
+                f"{_clock()} Built {total} selection(s): {failed} failed, {ok} OK"
+                f"{cancelled_note} in {_timing_text(time.monotonic() - started)}",
+                fg="red",
+            )
+        else:
+            click.secho(
+                f"{_clock()} Built {total} selection(s): all OK{cancelled_note}"
+                f" in {_timing_text(time.monotonic() - started)}",
+                fg="green",
+            )
+    if tiers_failed:
+        raise click.exceptions.Exit(1)
 
 
 @main.command("list")

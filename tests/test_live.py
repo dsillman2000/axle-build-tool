@@ -341,6 +341,31 @@ class TestLiveCheck:
         assert "Checked 2 selection(s): all OK" in result.output
 
 
+class TestLiveBuild:
+    def test_build_runs_both_tiers_in_one_run(self, make_live_project) -> None:
+        """The check pass streams first, then the verify pass — both
+        tier-tagged — and the build summary closes the run."""
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+            targets=["Base.base_holds", "User.derived_holds"],
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["build"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("  OK") == 4  # 2 check + 2 verify
+        assert "Checked 2 selection(s): all OK" in result.output
+        assert "Verified 2 selection(s): all OK" in result.output
+        assert "Built 2 selection(s): all OK in" in result.output
+        assert result.output.count("[check]") >= 2
+        assert result.output.count("[verify]") >= 2
+        # The check report precedes the verify pass in the stream.
+        assert result.output.index("Checked 2 selection(s)") < result.output.index(
+            "[verify]"
+        )
+
+
 class TestLiveVerify:
     def test_verify_targets_all_okay(self, make_live_project) -> None:
         """Proved theorems survive kernel-level verification."""
