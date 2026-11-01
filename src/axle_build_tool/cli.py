@@ -633,12 +633,25 @@ async def _mint_share_link(
     across selections mints once. Sharing is a convenience: callers
     warn on errors and never fail the run over them. Nothing is minted
     when `enabled` is false (`--share` was not passed).
+
+    The mint retries briefly because it streams in the moment the
+    response arrives — ahead of batch minting, the share service may
+    not have the run persisted yet and answers "request not found";
+    that clears within moments.
     """
     if enabled and request_id and request_id not in links:
-        try:
-            links[request_id] = await service.share_link(request_id)
-        except AxleServiceError as exc:
-            links[request_id] = exc
+        error: AxleServiceError | None = None
+        for wait in (0.0, 0.25, 0.5):
+            if wait:
+                await asyncio.sleep(wait)
+            try:
+                links[request_id] = await service.share_link(request_id)
+                error = None
+                break
+            except AxleServiceError as exc:
+                error = exc
+        if error is not None:
+            links[request_id] = error
 
 
 def _print_share_line(

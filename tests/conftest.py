@@ -207,8 +207,9 @@ class _FakeShareSession:
     """Session stand-in that records share mints.
 
     `FakeAxleClient.share_status` decides the outcome: an int status
-    (201 mints, anything else fails), or an exception to raise from the
-    POST itself (a network-level failure).
+    (201 mints, anything else fails), an exception to raise from the
+    POST itself (a network-level failure), or a queue of either for
+    multi-POST scenarios (an exhausted queue mints).
     """
 
     def __init__(self, client: FakeAxleClient) -> None:
@@ -219,6 +220,9 @@ class _FakeShareSession:
         request_id = (json or {}).get("request_id", "")
         self._client.share_requests.append((url, request_id))
         status = self._client.share_status
+        if isinstance(status, list):
+            # Queue of per-POST outcomes; an exhausted queue mints.
+            status = status.pop(0) if status else 201
         if isinstance(status, Exception):
             raise status
         return _FakeSharePost(
@@ -274,9 +278,10 @@ class FakeAxleClient:
         self._request_counter = 0
         self.request_ids: list[str] = []
         self.url = "https://axle.test"
-        #: Share-mint outcome: an HTTP status (201 mints) or an
-        #: exception raised from the POST itself.
-        self.share_status: int | Exception = 201
+        #: Share-mint outcome: an HTTP status (201 mints), an exception
+        #: raised from the POST itself, or a queue of either for
+        #: multi-POST scenarios (an exhausted queue mints).
+        self.share_status: int | Exception | list[int | Exception] = 201
         self.share_requests: list[tuple[str, str]] = []
         self._session: _FakeShareSession | None = None
 

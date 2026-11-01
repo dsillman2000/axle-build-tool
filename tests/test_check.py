@@ -898,6 +898,29 @@ class TestShare:
         assert "share: https://axle.test/check#r=fake-req-" in result.output
         assert "Share link(s) minted: 1" in result.output
 
+    def test_share_mint_retries_a_transient_not_found(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Streaming mints fire right when the run completes.
+
+        The share service may not have the run persisted in that
+        instant and answers "request not found" — the mint retries
+        instead of giving up immediately, and links once the run
+        shows up.
+        """
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.share_status = [404, 201]
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert len(fake_axle.share_requests) == 2  # first attempt, retry
+        assert "share: https://axle.test/check#r=fake-req-" in result.output
+        assert "Share link(s) minted: 1" in result.output
+
     def test_share_failure_warns_but_leaves_the_exit_code(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
