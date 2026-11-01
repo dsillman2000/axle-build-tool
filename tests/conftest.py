@@ -139,21 +139,79 @@ def normalized_lines(output: str) -> list[str]:
 
 
 _DOCUMENT_COUNTER = re.compile(r"^\[\s*\d+/\d+\] +")
+_TIMESTAMP = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3} +")
 _ITEM_TIMING = re.compile(r" +\d+\.\d{3}s$")
+
+
+def _strip_prefixes(line: str) -> str:
+    """A report line minus its timestamp and progress counter."""
+    body = _TIMESTAMP.sub("", line, count=1)
+    return _DOCUMENT_COUNTER.sub("", body, count=1)
+
+
+def stripped_lines(output: str) -> list[str]:
+    """Every non-empty line, timestamp/counter stripped and normalized.
+
+    Test assertions over report content use this so they can match
+    lines without fighting the clock or the `[n/m]` bracket prefixes.
+    """
+    return [
+        " ".join(_strip_prefixes(line).split())
+        for line in output.splitlines()
+        if line.strip()
+    ]
 
 
 def status_line(output: str, label: str) -> str:
     """The check report line for `label`, whitespace-normalized.
 
-    Report lines pad labels so the status column aligns, lead with the
-    streaming progress counter, and end with the item's elapsed time;
-    this helper erases all three so tests can assert on `label + status`.
+    Report lines pad labels so the status column aligns, lead with a
+    timestamp and the item-index counter `[n/m]`, and end with the
+    item's elapsed time. A selection's START announcement shares its
+    label and index with the verdicts, so those lines are skipped here
+    (the verdict verb follows the label; the START one says START).
     """
     for line in output.splitlines():
-        body = _DOCUMENT_COUNTER.sub("", line)
-        if body.startswith(label):
-            return _ITEM_TIMING.sub("", " ".join(body.split()))
+        body = _strip_prefixes(line)
+        tokens = body.split()
+        if len(tokens) >= 2 and tokens[0].startswith(label) and tokens[1] == "START":
+            continue
+        if tokens and tokens[0].startswith(label):
+            return _ITEM_TIMING.sub("", " ".join(tokens))
     raise AssertionError(f"no report line for {label!r} in:\n{output}")
+
+
+def start_line(output: str, label: str) -> str:
+    """The START announcement line for `label`, prefix-stripped.
+
+    The stripped body is `label START [RUN]` — the counter and the
+    timestamp are tested separately through `raw_report_line`.
+    """
+    for body in stripped_lines(output):
+        tokens = body.split()
+        if len(tokens) >= 3 and tokens[0].startswith(label) and tokens[1] == "START":
+            return body
+    raise AssertionError(f"no START line for {label!r} in:\n{output}")
+
+
+def raw_report_line(output: str, label: str, verb: str) -> tuple[str, str]:
+    """The (raw) report line for `label` whose status verb is `verb`.
+
+    Returns the line's timestamp and `[n/m]` counter, so tests can pin
+    the pairing/format themselves (millisecond clock, item-indexed
+    counters shared by a selection's START and its verdicts).
+    """
+    for line in output.splitlines():
+        if not _TIMESTAMP.match(line):
+            continue
+        tokens = line.split()
+        if (
+            len(tokens) >= 4
+            and tokens[2].startswith(label)
+            and tokens[3] == verb.upper()
+        ):
+            return tokens[0], tokens[1]
+    raise AssertionError(f"no {verb} line for {label!r} in:\n{output}")
 
 
 def make_extract_response(

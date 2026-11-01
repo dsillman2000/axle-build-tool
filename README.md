@@ -81,16 +81,16 @@ Run modes (shared by `compile`, `check`, `verify`):
 `axbt check` / `axbt verify` print each result the moment its submission completes — in completion order, so progress appears live during long runs. Every submission also announces itself dbt-style with a white `START` line the moment it is actually dispatched (dispatch order under the concurrency bound; selections answered locally — skips, cached verifications, `--sorry` grants — submit nothing and print no START):
 
 ```text
-  START M.A.t1
-  START M.B.t2
-[1/3] M.A.t1  OK  0.312s
-[2/3] M.B.t2  FAIL  1.234s
+14:22:04.183 [ 1/2] M.A.t1  START  [RUN]
+14:22:04.185 [ 2/2] M.B.t2  START  [RUN]
+14:22:04.492 [ 1/2] M.A.t1  OK  0.312s
+14:22:05.725 [ 2/2] M.B.t2  FAIL  1.234s
     [line 3, col 5 of M/B.lean] ...
-[3/3] M.C.t3  SKIP
-Checked 3 selection(s): 1 failed, 2 OK in 1.589s
+14:22:05.726 [ 3/3] M.C.t3  SKIP
+14:22:05.730 Checked 3 selection(s): 1 failed, 2 OK in 1.589s
 ```
 
-* The `[n/m]` counter numbers every printed verdict line, so submissions already settled locally (skips, cached selections, `sorry` failures) report first, before the API submissions stream in.
+* Every report line carries an aligned `HH:MM:SS.mmm` timestamp, and the item-indexed `[n/m]` counter is shared by a selection's START and its verdicts (dbt pairing) — verifications answered locally (skips, cached selections, `sorry` failures) print under their index first, without their own START.
 * Timings measure each submission individually — from its own START to its verdict — so waiting on the concurrency limit doesn't hide in them.
 
 ### Sharing a run
@@ -98,7 +98,7 @@ Checked 3 selection(s): 1 failed, 2 OK in 1.589s
 `axbt check --share` / `axbt verify --share` print a share link for every submission — a URL to the Axle web app showing that exact run (source, messages, verdict):
 
 ```text
-[1/1] M.User.derived_holds  OK  0.42s
+14:22:10.021 [ 1/1] M.User.derived_holds  OK  0.42s
     share: https://axle.axiommath.ai/check#r=e00f26e7-b2b6-47b2-9197-0dd5518434ec
 ```
 

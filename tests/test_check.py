@@ -5,13 +5,23 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from axle.types import CheckResponse, Messages
 from click.testing import CliRunner
 
 from axle_build_tool import main
 from axle_build_tool.config import load_config
 from axle_build_tool.manifest import load_manifest, manifest_path
-from conftest import checked_stamp_of, make_document, make_response, normalized_lines, status_line
+from conftest import (
+    _TIMESTAMP,
+    checked_stamp_of,
+    make_document,
+    make_response,
+    raw_report_line,
+    start_line,
+    status_line,
+)
 
 runner = CliRunner()
 
@@ -1049,12 +1059,13 @@ class TestStreaming:
         streamed = [
             line
             for line in result.output.splitlines()
-            if re.match(r"\[\s*\d+/\d+\] ", line)
+            if _TIMESTAMP.match(line) and re.match(r"\[\s*\d/\d\]", line.split()[1])
+            and "START" not in line
         ]
-        # B completes first and streams first, each line numbered and timed.
-        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
-        for position, line in enumerate(streamed, 1):
-            assert re.match(rf"\[\s*{position}/2\] ", line), line
+        # B completes first and stream first, each verdict line numbered
+        # by its item (B is selection 2, A is 1) with the total 2.
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[2] for line in streamed]
+        for line in streamed:
             assert re.search(r"\d+\.\d{3}s$", line), line
         def _delay(line: str) -> float:
             return float(line.split()[-1].removesuffix("s"))
@@ -1129,7 +1140,8 @@ modules:
         streamed = [
             line
             for line in result.output.splitlines()
-            if re.match(r"\[\s*\d+/\d+\] ", line)
+            if _TIMESTAMP.match(line) and re.match(r"\[\s*\d/\d\]", line.split()[1])
+            and "START" not in line
         ]
         assert len(streamed) == 1
         assert "M.A.t1" in streamed[0]
@@ -1156,12 +1168,12 @@ modules:
 
 
 class TestStartLines:
-    """dbt-style START lines: a white marker at actual dispatch per
-    submission, with the verdict line (and its timing) as the terminus.
+    """dbt-style START lines: a white, status-column announcement per
+    submission — same `[n/m]` counter and timestamp column as the
+    verdicts, with a `[RUN]` suffix where the timing sits on verdicts.
 
-    START lines carry no progress counter — they are announcements, not
-    verdicts — and selections that submit nothing (skips, grants,
-    cached verifications, local failures) print none."""
+    Selections that submit nothing (skips, grants, cached
+    verifications, local failures) print none."""
 
     def test_every_submitted_selection_starts_itself(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1174,21 +1186,25 @@ class TestStartLines:
         result = runner.invoke(main, ["check"])
 
         assert result.exit_code == 0, result.output
-        lines = normalized_lines(result.output)
-        # Exactly one START per submission, in dispatch order, followed
-        # by the counter'd verdict lines the report already produces.
-        assert lines.count("START M.A.t1") == 1
-        assert lines.count("START M.B.t2") == 1
+        # One white, column-aligned START per submission, in place of no
+        # timing: `label START [RUN]`.
+        assert start_line(result.output, "M.A.t1") == "M.A.t1 START [RUN]"
+        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        # The START shares the selection's item counter with its verdict
+        # (dbt pairing), and carries the ms timestamp.
+        for label in ("M.A.t1", "M.B.t2"):
+            start_ts, start_counter = raw_report_line(result.output, label, "START")
+            verdict_ts, verdict_counter = raw_report_line(result.output, label, "OK")
+            assert start_counter == verdict_counter, label
+            assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", start_ts), start_ts
         assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
-        # The verdict counters still count verdicts only (2 of 2).
-        assert "Checked 2 selection(s): all OK" in result.output
 
     def test_locally_answered_selections_print_no_start(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
         """A fully granted selection submits nothing and prints no
-        START; a submitted sibling does."""
+        START; its SKIP keeps the counter/timestamp columns."""
         root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
@@ -1199,9 +1215,37 @@ class TestStartLines:
         assert result.exit_code == 0, result.output
         assert status_line(result.output, "M.A.t1") == "M.A.t1 SKIP"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
-        lines = normalized_lines(result.output)
-        assert lines.count("START M.B.t2") == 1
-        assert "START M.A.t1" not in lines
+        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        with pytest.raises(AssertionError):
+            start_line(result.output, "M.A.t1")
+
+    def test_timestamps_and_counters_align_across_report_lines(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The whole report reads in fixed columns: every timestamp is
+        `HH:MM:SS.mmm` and the counters are the item-indexed pairs."""
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        report_lines = [
+            line
+            for line in result.output.splitlines()
+            if _TIMESTAMP.match(line) and re.match(r"\[\s*\d/2\]", line.split()[1])
+        ]
+        assert len(report_lines) >= 4  # 2 STARTs + 2 verdicts (the dim
+        # "Recorded"/summary lines are timestamped but carry no counter)
+        seen = set()
+        for line in report_lines:
+            assert re.match(r"\d{2}:\d{2}:\d{2}\.\d{3} ", line), line
+            counter = line.split()[1]
+            assert re.fullmatch(r"\[\s*\d/2\]", counter), line  # m == selections
+            seen.add(counter.strip("[] ").split("/")[0])
+        assert seen == {"1", "2"}
 
     def test_a_failed_submission_starts_then_fails(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1216,7 +1260,7 @@ class TestStartLines:
 
         assert result.exit_code == 1
         assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
-        assert normalized_lines(result.output).count("START M.A.t1") == 1
+        assert start_line(result.output, "M.A.t1") == "M.A.t1 START [RUN]"
 
 
 class TestCheckStamps:
@@ -1411,11 +1455,11 @@ class TestCheckStamps:
         streamed = [
             line
             for line in result.output.splitlines()
-            if re.match(r"\[\s*\d+/\d+\] ", line)
+            if _TIMESTAMP.match(line) and re.match(r"\[\s*\d/\d\]", line.split()[1])
+            and "START" not in line
         ]
-        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
-        for position, line in enumerate(streamed, 1):
-            assert re.match(rf"\[\s*{position}/2\] ", line), line
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[2] for line in streamed]
+        for line in streamed:
             assert re.search(r"\d+\.\d{3}s$", line), line
         assert re.search(r"Checked 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)
         # Both targets stamped their own decl.

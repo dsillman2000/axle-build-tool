@@ -6,15 +6,19 @@ import re
 import shutil
 from pathlib import Path
 
+import pytest
+
 from axle.types import Messages, VerifyProofNegation, VerifyProofResponse
 from click.testing import CliRunner
 
 from axle_build_tool import main
 from axle_build_tool.manifest import load_manifest, save_manifest
 from conftest import (
+    _TIMESTAMP,
     make_document,
     make_response,
-    normalized_lines,
+    raw_report_line,
+    start_line,
     status_line,
     verified_stamp_of,
 )
@@ -596,9 +600,15 @@ class TestStartLines:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 0, result.output
-        lines = normalized_lines(result.output)
-        assert lines.count("START M.A.t1") == 1
-        assert lines.count("START M.B.t2") == 1
+        # One START per submission, sharing the selection's counter with
+        # its verdict, in place of a timing: `label START [RUN]`.
+        assert start_line(result.output, "M.A.t1") == "M.A.t1 START [RUN]"
+        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        for label in ("M.A.t1", "M.B.t2"):
+            start_ts, start_counter = raw_report_line(result.output, label, "START")
+            verdict_ts, verdict_counter = raw_report_line(result.output, label, "OK")
+            assert start_counter == verdict_counter, label
+            assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", start_ts), start_ts
         assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
 
@@ -643,12 +653,9 @@ class TestStartLines:
         assert result.exit_code == 1
         assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
         # t2 submitted (START + verdict); the locally-failed t1 did not.
-        assert normalized_lines(result.output).count("START M.B.t2") == 1
-        assert normalised_count(result.output, "START M.A.t1") == 0
-
-
-def normalised_count(output: str, needle: str) -> int:
-    return sum(1 for line in normalized_lines(output) if line == needle)
+        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        with pytest.raises(AssertionError):
+            start_line(result.output, "M.A.t1")
 
 
 class TestPermittedSorry:
@@ -1078,12 +1085,13 @@ class TestStreaming:
         streamed = [
             line
             for line in result.output.splitlines()
-            if re.match(r"\[\s*\d+/\d+\] ", line)
+            if _TIMESTAMP.match(line) and re.match(r"\[\s*\d/\d\]", line.split()[1])
+            and "START" not in line
         ]
-        # B completes first and streams first, each line numbered and timed.
-        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
-        for position, line in enumerate(streamed, 1):
-            assert re.match(rf"\[\s*{position}/2\] ", line), line
+        # B completes first and streams first, each verdict line numbered
+        # by its item (B is selection 2, A is 1) with the total 2.
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[2] for line in streamed]
+        for line in streamed:
             assert re.search(r"\d+\.\d{3}s$", line), line
         def _delay(line: str) -> float:
             return float(line.split()[-1].removesuffix("s"))
@@ -1155,7 +1163,8 @@ modules:
         streamed = [
             line
             for line in result.output.splitlines()
-            if re.match(r"\[\s*\d+/\d+\] ", line)
+            if _TIMESTAMP.match(line) and re.match(r"\[\s*\d/\d\]", line.split()[1])
+            and "START" not in line
         ]
         assert len(streamed) == 1
         assert "M.A.t1" in streamed[0]

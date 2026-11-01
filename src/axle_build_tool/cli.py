@@ -595,14 +595,26 @@ def _printed_lines(
     return expanded or [(label, None, None)]
 
 
-def _progress_counter(done: int, total: int) -> str:
-    """A streaming report's progress counter, padded to align, e.g. `[ 3/12]`."""
-    return f"[{done:{max(len(str(total)), 1)}}/{total}]"
-
-
 def _timing_text(seconds: float) -> str:
     """A measured duration formatted for the report, e.g. `1.234s`."""
     return f"{seconds:.3f}s"
+
+
+def _clock() -> str:
+    """The report timestamp: local `HH:MM:SS.mmm`, fixed width so every
+    report line's columns align."""
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
+def _item_counter(position: int, total: int) -> str:
+    """The dbt-style item counter `[ 3/25]`, padded for alignment.
+
+    Indexed by selection, not by completion order: a submission
+    announces itself (START) and reports its verdicts under the same
+    counter, dbt pairing, however the completions interleave.
+    """
+    width = max(len(str(total)), 1)
+    return f"[{position:>{width}}/{total}]"
 
 
 @dataclass
@@ -611,10 +623,15 @@ class _StreamingReport:
 
     `check` and `verify` print each result the moment its submission
     completes, so the tallies and the progress counter mutate while the
-    report renders instead of being computed up front.
+    report renders instead of being computed up front. The `[n/m]`
+    counters are item-indexed (dbt pairing): a selection announces
+    itself with the same index its verdicts print, however the
+    completions interleave.
     """
 
-    line_total: int
+    #: Total selections in the run (the m of n/m).
+    item_total: int
+    #: Selections reported so far (any verdict kind).
     printed: int = 0
     failed: int = 0
     skipped: int = 0
@@ -623,10 +640,9 @@ class _StreamingReport:
     #: the run short — never submitted or never reported.
     cancelled: int = 0
 
-    def counter(self) -> str:
-        """The next printed line's progress counter, `[ 3/12]`-style."""
+    def mark(self) -> None:
+        """Count one more reported selection (its verdict lines)."""
         self.printed += 1
-        return _progress_counter(self.printed, self.line_total)
 
 
 async def _mint_share_link(
@@ -904,15 +920,8 @@ def check(
             else [(label, None, None)]
         )
     )
-    #: The report streams in as results arrive; every printed line
-    #: counts toward the progress counter.
-    line_total = sum(
-        len(_printed_lines(label, selection, manifest))
-        if granted is None
-        else 1
-        for label, selection, _, _, granted in checks
-    )
-    report = _StreamingReport(line_total=line_total)
+    report = _StreamingReport(item_total=len(checks))
+    headline = {item[0]: index for index, item in enumerate(checks, start=1)}
     share_links: dict[str, str | AxleServiceError] = {}
     #: Check stamps ride the submission completion loop: declaration
     #: name -> (closure signature, timestamp, request id). Mirrors
@@ -945,12 +954,15 @@ def check(
             ) -> tuple[tuple[str, Selection, Payload, dict, None], Any, float]:
                 label, selection, payload, _refined, _granted = item
                 async with semaphore:
-                    # dbt-style START line: printed the moment this
-                    # submission actually begins (the semaphore admitted
-                    # it), so the printed order mirrors the real dispatch
-                    # under the concurrency bound and the item's reported
-                    # timing starts from its own START.
-                    click.echo(f"  {click.style('START', fg='white')} {label:<{width}}")
+                    # dbt-style START line: indexed by this selection's
+                    # position in the run (paired with the verdicts that
+                    # print under the same counter) and printed the
+                    # moment the semaphore actually dispatches it, so
+                    # its reported timing runs from its own START.
+                    click.echo(
+                        f"{_clock()} {_item_counter(headline[label], report.item_total)} "
+                        f"{label:<{width}}  {click.style('START', fg='white')}  [RUN]"
+                    )
                     # Declaration-level selections focus the check by name;
                     # Axle resolves theorems/lemmas only — defs are rejected
                     # with "Theorem '<name>' not found".
@@ -967,8 +979,10 @@ def check(
                 if granted is None:
                     continue
                 report.skipped += 1
+                report.mark()
                 click.echo(
-                    f"{report.counter()} {label:<{width}}  "
+                    f"{_clock()} {_item_counter(headline[label], report.item_total)} "
+                    f"{label:<{width}}  "
                     f"{click.style('SKIP', dim=True)}"
                 )
                 click.secho(f"    {granted}", dim=True)
@@ -992,6 +1006,7 @@ def check(
                     label, selection, payload, refined, _granted = item
                     if not response.okay:
                         report.failed += 1
+                    counter = _item_counter(headline[label], report.item_total)
                     for printed, node, decl in _printed_lines(label, selection, manifest):
                         if node is None:
                             status = (
@@ -1002,9 +1017,10 @@ def check(
                         else:
                             status = _decl_verdict(node, decl, response, payload)
                         click.echo(
-                            f"{report.counter()} {printed:<{width}}  {status}"
+                            f"{_clock()} {counter} {printed:<{width}}  {status}"
                             f"  {_timing_text(elapsed)}"
                         )
+                    report.mark()
                     kept, _ = _split_stub_warnings(
                         [
                             *response.lean_messages.errors,
@@ -1116,7 +1132,7 @@ def check(
             save_manifest(manifest, project_root)
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
-        click.secho(f"Recorded {len(checked_stamps)} check stamp(s) in the manifest", dim=True)
+        click.secho(f"{_clock()} Recorded {len(checked_stamps)} check stamp(s) in the manifest", dim=True)
 
     total = len(checks)
     total_timing = _timing_text(time.monotonic() - started)
@@ -1126,7 +1142,7 @@ def check(
     )
     if report.failed:
         click.secho(
-            f"Checked {total} selection(s): {report.failed} failed, "
+            f"{_clock()} Checked {total} selection(s): {report.failed} failed, "
             f"{total - report.failed - report.cancelled} OK"
             f"{skipped_note}{cancelled_note} in {total_timing}",
             fg="red",
@@ -1134,7 +1150,7 @@ def check(
         _print_share_summary(share_links)
         raise click.exceptions.Exit(1)
     click.secho(
-        f"Checked {total} selection(s): all OK{skipped_note} in {total_timing}",
+        f"{_clock()} Checked {total} selection(s): all OK{skipped_note} in {total_timing}",
         fg="green",
     )
     _print_share_summary(share_links)
@@ -1625,9 +1641,10 @@ def verify(
         and item[5].to_verify
     ]
 
-    report = _StreamingReport(line_total=len(items))
+    report = _StreamingReport(item_total=len(items))
     #: Pad labels so the status column aligns across the report.
     width = max(len(label) for label, _, _, _, _, _ in items)
+    headline = {item[0]: index for index, item in enumerate(items, start=1)}
     share_links: dict[str, str | AxleServiceError] = {}
     stamps: dict[str, tuple[str, datetime, str | None]] = {}
 
@@ -1650,11 +1667,13 @@ def verify(
             #: streamed verdicts print the moment each submission
             #: completes, in completion order, with its elapsed time.
             stopped = False
+            counter_of = lambda label: _item_counter(headline[label], report.item_total)  # noqa: E731 - small inline formatter
             for label, _selection, payload, _refined, granted, scope in items:
                 if granted is not None:
                     report.skipped += 1
+                    report.mark()
                     click.echo(
-                        f"{report.counter()} {label:<{width}}  "
+                        f"{_clock()} {counter_of(label)} {label:<{width}}  "
                         f"{click.style('SKIP', dim=True)}"
                     )
                     click.secho(f"    {granted}", dim=True)
@@ -1662,16 +1681,18 @@ def verify(
                 assert scope is not None and payload is not None
                 if scope.skip_reason is not None:
                     report.skipped += 1
+                    report.mark()
                     click.echo(
-                        f"{report.counter()} {label:<{width}}  "
+                        f"{_clock()} {counter_of(label)} {label:<{width}}  "
                         f"{click.style('SKIP', dim=True)}"
                     )
                     click.secho(f"    {scope.skip_reason}", dim=True)
                     continue
                 if scope.sorried:
                     report.failed += 1
+                    report.mark()
                     click.echo(
-                        f"{report.counter()} {label:<{width}}  "
+                        f"{_clock()} {counter_of(label)} {label:<{width}}  "
                         f"{click.style('FAIL', fg='red')}"
                     )
                     for name in scope.sorried:
@@ -1682,7 +1703,7 @@ def verify(
                     #: --fail-fast: a local failure stops the run before
                     #: any submission is made.
                     if fail_fast:
-                        report.cancelled = report.line_total - report.printed
+                        report.cancelled = report.item_total - report.printed
                         click.secho(
                             f"    fail-fast: cancelled {report.cancelled} "
                             "remaining selection(s)",
@@ -1693,9 +1714,10 @@ def verify(
                     continue
                 if not scope.to_verify:
                     report.cached += 1
+                    report.mark()
                     note = "cached" if scope.cached else "nothing to submit"
                     click.echo(
-                        f"{report.counter()} {label:<{width}}  "
+                        f"{_clock()} {counter_of(label)} {label:<{width}}  "
                         f"{click.style('OK', fg='green')} ({note})"
                     )
                     if scope.cached:
@@ -1715,11 +1737,16 @@ def verify(
                 ]:
                     label, _selection, payload, _refined, _granted, scope = item
                     async with semaphore:
-                        # dbt-style START line at actual dispatch: the
-                        # semaphore admitted it, the reported timing runs
-                        # from here (moved before the roundtrip — the
-                        # formal-statement transform is part of the run).
-                        click.echo(f"  {click.style('START', fg='white')} {label:<{width}}")
+                        # dbt-style START line: indexed by this
+                        # selection's run position (paired with the
+                        # verdicts under the same counter) and printed
+                        # the moment the semaphore dispatches it — the
+                        # formal-statement transform is part of the run,
+                        # so its timing runs from its own START.
+                        click.echo(
+                            f"{_clock()} {counter_of(label)} {label:<{width}}  "
+                            f"{click.style('START', fg='white')}  [RUN]"
+                        )
                         # The formal statement is the payload with exactly
                         # the to-verify theorems' proofs stripped; cached,
                         # permitted, and stubbed declarations stay as they
@@ -1770,14 +1797,14 @@ def verify(
                                 f", {len(scope.cached)} cached" if scope.cached else ""
                             )
                             click.echo(
-                                f"{report.counter()} {label:<{width}}  "
+                                f"{_clock()} {counter_of(label)} {label:<{width}}  "
                                 f"{click.style('OK', fg='green')}{cached_note}"
                                 f"  {_timing_text(elapsed)}"
                             )
                         else:
                             report.failed += 1
                             click.echo(
-                                f"{report.counter()} {label:<{width}}  "
+                                f"{_clock()} {counter_of(label)} {label:<{width}}  "
                                 f"{click.style('FAIL', fg='red')}  {_timing_text(elapsed)}"
                             )
                             if vacuous:
@@ -1879,7 +1906,7 @@ def verify(
             save_manifest(manifest, project_root)
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
-        click.secho(f"Recorded {len(stamps)} verification(s) in the manifest", dim=True)
+        click.secho(f"{_clock()} Recorded {len(stamps)} verification(s) in the manifest", dim=True)
 
     total = len(items)
     total_timing = _timing_text(time.monotonic() - started)
@@ -1891,14 +1918,14 @@ def verify(
     cached_note = f" ({report.cached} cached)" if report.cached else ""
     if report.failed:
         click.secho(
-            f"Verified {total} selection(s): {report.failed} failed, {ok} OK"
+            f"{_clock()} Verified {total} selection(s): {report.failed} failed, {ok} OK"
             f"{skipped_note}{cancelled_note} in {total_timing}",
             fg="red",
         )
         _print_share_summary(share_links)
         raise click.exceptions.Exit(1)
     click.secho(
-        f"Verified {total} selection(s): all OK{skipped_note}{cached_note}"
+        f"{_clock()} Verified {total} selection(s): all OK{skipped_note}{cached_note}"
         f" in {total_timing}",
         fg="green",
     )
