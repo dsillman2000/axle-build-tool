@@ -78,9 +78,11 @@ Run modes (shared by `compile`, `check`, `verify`):
 
 ### Streaming results
 
-`axbt check` / `axbt verify` print each result the moment its submission completes — in completion order, so progress appears live during long runs. Every result line carries a progress counter and its own elapsed time; the summary carries the total:
+`axbt check` / `axbt verify` print each result the moment its submission completes — in completion order, so progress appears live during long runs. Every submission also announces itself dbt-style with a white `START` line the moment it is actually dispatched (dispatch order under the concurrency bound; selections answered locally — skips, cached verifications, `--sorry` grants — submit nothing and print no START):
 
 ```text
+  START M.A.t1
+  START M.B.t2
 [1/3] M.A.t1  OK  0.312s
 [2/3] M.B.t2  FAIL  1.234s
     [line 3, col 5 of M/B.lean] ...
@@ -88,8 +90,8 @@ Run modes (shared by `compile`, `check`, `verify`):
 Checked 3 selection(s): 1 failed, 2 OK in 1.589s
 ```
 
-* The `[n/m]` counter numbers every printed line, so submissions already settled locally (skips, cached selections, `sorry` failures) report first, before the API submissions stream in.
-* Timings measure each submission individually — waiting on the concurrency limit doesn't hide in them.
+* The `[n/m]` counter numbers every printed verdict line, so submissions already settled locally (skips, cached selections, `sorry` failures) report first, before the API submissions stream in.
+* Timings measure each submission individually — from its own START to its verdict — so waiting on the concurrency limit doesn't hide in them.
 
 ### Sharing a run
 

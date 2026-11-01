@@ -834,6 +834,12 @@ def check(
     their judged declarations — `--sorry`-granted and failing runs
     record nothing.
 
+    Submissions announce themselves dbt-style: each one prints a white
+    START line the moment it is dispatched (dispatch order under the
+    concurrency bound), followed by the verdict line with its elapsed
+    time when it completes. Selections that submit nothing (skips,
+    grants) print no START.
+
     Declaration-level selections pass `names=[<declaration>]` so Axle
     focuses the check; Axle resolves names against theorems/lemmas only
     (a `def` name is rejected with "Theorem '<name>' not found"), so
@@ -939,6 +945,12 @@ def check(
             ) -> tuple[tuple[str, Selection, Payload, dict, None], Any, float]:
                 label, selection, payload, _refined, _granted = item
                 async with semaphore:
+                    # dbt-style START line: printed the moment this
+                    # submission actually begins (the semaphore admitted
+                    # it), so the printed order mirrors the real dispatch
+                    # under the concurrency bound and the item's reported
+                    # timing starts from its own START.
+                    click.echo(f"  {click.style('START', fg='white')} {label:<{width}}")
                     # Declaration-level selections focus the check by name;
                     # Axle resolves theorems/lemmas only — defs are rejected
                     # with "Theorem '<name>' not found".
@@ -1484,7 +1496,10 @@ def verify(
     preserved, so statements referencing them stay verifiable), and the
     real content is checked against it kernel-level. Selection and run
     modes match `axbt check`, and selections carrying a `sorry` fail
-    without an API call.
+    without an API call. Submissions announce themselves dbt-style with
+    a white START line at dispatch, followed by the verdict line with
+    its elapsed time; selections answered locally (cached, skipped,
+    locally-failed) never submit and print no START.
 
     Successful verifications are recorded per declaration in the
     manifest, keyed on the declaration's file-closure content, the
@@ -1700,6 +1715,11 @@ def verify(
                 ]:
                     label, _selection, payload, _refined, _granted, scope = item
                     async with semaphore:
+                        # dbt-style START line at actual dispatch: the
+                        # semaphore admitted it, the reported timing runs
+                        # from here (moved before the roundtrip — the
+                        # formal-statement transform is part of the run).
+                        click.echo(f"  {click.style('START', fg='white')} {label:<{width}}")
                         # The formal statement is the payload with exactly
                         # the to-verify theorems' proofs stripped; cached,
                         # permitted, and stubbed declarations stay as they

@@ -11,7 +11,7 @@ from click.testing import CliRunner
 from axle_build_tool import main
 from axle_build_tool.config import load_config
 from axle_build_tool.manifest import load_manifest, manifest_path
-from conftest import checked_stamp_of, make_document, make_response, status_line
+from conftest import checked_stamp_of, make_document, make_response, normalized_lines, status_line
 
 runner = CliRunner()
 
@@ -1153,6 +1153,70 @@ modules:
 
         assert result.exit_code == 0, result.output
         assert "Checked 2 selection(s): all OK" in result.output
+
+
+class TestStartLines:
+    """dbt-style START lines: a white marker at actual dispatch per
+    submission, with the verdict line (and its timing) as the terminus.
+
+    START lines carry no progress counter — they are announcements, not
+    verdicts — and selections that submit nothing (skips, grants,
+    cached verifications, local failures) print none."""
+
+    def test_every_submitted_selection_starts_itself(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        lines = normalized_lines(result.output)
+        # Exactly one START per submission, in dispatch order, followed
+        # by the counter'd verdict lines the report already produces.
+        assert lines.count("START M.A.t1") == 1
+        assert lines.count("START M.B.t2") == 1
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        # The verdict counters still count verdicts only (2 of 2).
+        assert "Checked 2 selection(s): all OK" in result.output
+
+    def test_locally_answered_selections_print_no_start(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A fully granted selection submits nothing and prints no
+        START; a submitted sibling does."""
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 SKIP"
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        lines = normalized_lines(result.output)
+        assert lines.count("START M.B.t2") == 1
+        assert "START M.A.t1" not in lines
+
+    def test_a_failed_submission_starts_then_fails(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.check_result = make_response(CheckResponse, okay=False)
+
+        result = runner.invoke(main, ["check", "--select", "M.A.t1"])
+
+        assert result.exit_code == 1
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
+        assert normalized_lines(result.output).count("START M.A.t1") == 1
 
 
 class TestCheckStamps:

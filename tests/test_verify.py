@@ -11,7 +11,13 @@ from click.testing import CliRunner
 
 from axle_build_tool import main
 from axle_build_tool.manifest import load_manifest, save_manifest
-from conftest import make_document, make_response, status_line, verified_stamp_of
+from conftest import (
+    make_document,
+    make_response,
+    normalized_lines,
+    status_line,
+    verified_stamp_of,
+)
 
 runner = CliRunner()
 
@@ -573,6 +579,76 @@ class TestBothStampTiers:
         assert result.exit_code == 0, result.output
         assert "(cached)" in result.output
         assert verify_calls(fake_axle) == []
+
+
+class TestStartLines:
+    """dbt-style START lines on verify too: one per actual submission,
+    none for locally-answered selections (cached, skipped, sorried)."""
+
+    def test_submitted_verifications_print_start_lines(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        lines = normalized_lines(result.output)
+        assert lines.count("START M.A.t1") == 1
+        assert lines.count("START M.B.t2") == 1
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+
+    def test_locally_answered_verifications_print_no_start(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The second run is fully cached: verdicts print without any
+        submission, therefore without any START line."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify", "--no-compile"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("(cached)") == 2
+        assert "START" not in result.output
+
+    def test_sorried_local_failure_prints_no_start(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        sorried_docs = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = sorried_docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 1
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
+        # t2 submitted (START + verdict); the locally-failed t1 did not.
+        assert normalized_lines(result.output).count("START M.B.t2") == 1
+        assert normalised_count(result.output, "START M.A.t1") == 0
+
+
+def normalised_count(output: str, needle: str) -> int:
+    return sum(1 for line in normalized_lines(output) if line == needle)
 
 
 class TestPermittedSorry:
