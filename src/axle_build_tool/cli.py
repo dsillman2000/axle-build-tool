@@ -31,6 +31,7 @@ from axle_build_tool.config import (
     scaffold_config,
 )
 from axle_build_tool.extraction import ExtractionError, apply_extraction
+from axle_build_tool.graph import build_graph_data, rendered_nodes, write_graph
 from axle_build_tool.manifest import (
     MANIFEST_VERSION,
     ExtractedDecl,
@@ -1952,3 +1953,63 @@ def list_declarations(select: str | None) -> None:
                 position += ", " + click.style("sorry", fg="yellow")
             position += click.style("]", dim=True)
             click.echo(f"    {kind}  {name}  {position}")
+
+
+@main.command()
+@click.option(
+    "--select",
+    "select",
+    default=None,
+    help=(
+        "Render the subgraph for <module>[.<file stem>[.<declaration>]] "
+        "instead of the whole manifest — the selection plus its full "
+        "dependency closure (a declaration selection brings its whole "
+        "owning file)."
+    ),
+)
+@click.option(
+    "-o",
+    "--output",
+    "output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write the graph HTML to PATH instead of .axbt/graph.html.",
+)
+def graph(select: str | None, output: Path | None) -> None:
+    """Render the manifest as an offline, interactive HTML graph (Cytoscape.js).
+
+    A read-only visualization of .axbt/manifest.json, exactly like
+    `axbt list` but pictorial: module compound nodes around file nodes
+    around declarations, import edges between files, and
+    declaration-to-declaration edges from the extracted dependency
+    lists. Colors key only on the outcome stamps — green verified,
+    yellow checked-clean (awaiting kernel verification), orange
+    unchecked — so the page reads the same contract `axbt check` /
+    `axbt verify` write. The single external asset is the Cytoscape.js
+    script from a pinned CDN URL; nothing is fetched by axbt itself
+    and no API calls are made.
+
+    The output defaults to .axbt/graph.html; pass -o to write anywhere.
+    """
+    project_root = Path.cwd()
+    try:
+        config = load_config(project_root)
+        manifest = load_manifest(project_root)
+        if manifest.version != MANIFEST_VERSION:
+            raise ManifestError(
+                f"The manifest in {CACHE_DIRNAME}/ was written by an incompatible "
+                f"axbt version; run `axbt compile` first."
+            )
+        selected = manifest.nodes
+        if select is not None:
+            selected = resolve_selection(select, config, manifest).payload_nodes(manifest)
+        files = rendered_nodes(manifest, selected)
+        out, counts = write_graph(manifest, project_root, files, output)
+    except (ConfigError, ManifestError, SelectionError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(
+        f"Wrote graph to {out} ({counts['modules']} module(s), "
+        f"{counts['files']} file(s), {counts['declarations']} declaration(s), "
+        f"{counts['edges']} edge(s))"
+    )

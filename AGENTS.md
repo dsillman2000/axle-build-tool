@@ -16,6 +16,7 @@ history.
 - `src/axle_build_tool/stubbing.py` — `--sorry` span replacement; `bare_name` (canonical labels).
 - `src/axle_build_tool/scopes.py` — Lean scope-header parser (`preamble_at` reconstructs scope context; currently uncalled — built for the parked declaration-cutting extension).
 - `src/axle_build_tool/selection.py` — `--select` grammar: `module[.file-stem[.declaration]]` (greedy stem, unique-suffix decl match).
+- `src/axle_build_tool/graph.py` — offline Cytoscape.js `graph.html` generation (outcome-stamp-keyed colors; the only external asset is a pinned CDN script). `--select`/closure reuse mirrors `axbt list`.
 - `tests/` — pytest suite; `tests/conftest.py` has `FakeAxleClient` (the offline API fake) and assertion helpers (`status_line`, `normalized_lines`).
 - `demos/small/` — integration-only demo projects (`RootTwoIrrational`, `GaussIntSum`); exercised by `.github/workflows/demo.yml`.
 

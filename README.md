@@ -66,6 +66,7 @@ axle:
 | `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every configured target — or a `--select`ion — as a standalone payload with dependencies inlined. Clean outcomes are recorded per declaration in the manifest. |
 | `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
 | `axbt list` | Print the parsed declaration tree — kinds, file-accurate positions, `sorry` markers — dependencies first. Offline and read-only. |
+| `axbt graph` | Render the manifest as an offline, interactive Cytoscape.js HTML graph (default `.axbt/graph.html`; `--select` filters the subgraph). Colors key on outcome stamps only. No API calls. |
 | `axbt debug` | Verify `AXLE_API_KEY` is set and accepted by the API; print the project's configuration and `.axbt/` cache state. |
 
 Run modes (shared by `compile`, `check`, `verify`):
@@ -112,6 +113,30 @@ The manifest records three kinds of per-declaration facts (all additive, optiona
 * **Verify stamps** (`verify`) — kernel-level successes get `verified_sig`/`verified_at`/`verified_request_id`. They are consulted by the verify cache and never by check's records.
 
 The two tiers are distinct facts: a `sorry` passes check and fails verify, so `checked_sig` without `verified_sig` means "checked-clean, still awaiting kernel verification" — the state the per-declaration status graph renders as its "in progress" color.
+
+### Visualizing the manifest
+
+`axbt graph [--select SELECTOR] [-o PATH]` renders `.axbt/manifest.json` as a single-file
+Cytoscape.js HTML visualization — pan/zoom, hover tooltips, click to highlight a node's
+neighborhood. Declaration level: every declaration is a node under its file, under its module,
+with file import edges and declaration-to-declaration edges from the extracted dependency lists.
+
+```bash
+axbt graph                              # whole manifest -> .axbt/graph.html
+axbt graph --select my-project.Utils    # one file + its dependency closure
+```
+
+Colors are read straight from the manifest's per-declaration outcome stamps — nothing is inferred:
+
+* **green = verified** — `verified_sig` present (kernel-level).
+* **yellow = checked** — `checked_sig` present but not verified: passed `check`, awaiting `verify`
+  (definitions included, their terminal tier).
+* **orange = unchecked** — neither stamp: never judged by a full, unstubbed check.
+* Containers roll up to the weakest constituent color; declaration-free files/modules are grey.
+
+Files whose source is `new`/`changed` carry a red ✱. The only external asset is the
+Cytoscape.js script from a pinned CDN URL — nothing is fetched by axbt itself, and the
+command makes no API calls.
 
 ### Selecting what to check
 

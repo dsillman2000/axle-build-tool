@@ -17,7 +17,9 @@ workflows, not by this suite.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -683,6 +685,156 @@ class TestLiveTierSplit:
         assert base_holds.verified_sig is not None
         assert base_holds.checked_sig == base_holds.verified_sig
         assert base_holds.checked_request_id != base_holds.verified_request_id
+
+
+class TestLiveGraphPage:
+    """The generated page must actually render with the real Cytoscape.js.
+
+    Offline tests assert text; this one downloads the pinned, SRI-hashed
+    CDN script and replays the page's own application script through the
+    genuine Cytoscape (headless) to prove every node/edge ingests and
+    containment/classes resolve — the regression class a text assertion
+    can never see (a page that renders its legend but no data)."""
+
+    @pytest.fixture(autouse=True)
+    def _require_node(self) -> None:
+        if shutil.which("node") is None:
+            pytest.skip("node is unavailable")
+
+    CDN_BYTES: list[bytes] = []
+
+    def test_page_renders_through_real_cytoscape(
+        self, tmp_path: Path, make_live_project
+    ) -> None:
+        import base64
+        import hashlib
+        import subprocess
+        import urllib.request
+        from datetime import datetime, timezone
+
+        from axle_build_tool.graph import (
+            COSE_BASE_INTEGRITY,
+            COSE_BASE_URL,
+            CYTOSCAPE_INTEGRITY,
+            CYTOSCAPE_URL,
+            FCOSE_INTEGRITY,
+            FCOSE_URL,
+            LAYOUT_BASE_INTEGRITY,
+            LAYOUT_BASE_URL,
+            graph_html,
+        )
+        from axle_build_tool.manifest import (
+            ExtractedDecl,
+            Manifest,
+            ManifestNode,
+            save_manifest,
+        )
+
+        # Each pinned script's digest must equal the embedded SRI hash
+        # (the supply-chain pin, checked on every live run).
+        pins = {
+            "cytoscape": (CYTOSCAPE_URL, CYTOSCAPE_INTEGRITY, "cytoscape.min.js"),
+            "layout-base": (LAYOUT_BASE_URL, LAYOUT_BASE_INTEGRITY, "layout-base.js"),
+            "cose-base": (COSE_BASE_URL, COSE_BASE_INTEGRITY, "cose-base.js"),
+            "cytoscape-fcose": (FCOSE_URL, FCOSE_INTEGRITY, "cytoscape-fcose.js"),
+        }
+        downloaded: dict[str, bytes] = {}
+        for name, (url, integrity, filename) in pins.items():
+            body = urllib.request.urlopen(url, timeout=60).read()
+            digest = "sha512-" + base64.b64encode(hashlib.sha512(body).digest()).decode()
+            assert digest == integrity, (
+                f"the pinned {name} script's digest no longer matches the SRI "
+                f"hash embedded in graph pages: {digest} vs {integrity}"
+            )
+            downloaded[name] = bytes(body)
+
+        # A manifest with the three stamp states; no API calls at all.
+        now = datetime.now(timezone.utc)
+        declarations = [
+            ExtractedDecl(
+                name=name,
+                kind=kind,
+                is_sorry=False,
+                line_pos=index + 1,
+                end_line_pos=index + 2,
+                signature=f"def {name} := 1" if kind == "def" else f"theorem {name}",
+                dependencies=[],
+                checked_sig="c" * 32,
+                checked_at=now,
+                verified_sig=("v" * 32 if name == "verified_one" else None),
+                verified_at=(now if name == "verified_one" else None),
+            )
+            for index, (name, kind) in enumerate(
+                [("verified_one", "theorem"), ("checked_one", "def"), ("unchecked_one", "theorem")],
+                start=2,
+            )
+        ]
+        manifest = Manifest(
+            generated_at=now,
+            nodes=[
+                ManifestNode(
+                    name="M.File",
+                    module="M",
+                    path="M/File.lean",
+                    md5="0" * 32,
+                    status="new",
+                    declarations=declarations,
+                ),
+                ManifestNode(
+                    name="M.Empty",
+                    module="M",
+                    path="M/Empty.lean",
+                    md5="1" * 32,
+                    status="clean",
+                    declarations=[],
+                ),
+            ],
+        )
+        _ = make_live_project({}, environment=None)
+        save_manifest(manifest, Path.cwd())
+        page_path = Path.cwd() / ".axbt" / "graph.html"
+        page_path.write_text(graph_html(manifest, manifest.nodes), encoding="utf-8")
+
+        # Lay the downloaded CDN files out as a module tree so the
+        # harness can require the real fcose (whose runtime deps bind
+        # to sibling node_modules) without an npm install.
+        modules_dir = tmp_path / "node_modules"
+        for name, (_, _, filename) in pins.items():
+            package = modules_dir / name
+            package.mkdir(parents=True)
+            (package / filename).write_bytes(downloaded[name])
+            (package / "package.json").write_text(
+                    json.dumps({"name": name, "main": filename}), encoding="utf-8"
+            )
+
+        def run_harness(*extra: str) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                [
+                    "node",
+                    str(Path(__file__).parent / "graph_runtime_harness.js"),
+                    str(page_path),
+                    str(modules_dir / "cytoscape" / "cytoscape.min.js"),
+                    *extra,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        # Full replay: fcose registered, every cluster force-spread.
+        result = run_harness(str(modules_dir / "cytoscape-fcose"))
+        assert result.returncode == 0, (
+            f"the generated page failed real Cytoscape ingestion:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "fcose replayed" in result.stdout
+
+        # Degradation path: a missing fcose CDN script must leave a
+        # page that still renders (preset stacks), not a blank canvas.
+        degraded = run_harness()
+        assert degraded.returncode == 0, (
+            f"the page's no-fcose degradation broke:\n{degraded.stdout}\n{degraded.stderr}"
+        )
+        assert "degraded preset" in degraded.stdout
 
 
 class TestLiveDependencyNames:
