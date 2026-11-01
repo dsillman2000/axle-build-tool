@@ -14,11 +14,13 @@ axbt orchestrates a Lean 4 project as a dependency DAG of small files, and
 submits self-contained payloads to the Axle API for checking and
 kernel-level proof verification. No local Lean/Mathlib install is needed.
 
-Assumed installed on the user's system:
+Assumed installed on the user's system (the intended way to use axbt is
+as a uv tool; `uvx --from git+https://github.com/dsillman2000/axle-build-tool axbt …`
+runs it without installing):
 
 ```bash
 uv tool install git+https://github.com/dsillman2000/axle-build-tool
-uv tool upgrade axbt   # occasionally
+uv tool upgrade axle-build-tool   # occasionally
 ```
 
 It requires `AXLE_API_KEY` in the environment. Verify setup any time with
@@ -33,6 +35,7 @@ of plain `.lean` files:
 ```yaml
 project:
   name: "MyProject"
+  # minify: false                 # optional: opt out of payload minification
 modules:
   Core:
     dir: "Core"                     # module = directory of .lean files
@@ -60,21 +63,27 @@ Guidance for structuring Lean code:
 
 ## The iteration loop
 
-Work from the project root (axbt writes `.axbt/` there — cache + manifest;
-gitignore it).
+Work from the project root (axbt writes `.axbt/` there — a compact
+single-line `manifest.json` cache plus inspectable payloads; gitignore it).
 
 1. **Edit** the Lean source.
 2. **`axbt compile`** — scan, detect changes (MD5), extract declarations via
    the API. Incremental: unchanged files make no API calls.
-3. **`axbt check`** — fast typechecking of every target. Errors print with
-   positions attributed back to real source files. Iterate here; this tier
-   is cheap and always re-submits.
-4. **`axbt verify`** — kernel-level proof validation for finished proofs:
-   rejects `sorry`, missing proofs, and axiom-dependence. Results are cached
-   per declaration (keyed on file content + environment); re-runs skip
-   anything still valid. Pass `--force` to re-verify everything.
-5. **`axbt list`** — the parsed declaration tree with `sorry` markers and
-   file-accurate positions. Offline; use for orientation.
+3. **`axbt build`** — both tiers in one run, dbt-style: the check pass
+   streams first, then the verify pass skips the selections whose check
+   failed, and the run exits nonzero if either tier failed. Build-mode rows
+   carry a `[check]`/`[verify]` suffix so the passes tell apart.
+4. **`axbt check`** alone for fast typechecking of every target. Errors
+   print with positions attributed back to real source files. Iterate
+   here; this tier is cheap and always re-submits.
+5. **`axbt verify`** alone for kernel-level proof validation of finished
+   proofs: rejects `sorry`, missing proofs, and axiom-dependence. Results
+   are cached per declaration (keyed on file content + environment +
+   options); re-runs skip anything still valid. Pass `--force` to re-verify.
+6. **`axbt list`** — the parsed declaration tree with `sorry` markers and
+   file-accurate positions. Offline; use for orientation. `axbt graph`
+   renders the same manifest as an interactive HTML dependency graph,
+   colored per declaration by its check/verify stamp state — also offline.
 
 Key semantics when advising the user:
 
@@ -86,15 +95,27 @@ Key semantics when advising the user:
   `--select Core.Algebra.ring_identity` (declaration; unique suffixes
   allowed). Declaration-level selects must name a theorem/lemma — check
   defs via their file or module.
-- **`--sorry <selector>` (repeatable) stubs a dependency subtree**: proof
-  bodies become `sorry` for that run so downstream work continues before
-  the upstream is finished. Selections inside a `--sorry` grant are
-  skipped as "taken as granted". On verify, excused stubs are named to
+- **`--sorry <selector>` (repeatable) grants a dependency subtree**:
+  theorem proof bodies become `sorry` for that run — statements intact, so
+  downstream work continues before the upstream is finished, and complete
+  upstream proofs don't need re-certifying every run. Def/abbrev bodies
+  always stay real (downstream proofs unfold them definitionally:
+  anonymous constructors, projections, `rfl`). Selections inside a grant
+  are skipped as "taken as granted". On verify, granted stubs are named to
   the API's `permitted_sorries` and never recorded as verified.
 - **`--permitted-sorries <selector>`** (verify only) excuses a genuinely
-  incomplete declaration without stubbing it.
-- **`--share`** (check/verify) prints a web link to that exact run — the
-  right thing to paste when asking someone to look at a failure. Best
+  incomplete (sorried-in-source) declaration *without stubbing anything*.
+  Use it when the upstream's proofs exist but are sorried; use `--sorry`
+  when you want complete-but-untrusted upstreams treated as axioms.
+- **`--fail-fast`** stops at the first failing selection (cancel in-flight
+  submissions); under `build`, a fail-fast in the check pass abandons the
+  build before verifying.
+- **Minification is on by default**: comments and blank lines are stripped
+  from submitted payloads (docstrings and indentation survive; attribution
+  stays exact). `--no-minify` opts a run out;
+  `project.minify: false` changes the default.
+- **`--share`** (check/verify/build) prints a web link to that exact run —
+  check runs open the check UI, verify runs the verify_proof UI. Best
   effort; never affects exit codes.
 - **`axbt debug`** is the first stop when anything seems off (key,
   environment, cache state).
@@ -103,14 +124,16 @@ Key semantics when advising the user:
 
 - Scaffold: `axbt init my-proofs`, then edit `axbt_project.yml` and the
   module sources.
-- After edits: run `axbt compile` then `axbt check` (or
-  `axbt check --select <file>`) and read attributed errors back to the
-  user; fix Lean code; repeat.
-- When a proof looks complete: `axbt verify` — treat a FAIL as the
-  authoritative verdict and iterate on the Lean source, not the tool.
-- To prove a new theorem while an upstream lemma is still unfinished:
-  `axbt check --sorry <upstream-file>` (and the same on verify with
-  `--permitted-sorries` if only that one declaration is incomplete).
+- After edits: run `axbt build` (or `axbt check` /
+  `axbt check --select <file>` while iterating) and read attributed errors
+  back to the user; fix Lean code; repeat.
+- When a proof looks complete: `axbt build`'s verify pass — or a bare
+  `axbt verify` — is the authoritative verdict; iterate on the Lean
+  source, not the tool.
+- To prove a new theorem while an upstream file is still unfinished:
+  `axbt build --sorry <upstream-file>` (grants apply in both passes), or
+  `--permitted-sorries <selector>` when only that one declaration is
+  sorried in source.
 - Before claiming success to the user: the success criterion for a Lean
-  project here is `axbt verify` exiting 0 — a green `check` is not
-  sufficient on its own.
+  project here is the verify tier exiting 0 (i.e. `axbt verify` or
+  `axbt build` exiting 0) — a green `check` is not sufficient on its own.
