@@ -52,7 +52,114 @@ def chain_state(make_project, tmp_path: Path):
     return config, manifest, root
 
 
-class TestResolveSelection:
+RAGGED_CONFIG = """\
+project:
+  name: ragged
+modules:
+  M:
+    targets: []
+  N:
+    targets: []
+"""
+
+# A project with comment/blank-line noise around real code: a hoisted
+# external import, a `/-!` section header, a preserved docstring, an
+# inline line comment, and a full-line comment.
+RAGGED_FILES = {
+    "N/base.lean": (
+        "import Mathlib\n"                             # 1
+        "\n"                                            # 2
+        "/-! Base definitions. -/\n"                    # 3
+        "\n"                                            # 4
+        "/-- The shared base. -/\n"                     # 5
+        "def base := 1\n"                               # 6
+        "\n"                                            # 7
+        "def extra := base -- note\n"                   # 8
+    ),
+    "N/bad.lean": '-- build-up comment\ntheorem ugly := "unterminated\n',
+    "M/uses.lean": (
+        "import base\n"                                 # 1
+        "-- what follows\n"                             # 2
+        "theorem top : base = 1 := rfl\n"               # 3
+    ),
+}
+
+
+class TestMinifiedPayload:
+    """Payload minification at assembly: comments and blank lines are
+    dropped while the line maps keep pointing at original source lines."""
+
+    @pytest.fixture
+    def ragged(self, make_project, tmp_path: Path):
+        root = make_project(tmp_path, RAGGED_CONFIG, RAGGED_FILES)
+        config = load_config(root)
+        manifest = build_manifest(root, config, None)
+        return config, manifest, root
+
+    def test_comments_and_blank_lines_are_dropped_docstrings_survive(
+        self, ragged
+    ) -> None:
+        _config, manifest, root = ragged
+        selection_nodes = [manifest.by_name()["M.uses"]]
+        payload = build_payload(selection_nodes, manifest, root, minify=True)
+
+        assert "-- what follows" not in payload.content
+        start, end = payload.sections["N.base"]
+        section_lines = payload.lines[start - 1 : end]
+        # Only non-blank, comment-free code lines survive the section.
+        assert all(line.strip() for line in section_lines)
+        assert not any(line.lstrip().startswith("--") for line in section_lines)
+        assert "/-! Base definitions. -/" not in payload.content
+        assert "/-- The shared base. -/" in payload.content
+
+    def test_line_maps_track_surviving_source_lines(self, ragged) -> None:
+        _config, manifest, root = ragged
+        payload = build_payload(
+            [manifest.by_name()["M.uses"]], manifest, root, minify=True
+        )
+
+        # N.base: the hoisted import, blank lines, and the `/-!` header go;
+        # docstring, defs (one with `-- note` stripped), keep their numbers.
+        assert payload.line_map["N.base"] == [5, 6, 8]
+        # M.uses: the full-line comment (source line 2) is dropped.
+        assert payload.line_map["M.uses"] == [3]
+        start, _end = payload.sections["N.base"]
+        assert source_position(payload, start + 1) == ("N.base", 6)
+        uses_start, uses_end = payload.sections["M.uses"]
+        assert source_position(payload, uses_start) == ("M.uses", 3)
+
+    def test_minified_content_matches_all_responses(self, ragged) -> None:
+        _config, manifest, root = ragged
+
+        payload = build_payload(
+            [manifest.by_name()["M.uses"]], manifest, root, minify=True
+        )
+        # The section text itself survives; only layout does not.
+        assert "def base := 1" in payload.content
+        assert "def extra := base" in payload.content
+        assert "theorem top : base = 1 := rfl" in payload.content
+
+    def test_default_payloads_stay_raw(self, ragged) -> None:
+        """Extraction payloads and default `build_payload` calls keep the
+        raw text (manifest spans are keyed to unminified source)."""
+        _config, manifest, root = ragged
+        payload = build_payload([manifest.by_name()["M.uses"]], manifest, root)
+
+        assert "-- what follows" in payload.content
+        assert payload.line_map["M.uses"] == [2, 3]
+
+    def test_untrackable_files_are_submitted_unminified(self, ragged) -> None:
+        """A file that doesn't track (unterminated string) falls back to
+        raw, comment lines and all."""
+        _config, manifest, root = ragged
+        payload = build_payload(
+            [manifest.by_name()["N.bad"]], manifest, root, minify=True
+        )
+
+        assert "-- build-up comment" in payload.content
+        start, _end = payload.sections["N.bad"]
+        section = payload.lines[start - 1 : _end]
+        assert section[0] == "-- build-up comment"
     def test_module_selection(self, chain_state) -> None:
         config, manifest, _ = chain_state
         selection = resolve_selection("M", config, manifest)

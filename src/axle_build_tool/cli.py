@@ -44,6 +44,7 @@ from axle_build_tool.manifest import (
     save_manifest,
     topological_order,
 )
+from axle_build_tool.minify import signature_marker
 from axle_build_tool.payloads import (
     Payload,
     build_payload,
@@ -167,7 +168,9 @@ def _run_compile(
                 return await apply_extraction(service, manifest, project_root)
 
         manifest = asyncio.run(extract())
-        payload_paths = write_compiled_payloads(manifest, project_root)
+        payload_paths = write_compiled_payloads(
+            manifest, project_root, minify=config.minify
+        )
         written = save_manifest(manifest, project_root)
     except (
         ConfigError,
@@ -389,6 +392,17 @@ def _granted_skip_reason(
     ):
         return "taken as granted (--sorry)"
     return None
+
+
+def _signature_options(
+    config: ProjectConfig, minified: bool
+) -> dict[str, bool | int | str]:
+    """The closure-signature options material: the config's Lean global
+    options plus the payload-minification marker — the shape of the
+    submitted payload is part of what a stamp or cache entry certifies,
+    so a minifier change invalidates exactly once (one-time,
+    self-healing)."""
+    return {**config.axle.global_options, "minify": signature_marker(minified)}
 
 
 def _resolve_permitted_sorries(
@@ -792,6 +806,17 @@ def _rewrite_message_position(
     ),
 )
 @click.option(
+    "--minify/--no-minify",
+    "minify_flag",
+    default=None,
+    help=(
+        "Best-effort minification of the submitted payload: comments "
+        "and blank lines are stripped (attribution preserved; files "
+        "that don't track cleanly are sent unminified). Defaults to "
+        "the project config's `project.minify` setting (on)."
+    ),
+)
+@click.option(
     "--select",
     "select",
     default=None,
@@ -831,6 +856,7 @@ def check(
     select: str | None,
     share: bool,
     fail_fast: bool,
+    minify_flag: bool | None,
 ) -> None:
     """Typecheck targets or a selection via the Axle API.
 
@@ -875,6 +901,10 @@ def check(
         config, manifest = _acquire_project_state(
             project_root, no_compile=no_compile, incremental=incremental
         )
+        #: `--no-minify` (or off in the config) submits raw content; the
+        #: effective setting rides in the stamp/cache signature material.
+        minified = config.minify if minify_flag is None else minify_flag
+        signature_options = _signature_options(config, minified)
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         stub_warnings: list[str] = []
@@ -896,6 +926,7 @@ def check(
                 project_root,
                 stubbed=refined or None,
                 warnings=stub_warnings,
+                minify=minified,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
@@ -948,7 +979,7 @@ def check(
                         by_name[node_name],
                         manifest,
                         environment,
-                        config.axle.global_options,
+                        signature_options,
                     )
                 return sig_cache[node_name]
 
@@ -1453,6 +1484,17 @@ def _verify_scope(
     ),
 )
 @click.option(
+    "--minify/--no-minify",
+    "minify_flag",
+    default=None,
+    help=(
+        "Best-effort minification of the submitted payload: comments "
+        "and blank lines are stripped (attribution preserved; files "
+        "that don't track cleanly are sent unminified). Defaults to "
+        "the project config's `project.minify` setting (on)."
+    ),
+)
+@click.option(
     "--permitted-sorries",
     "permitted_sorries",
     multiple=True,
@@ -1509,6 +1551,7 @@ def verify(
     select: str | None,
     share: bool,
     fail_fast: bool,
+    minify_flag: bool | None,
 ) -> None:
     """Verify proofs at kernel level via the Axle API.
 
@@ -1538,6 +1581,10 @@ def verify(
         config, manifest = _acquire_project_state(
             project_root, no_compile=no_compile, incremental=incremental
         )
+        #: `--no-minify` (or off in the config) submits raw content; the
+        #: effective setting rides in the stamp/cache signature material.
+        minified = config.minify if minify_flag is None else minify_flag
+        signature_options = _signature_options(config, minified)
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         user_permitted = _resolve_permitted_sorries(
@@ -1577,7 +1624,7 @@ def verify(
                 by_name[node_name],
                 manifest,
                 environment,
-                config.axle.global_options,
+                signature_options,
             )
         return sig_cache[node_name]
 
@@ -1599,6 +1646,7 @@ def verify(
                 project_root,
                 stubbed=refined or None,
                 warnings=stub_warnings,
+                minify=minified,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
