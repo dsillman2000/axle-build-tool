@@ -447,6 +447,104 @@ class TestExtraction:
         (node,) = load_manifest(root).nodes
         assert node.declarations[0].is_sorry is True
 
+    def test_declaration_dependencies_are_recorded(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Each extracted declaration carries its dependency lists: the
+        local type/value/syntactic variants union into one deduplicated,
+        sorted `dependencies` list, and the external variants persist
+        separately (tooltip material, not graph nodes)."""
+        files = {"M/A.lean": "def base := 1\ntheorem derived : base = 1 := rfl\n"}
+        docs = {
+            "theorem derived": {
+                "base": make_document("base", kind="def", line_pos=1, end_line_pos=1),
+                "derived": make_document(
+                    "derived",
+                    kind="theorem",
+                    line_pos=2,
+                    end_line_pos=2,
+                    local_type_dependencies=["base"],
+                    local_value_dependencies=["base", "Eq", "Nat"],
+                    local_syntactic_dependencies=["rfl"],
+                    external_type_dependencies=["Nat"],
+                    external_value_dependencies=["Nat", "Eq"],
+                ),
+            },
+        }
+        fake_axle._extract_documents_by_marker = docs
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        (node,) = load_manifest(root).nodes
+        base, derived = node.declarations
+        assert base.dependencies == []
+        assert base.external_dependencies == []
+        assert derived.dependencies == ["Eq", "Nat", "base", "rfl"]
+        assert derived.external_dependencies == ["Eq", "Nat"]
+
+    def test_cross_file_dependencies_survive_signature_stubs(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Extraction submits the node's dependency closure with every
+        other file's proof/definition bodies stubbed to signatures; the
+        dependency names the API reports for the node's own documents
+        are recorded as-is, so a node referencing its import's
+        declarations still carries the cross-file edge."""
+        files = {
+            "M/A.lean": "def base := 1\n",
+            "M/B.lean": "import A\ntheorem derived : base = 1 := rfl\n",
+        }
+        docs = {
+            "def base := 1": {
+                "base": make_document(
+                    "base",
+                    kind="def",
+                    line_pos=1,
+                    end_line_pos=1,
+                    signature="def base",
+                ),
+            },
+            "theorem derived": {
+                "derived": make_document(
+                    "derived", kind="theorem", line_pos=3, end_line_pos=3
+                ),
+            },
+        }
+        fake_axle._extract_documents_by_marker = docs
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
+
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        # Re-extract just B (A stays clean): B's payload now inlines A
+        # *stubbed to its signature* (`def base := sorry`), the very
+        # situation the manifest's dependency names must stay true to.
+        (root / "M/B.lean").write_text(
+            "import A\ntheorem derived : base = 1 := rfl\n-- touched\n",
+            encoding="utf-8",
+        )
+        fake_axle._extract_documents_by_marker["-- touched"] = {
+            "derived": make_document(
+                "derived",
+                kind="theorem",
+                line_pos=3,
+                end_line_pos=3,
+                local_syntactic_dependencies=["base"],
+            ),
+        }
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        manifest = load_manifest(root)
+        (derived,) = manifest.by_name()["M.B"].declarations
+        assert derived.dependencies == ["base"]
+        assert manifest.by_name()["M.A"].declarations[0].name == "base"
+        # A's own record keeps no deps (a dependency-free file).
+        assert manifest.by_name()["M.A"].declarations[0].dependencies == []
+
     def test_recompile_skips_extraction(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
         root = make_project(
             tmp_path,

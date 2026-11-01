@@ -10,8 +10,8 @@ from axle.types import Messages, VerifyProofNegation, VerifyProofResponse
 from click.testing import CliRunner
 
 from axle_build_tool import main
-from axle_build_tool.manifest import load_manifest
-from conftest import make_document, make_response, status_line
+from axle_build_tool.manifest import load_manifest, save_manifest
+from conftest import make_document, make_response, status_line, verified_stamp_of
 
 runner = CliRunner()
 
@@ -469,6 +469,110 @@ class TestVerificationCache:
         assert len(verify_calls(fake_axle)) == 1
         assert verify_calls(fake_axle)[0]["environment"] == "lean-4.34.1"
         assert "(cached)" not in result.output
+
+
+class TestBothStampTiers:
+    """Check and verify are distinct verdicts, recorded independently.
+
+    `checked_*` and `verified_*` live on the same declaration without
+    interfering: the verify cache consults only `verified_sig` against
+    the closure signature — check stamps never satisfy it, and stale
+    check fields never disturb it.
+    """
+
+    def test_checked_and_verified_stamps_coexist(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        check_result = runner.invoke(main, ["check"])
+        assert check_result.exit_code == 0, check_result.output
+        checked_rids = {
+            d.checked_request_id for n in load_manifest(root).nodes for d in n.declarations
+        }
+        fake_axle.calls.clear()
+
+        verify_result = runner.invoke(main, ["verify"])
+        assert verify_result.exit_code == 0, verify_result.output
+        manifest = load_manifest(root)
+        for name in ("t1", "t2"):
+            decl = verified_stamp_of(manifest, name)
+            assert decl.verified_sig is not None
+            # Same closure signature material — the tiers differ in what
+            # they judged, not in what content they judged against.
+            assert decl.verified_sig == decl.checked_sig
+            assert decl.checked_sig is not None
+            assert decl.verified_request_id not in checked_rids
+
+        # A second verify stays cached: the cache reads verified fields only.
+        fake_axle.calls.clear()
+        again = runner.invoke(main, ["verify", "--no-compile"])
+        assert again.exit_code == 0, again.output
+        assert again.output.count("(cached)") == 2
+        assert verify_calls(fake_axle) == []
+
+    def test_check_stamps_do_not_satisfy_the_verify_cache(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A declaration checked clean has not been kernel-verified;
+        verify must still submit it."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        assert runner.invoke(main, ["check"]).exit_code == 0
+        fake_axle.calls.clear()
+        assert all(
+            d.checked_sig is not None for n in load_manifest(root).nodes for d in n.declarations
+        )
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        assert len(verify_calls(fake_axle)) == 2
+        assert "(cached)" not in result.output
+
+    def test_verify_cache_ignores_stale_check_fields(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+
+        # Corrupt every checked_* field after verifying: the cache must
+        # keep working — verify's signature material excludes them.
+        manifest = load_manifest(root)
+        stamped_nodes = [
+            node.model_copy(
+                update={
+                    "declarations": [
+                        d.model_copy(
+                            update={
+                                "checked_sig": "bogus",
+                                "checked_at": None,
+                                "checked_request_id": "bogus",
+                            }
+                        )
+                        for d in node.declarations
+                    ]
+                }
+            )
+            for node in manifest.nodes
+        ]
+        save_manifest(manifest.model_copy(update={"nodes": stamped_nodes}), root)
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify", "--no-compile"])
+
+        assert result.exit_code == 0, result.output
+        assert "(cached)" in result.output
+        assert verify_calls(fake_axle) == []
 
 
 class TestPermittedSorry:

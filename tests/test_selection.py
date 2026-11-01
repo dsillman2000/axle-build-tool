@@ -139,6 +139,53 @@ class TestResolveSelection:
             resolve_selection("M", config, manifest)
 
 
+class TestReadOnlyAgainstRicherRecords:
+    """Selection resolution reads declaration *names* only: dependency
+    lists and the checked/verified stamp tiers must not affect it."""
+
+    def test_resolution_is_unchanged_by_the_outcome_fields(self, chain_state) -> None:
+        from datetime import datetime, timezone
+
+        config, manifest, _ = chain_state
+        stamped = manifest.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(
+                        update={
+                            "declarations": [
+                                declaration.model_copy(
+                                    update={
+                                        "dependencies": ["external.things"],
+                                        "external_dependencies": ["Nat"],
+                                        "checked_sig": "c" * 32,
+                                        "checked_at": datetime.now(timezone.utc),
+                                        "checked_request_id": "req-check",
+                                        "verified_sig": "v" * 32,
+                                        "verified_at": datetime.now(timezone.utc),
+                                        "verified_request_id": "req-verify",
+                                    }
+                                )
+                                for declaration in node.declarations
+                            ]
+                        }
+                    )
+                    for node in manifest.nodes
+                ]
+            }
+        )
+
+        for selector, _expected in (
+            ("M", None),
+            ("M.B", None),
+            ("M.C", None),
+            ("M.C.top", None),
+            ("M.Utils.Basic.x", None),
+        ):
+            assert resolve_selection(selector, config, manifest) == resolve_selection(
+                selector, config, stamped
+            )
+
+
 class TestSelectionPayloads:
     def test_module_selection_covers_all_files_in_dependency_order(
         self, chain_state

@@ -9,8 +9,9 @@ from axle.types import CheckResponse, Messages
 from click.testing import CliRunner
 
 from axle_build_tool import main
+from axle_build_tool.config import load_config
 from axle_build_tool.manifest import load_manifest, manifest_path
-from conftest import make_document, make_response, status_line
+from conftest import checked_stamp_of, make_document, make_response, status_line
 
 runner = CliRunner()
 
@@ -968,21 +969,58 @@ class TestShare:
         assert "SKIP" in result.output
         assert "share:" not in result.output
 
-    def test_share_does_not_modify_the_manifest(
+    def test_share_records_nothing_extra_in_the_manifest(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
-        monkeypatch.chdir(root)
+        """--share itself persists nothing: a shared run's manifest is
+        identical to a plain run's. (An okay check does record its
+        per-declaration check stamps — the point here is that sharing
+        adds nothing beyond that.)"""
+        import datetime as dt_module
+        import json
+
+        class _FixedDatetime(dt_module.datetime):
+            """A clock stamping identical `checked_at` in both runs."""
+
+            @classmethod
+            def now(cls, tz=None):  # noqa: ARG002 - the interface is positional
+                return dt_module.datetime(2026, 1, 1, tzinfo=dt_module.timezone.utc)
+
+        monkeypatch.setattr("axle_build_tool.cli.datetime", _FixedDatetime)
+
         fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
-        assert runner.invoke(main, ["compile"]).exit_code == 0
-        before = manifest_path(root).read_bytes()
+        roots = {}
+        for name in ("plain", "shared"):
+            root = make_project(tmp_path / name, NO_TARGETS_CONFIG, TWO_FILES)
+            monkeypatch.chdir(root)
+            fake_axle._request_counter = 0  # identical request ids in both fixtures
+            assert runner.invoke(main, ["compile"]).exit_code == 0
+            roots[name] = root
 
-        # --no-compile isolates the check phase: a precursor compile
-        # always refreshes generated_at.
-        result = runner.invoke(main, ["check", "--no-compile", "--select", "M.A", "--share"])
+        monkeypatch.chdir(roots["shared"])
+        fake_axle._request_counter = 0  # ...and for the checks: same ids here too
+        shared = runner.invoke(main, ["check", "--no-compile", "--select", "M.A", "--share"])
+        assert shared.exit_code == 0, shared.output
+        assert "share: https://axle.test/check#r=fake-req-" in shared.output
 
-        assert result.exit_code == 0, result.output
-        assert manifest_path(root).read_bytes() == before
+        monkeypatch.chdir(roots["plain"])
+        fake_axle._request_counter = 0  # ...and for the plain run
+        plain = runner.invoke(main, ["check", "--no-compile", "--select", "M.A"])
+        assert plain.exit_code == 0, plain.output
+
+        def manifest_of(name: str) -> dict:
+            return json.loads(manifest_path(roots[name]).read_text(encoding="utf-8"))
+
+        plain_manifest = manifest_of("plain")
+        shared_manifest = manifest_of("shared")
+        # The compile-time clocks differ between the fixtures; the
+        # outcome data (including the fixed `checked_at`) must not.
+        shared_manifest["generated_at"] = plain_manifest["generated_at"]
+        for shared_node, plain_node in zip(
+            shared_manifest["nodes"], plain_manifest["nodes"]
+        ):
+            shared_node["last_checked"] = plain_node["last_checked"]
+        assert shared_manifest == plain_manifest
 
 
 class TestStreaming:
@@ -1115,3 +1153,208 @@ modules:
 
         assert result.exit_code == 0, result.output
         assert "Checked 2 selection(s): all OK" in result.output
+
+
+class TestCheckStamps:
+    """Clean check outcomes are recorded per declaration in the manifest.
+
+    Check and verify are distinct verdict tiers, so check carries its
+    own stamp set (`checked_sig`/`checked_at`/`checked_request_id`),
+    keyed on the same closure signature material as the verify cache
+    and only written for full, unstubbed payloads that actually passed.
+    """
+
+    FILES = {
+        "M/A.lean": "def t1 := 1\n",
+        "M/B.lean": "import A\ndef t2 := t1\n",
+    }
+    DOCS = TWO_FILE_DOCS
+
+    def compile_project(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> Path:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        return root
+
+    def expected_sig(self, root: Path, node_name: str) -> str:
+        """The closure signature a stamped declaration should carry."""
+        from axle_build_tool.manifest import closure_signature
+
+        return closure_signature(
+            load_manifest(root).by_name()[node_name],
+            load_manifest(root),
+            "lean-4.35.0",
+            load_config(root).axle.global_options,
+        )
+
+    def test_file_selection_stamps_its_own_declarations_only(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A file-level selection stamps every declaration of the file —
+        and nothing beyond it: closure dependencies are not stamped
+        (their own hosts stamp them when judged)."""
+        root = self.compile_project(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M.B"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        t2 = checked_stamp_of(load_manifest(root), "t2")
+        t1 = checked_stamp_of(load_manifest(root), "t1")
+        assert t2.checked_sig == self.expected_sig(root, "M.B")
+        assert t2.checked_at is not None
+        assert t2.checked_request_id in fake_axle.request_ids
+        # The inlined dependency stays unstamped.
+        assert t1.checked_sig is None
+        assert t1.checked_at is None
+        assert "Recorded 1 check stamp(s) in the manifest" in result.output
+
+    def test_declaration_selection_stamps_its_one_declaration(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_project(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M.B.t2"])
+
+        assert result.exit_code == 0, result.output
+        t2 = checked_stamp_of(load_manifest(root), "t2")
+        assert t2.checked_sig == self.expected_sig(root, "M.B")
+        assert t2.checked_request_id in fake_axle.request_ids
+        assert checked_stamp_of(load_manifest(root), "t1").checked_sig is None
+
+    def test_module_selection_stamps_every_declaration_of_its_nodes(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_project(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M"])
+
+        assert result.exit_code == 0, result.output
+        manifest = load_manifest(root)
+        for name, node_name in (("t1", "M.A"), ("t2", "M.B")):
+            decl = checked_stamp_of(manifest, name)
+            assert decl.checked_sig == self.expected_sig(root, node_name)
+            assert decl.checked_request_id in fake_axle.request_ids
+
+    def test_failing_payload_stamps_nothing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Only successes are stamped — a failing payload leaves every
+        judged declaration unstamped (the report's per-decl OK
+        fallbacks stay report-only judgments)."""
+        root = self.compile_project(make_project, tmp_path, monkeypatch, fake_axle)
+        fake_axle.check_result = make_response(CheckResponse, okay=False)
+
+        result = runner.invoke(main, ["check", "--select", "M"])
+
+        assert result.exit_code == 1
+        manifest = load_manifest(root)
+        for decl in (d for node in manifest.nodes for d in node.declarations):
+            assert decl.checked_sig is None
+            assert decl.checked_at is None
+            assert decl.checked_request_id is None
+
+    def test_sorry_granted_run_stamps_nothing_even_when_okay(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A check against a `--sorry`-stubbed payload is not the
+        full-context fact the signature claims — nothing is stamped,
+        including the selection's own declarations."""
+        chain = TestSorry()
+        root = chain.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M.C", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.C.top") == "M.C.top OK"
+        manifest = load_manifest(root)
+        for name in ("base", "base_holds", "middle", "top"):
+            decl = checked_stamp_of(manifest, name)
+            assert decl.checked_sig is None
+            assert decl.checked_at is None
+
+    def test_partially_granted_module_stamps_nothing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """`--select M --sorry M.A`: B and C pass against a stubbed
+        dependency — the payload is not the full closure, so no
+        declaration in it is stamped."""
+        chain = TestSorry()
+        root = chain.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        manifest = load_manifest(root)
+        for name in ("base", "base_holds", "middle", "top"):
+            assert checked_stamp_of(manifest, name).checked_sig is None
+
+    def test_fully_granted_selection_is_skipped_and_stamps_nothing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.compile_project(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--sorry", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A") == "M.A SKIP"
+        assert checked_stamp_of(load_manifest(root), "t1").checked_sig is None
+        assert checked_stamp_of(load_manifest(root), "t2").checked_sig is None
+
+    def test_environment_change_invalidates_the_stamp_key(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """`checked_sig` folds the environment in: same sources under
+        another environment stamp a different signature, so a future
+        check cache (and any consumer of the stamps) can tell them apart."""
+        root = self.compile_project(make_project, tmp_path, monkeypatch, fake_axle)
+        assert runner.invoke(
+            main, ["check", "--select", "M.A", "--no-compile"]
+        ).exit_code == 0
+        first = checked_stamp_of(load_manifest(root), "t1").checked_sig
+
+        (root / "axbt_project.yml").write_text(
+            pinned_config("lean-4.35.0").replace("lean-4.35.0", "lean-4.34.1"),
+            encoding="utf-8",
+        )
+        fake_axle._environments = [{"name": "lean-4.35.0"}, {"name": "lean-4.34.1"}]
+        assert runner.invoke(
+            main, ["check", "--select", "M.A", "--no-compile"]
+        ).exit_code == 0
+
+        second = checked_stamp_of(load_manifest(root), "t1").checked_sig
+        assert second is not None and second != first
+
+    def test_stamped_report_keeps_counters_and_timing_unchanged(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Stamping rides the completion loop: the streamed report's
+        counters, orderings, and per-item timings are exactly as before."""
+        root = make_project(tmp_path, TARGETS_CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        # A's own-file marker routes the delay to A only; the marker
+        # routing picks the one occurring latest in a payload, and B's
+        # payload (dependencies inlined) ends with `def t2 := t1`.
+        fake_axle.check_delays = {"def t1 := 1": 0.15, "def t2 := t1": 0.0}
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
+        for position, line in enumerate(streamed, 1):
+            assert re.match(rf"\[\s*{position}/2\] ", line), line
+            assert re.search(r"\d+\.\d{3}s$", line), line
+        assert re.search(r"Checked 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)
+        # Both targets stamped their own decl.
+        manifest = load_manifest(root)
+        assert checked_stamp_of(manifest, "t1").checked_sig is not None
+        assert checked_stamp_of(manifest, "t2").checked_sig is not None

@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from axle_build_tool import main
-from axle_build_tool.manifest import MANIFEST_VERSION, manifest_path
+from axle_build_tool.manifest import MANIFEST_VERSION, load_manifest, manifest_path
 from conftest import make_document, normalized_lines
 
 runner = CliRunner()
@@ -133,6 +133,56 @@ class TestList:
 
         assert result.exit_code != 0
         assert "axbt_project.yml" in result.output
+
+
+class TestUnaffectedByRicherRecords:
+    """`axbt list` is a read-only consumer of the declaration model:
+    dependency lists and check/verify stamps change nothing in its
+    output."""
+
+    def test_stamped_declarations_render_identically(
+        self, compiled_project: Path
+    ) -> None:
+        from datetime import datetime, timezone
+
+        plain = runner.invoke(main, ["list"])
+        assert plain.exit_code == 0, plain.output
+
+        manifest = load_manifest(compiled_project)
+        richer = manifest.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(
+                        update={
+                            "declarations": [
+                                d.model_copy(
+                                    update={
+                                        "dependencies": ["sibling_decl"],
+                                        "external_dependencies": ["Nat"],
+                                        "checked_sig": "c" * 32,
+                                        "checked_at": datetime.now(timezone.utc),
+                                        "checked_request_id": "req-check",
+                                        "verified_sig": "v" * 32,
+                                        "verified_at": datetime.now(timezone.utc),
+                                        "verified_request_id": "req-verify",
+                                    }
+                                )
+                                for d in node.declarations
+                            ]
+                        }
+                    )
+                    for node in manifest.nodes
+                ]
+            }
+        )
+        from axle_build_tool.manifest import save_manifest
+
+        save_manifest(richer, compiled_project)
+
+        stamped = runner.invoke(main, ["list"])
+
+        assert stamped.exit_code == 0, stamped.output
+        assert stamped.output == plain.output
 
 
 class TestListSelection:

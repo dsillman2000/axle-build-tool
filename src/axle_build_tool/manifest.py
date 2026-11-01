@@ -32,14 +32,28 @@ class ManifestError(Exception):
 class ExtractedDecl(BaseModel):
     """Per-declaration metadata extracted from a node by the Axle API.
 
-    `verified_sig`/`verified_at` record a successful kernel-level
-    verification of this declaration (the `axbt verify` cache): the
-    signature identifies the exact content/config the verification ran
-    against (see `verification_signature`); a declaration is only
-    stamped when it was actually swept — permitted or stubbed
-    declarations are never stamped. `verified_request_id` is the API
-    request id of that verification run, so `--share` can mint a link
-    to a cached verification without re-submitting it.
+    `dependencies` carries the declaration's local dependencies (the
+    deduplicated, sorted union of the extraction document's local
+    type/value/syntactic dependency lists; the type/value/syntactic
+    split itself is tooltip-grade detail); `external_dependencies`
+    holds the external variants — names outside the project, rendered
+    in tooltips rather than drawn as graph nodes. Both are populated at
+    extraction time from the node's own documents only.
+
+    Check and verify record two distinct outcome tiers. `checked_sig`/
+    `checked_at`/`checked_request_id` record a successful typecheck
+    (`axbt check`): the signature identifies the exact closure
+    content/config the check ran against (see `closure_signature`), and
+    a `sorry` elaborates with only a warning here, so a checked-clean
+    declaration may still await kernel verification. `verified_sig`/
+    `verified_at` record the stronger kernel-level verification (the
+    `axbt verify` cache); the two stamp sets are orthogonal — verify's
+    cache consults only `verified_sig`, check's records only the
+    `checked_*` fields. For both tiers a declaration is only stamped
+    when it was actually judged by a full, unstubbed payload —
+    permitted or stubbed declarations are never stamped. The request
+    ids are the API request ids of the recorded runs (`--share` mints
+    links from them).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -50,6 +64,11 @@ class ExtractedDecl(BaseModel):
     line_pos: int
     end_line_pos: int
     signature: str = ""
+    dependencies: list[str] = Field(default_factory=list)
+    external_dependencies: list[str] = Field(default_factory=list)
+    checked_sig: str | None = None
+    checked_at: datetime | None = None
+    checked_request_id: str | None = None
     verified_sig: str | None = None
     verified_at: datetime | None = None
     verified_request_id: str | None = None
@@ -312,20 +331,22 @@ def check_targets(config: ProjectConfig, manifest: Manifest) -> None:
                 )
 
 
-def verification_signature(
+def closure_signature(
     node: ManifestNode,
     manifest: Manifest,
     environment: str,
     global_options: dict[str, bool | int | str],
 ) -> str:
-    """The cache signature of verifying `node` — and of every declaration in it.
+    """The cache signature of judging `node` — and of every declaration in it.
 
     Covers the node's **file dependency closure** (each closure file's
     name and md5), the resolved environment, and the global options —
-    everything that can change whether the node's proofs verify.
-    Selection-independent by design: a declaration verified through any
-    selection granularity carries the same signature, and any change to
-    the node or one of its (transitive) dependencies invalidates it.
+    everything that can change whether the node's content checks or
+    verifies. Selection-independent by design: a declaration judged
+    through any selection granularity carries the same signature, and
+    any change to the node or one of its (transitive) dependencies
+    invalidates it. Not tier-specific: the verify cache keys on it, and
+    check's `checked_sig` stamps record it.
     """
     by_name = manifest.by_name()
     seen: set[str] = set()

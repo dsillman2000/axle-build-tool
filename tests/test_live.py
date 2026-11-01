@@ -618,3 +618,130 @@ class TestLiveShare:
         assert result.exit_code == 0, result.output
         assert f"share: {base_url}/check#r=" in result.output
         assert "Share link(s) minted: 1" in result.output
+
+
+class TestLiveTierSplit:
+    """Check and verify are genuinely distinct verdict tiers, and the
+    manifest records both independently.
+
+    A `sorry` elaborates with only a warning, so it passes the check
+    tier while its kernel-level verification fails — locally, without
+    an API call. The declaration ends up *checked-clean but
+    unverified*: exactly the state #22's graph needs for the
+    yellow/orange split, and impossible to express with a single
+    `verified_*` stamp.
+    """
+
+    def test_sorried_theorem_checks_clean_but_fails_verification(
+        self, make_live_project
+    ) -> None:
+        root = make_live_project({"M/Gap.lean": SORRY_SOURCE}, targets=["Gap.gap"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        check_result = runner.invoke(main, ["check", "--select", "M.Gap"])
+        assert check_result.exit_code == 0, check_result.output
+        assert "Recorded 1 check stamp(s) in the manifest" in check_result.output
+
+        verify_result = runner.invoke(main, ["verify"])
+        assert verify_result.exit_code == 1
+        assert status_line(verify_result.output, "M.Gap.gap") == "M.Gap.gap FAIL"
+        assert "declaration 'gap' has a `sorry`" in verify_result.output
+
+        from axle_build_tool.manifest import load_manifest
+
+        (gap,) = [
+            decl
+            for node in load_manifest(root).nodes
+            for decl in node.declarations
+        ]
+        assert gap.checked_sig is not None
+        assert gap.checked_at is not None
+        assert gap.checked_request_id is not None
+        # The failing verify recorded nothing — checked-clean and
+        # unverified coexist on this one declaration.
+        assert gap.verified_sig is None
+        assert gap.verified_at is None
+
+    def test_both_tiers_proven_declaration_holds_both_stamps(
+        self, make_live_project
+    ) -> None:
+        root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        assert runner.invoke(main, ["check"]).exit_code == 0
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+
+        from axle_build_tool.manifest import load_manifest
+
+        decls = {
+            decl.name: decl
+            for node in load_manifest(root).nodes
+            for decl in node.declarations
+        }
+        base_holds = decls["base_holds"]
+        assert base_holds.checked_sig is not None
+        assert base_holds.verified_sig is not None
+        assert base_holds.checked_sig == base_holds.verified_sig
+        assert base_holds.checked_request_id != base_holds.verified_request_id
+
+
+class TestLiveDependencyNames:
+    """The dependency names recorded per declaration are the graph's
+    edges (#22): they must match how axbt extracts the declarations
+    themselves, across files, with the dependency closure stubbed to
+    signatures.
+
+    Names in `dependencies` surface from the submitted extraction
+    payload, whose dependency closure is signature-stubbed
+    (`build_file_payload(..., stub_dependencies=True)`) — this probe
+    exists to confirm the reported names are recognized against the
+    extracted names (bare vs. qualified), that cross-file
+    dependencies are reported at all, and that signature-stubbed
+    dependency declarations still appear in the lists.
+    """
+
+    DEP_BASE = (
+        "import Mathlib\n\n"
+        "def shared : Nat := 1\n\n"
+        "theorem shared_holds : shared = 1 := rfl\n"
+    )
+    DEP_USER = (
+        "import Base\n\n"
+        "namespace Scoped\n\n"
+        "def combined : Nat := shared + 1\n\n"
+        "theorem combined_holds : combined = 2 := rfl\n\n"
+        "end Scoped\n"
+    )
+
+    def test_recorded_dependencies_match_extracted_names(
+        self, make_live_project
+    ) -> None:
+        root = make_live_project({"M/Base.lean": self.DEP_BASE, "M/User.lean": self.DEP_USER})
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        from axle_build_tool.manifest import load_manifest
+
+        manifest = load_manifest(root)
+        extracted = {decl.name for node in manifest.nodes for decl in node.declarations}
+        extracted_last_segments = {name.rsplit(".", 1)[-1] for name in extracted}
+        user = manifest.by_name()["M.User"]
+        user_decls = {decl.name.rsplit(".", 1)[-1]: decl for decl in user.declarations}
+        assert {"combined", "combined_holds"} <= set(user_decls), extracted
+
+        for decl in (d for node in manifest.nodes for d in node.declarations):
+            # The union is deduplicated and sorted by construction.
+            assert decl.dependencies == sorted(set(decl.dependencies))
+            for dep in decl.dependencies:
+                # Recognized: exact extracted name, or the bare
+                # counterpart of one (Lean's namespacing means both
+                # spellings can appear in the reported lists).
+                assert (
+                    dep in extracted or dep.rsplit(".", 1)[-1] in extracted_last_segments
+                ), f"{decl.name}: unrecognized dependency {dep!r} (extracted: {sorted(extracted)})"
+
+        # The cross-file edge: `combined := shared + 1` must name the
+        # dependency in Base — reported even though Base's body was
+        # signature-stubbed in User's extraction payload.
+        combined = user_decls["combined"]
+        assert combined.dependencies, f"no deps recorded: {combined}"
+        assert any(dep.rsplit(".", 1)[-1] == "shared" for dep in combined.dependencies)
