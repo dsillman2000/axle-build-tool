@@ -1024,3 +1024,94 @@ class TestStreaming:
         # the whole run.
         assert _delay(streamed[1]) > _delay(streamed[0])
         assert re.search(r"Checked 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)
+
+
+class TestFailFast:
+    """--fail-fast (-x): the first failed selection cancels the rest."""
+
+    TARGETS_CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+      - C.t3
+"""
+
+    FILES = {
+        "M/A.lean": "def t1 := 1\n",
+        "M/B.lean": "import A\ndef t2 := t1\n",
+        "M/C.lean": "import A\nimport B\ndef t3 := t2\n",
+    }
+
+    DOCS = {
+        "def t1 := 1": {
+            "t1": make_document(
+                "t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1"
+            )
+        },
+        "def t2 := t1": {
+            "t2": make_document(
+                "t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2"
+            )
+        },
+        "def t3 := t2": {
+            "t3": make_document(
+                "t3", kind="def", line_pos=5, end_line_pos=5, signature="def t3"
+            )
+        },
+    }
+
+    def test_first_failure_cancels_in_flight_submissions(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The failing result streams first and cuts the run short.
+
+        The first failure is reported with its timing and message
+        block; submissions still in flight are cancelled rather than
+        finished, and the summary accounts for what was not judged.
+        """
+        root = make_project(tmp_path, self.TARGETS_CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        fake_axle.request_ids.clear()
+        fake_axle.check_result = make_response(CheckResponse, okay=False)
+        fake_axle.check_delays = {"def t2 := t1": 0.5, "def t3 := t2": 0.5}
+
+        result = runner.invoke(main, ["check", "-x"])
+
+        assert result.exit_code == 1, result.output
+        # The delayed submissions were cancelled in flight: they never
+        # came back from the API (request ids mint on response only).
+        assert len(fake_axle.request_ids) == 1
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        assert len(streamed) == 1
+        assert "M.A.t1" in streamed[0]
+        assert "FAIL" in streamed[0]
+        assert "fail-fast: cancelled 2 remaining selection(s)" in result.output
+        assert re.search(
+            r"Checked 3 selection\(s\): 1 failed, 0 OK, "
+            r"2 cancelled by fail-fast in \d+\.\d{3}s",
+            result.output,
+        )
+
+    def test_fail_fast_leaves_happy_runs_untouched(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--fail-fast"])
+
+        assert result.exit_code == 0, result.output
+        assert "Checked 2 selection(s): all OK" in result.output

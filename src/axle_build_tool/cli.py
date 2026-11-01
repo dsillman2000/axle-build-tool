@@ -612,6 +612,9 @@ class _StreamingReport:
     failed: int = 0
     skipped: int = 0
     cached: int = 0
+    #: Selections that stopped being judged because --fail-fast cut
+    #: the run short — never submitted or never reported.
+    cancelled: int = 0
 
     def counter(self) -> str:
         """The next printed line's progress counter, `[ 3/12]`-style."""
@@ -781,12 +784,25 @@ def _rewrite_message_position(
         "of that exact check run."
     ),
 )
+@click.option(
+    "--fail-fast",
+    "-x",
+    "fail_fast",
+    is_flag=True,
+    default=False,
+    help=(
+        "Stop at the first failing selection: cancel all ongoing "
+        "submissions and report the failure instead of finishing the "
+        "rest of the run."
+    ),
+)
 def check(
     no_compile: bool,
     incremental: bool,
     sorry: tuple[str, ...],
     select: str | None,
     share: bool,
+    fail_fast: bool,
 ) -> None:
     """Typecheck targets or a selection via the Axle API.
 
@@ -808,6 +824,10 @@ def check(
     focuses the check; Axle resolves names against theorems/lemmas only
     (a `def` name is rejected with "Theorem '<name>' not found"), so
     definitions must be checked via file- or module-level selections.
+
+    With --fail-fast (-x), the first failed selection cancels every
+    submission still in flight and stops the run early — remaining
+    selections are reported as cancelled in the summary.
     """
     project_root = Path.cwd()
     try:
@@ -908,49 +928,76 @@ def check(
 
             submittable = [item for item in checks if item[2] is not None]
             #: Results print the moment each submission completes, in
-            #: completion order, each line with its elapsed time.
-            for future in asyncio.as_completed([submit(item) for item in submittable]):
-                item, response, elapsed = await future
-                label, selection, payload, refined, _granted = item
-                if not response.okay:
-                    report.failed += 1
-                for printed, node, decl in _printed_lines(label, selection, manifest):
-                    if node is None:
-                        status = (
-                            click.style("OK", fg="green")
-                            if response.okay
-                            else click.style("FAIL", fg="red")
-                        )
-                    else:
-                        status = _decl_verdict(node, decl, response, payload)
-                    click.echo(
-                        f"{report.counter()} {printed:<{width}}  {status}"
-                        f"  {_timing_text(elapsed)}"
-                    )
-                kept, _ = _split_stub_warnings(
-                    [
-                        *response.lean_messages.errors,
-                        *response.lean_messages.warnings,
-                    ],
-                    payload,
-                    stub_map,
+            #: completion order, each line with its elapsed time. Tasks
+            #: are created explicitly so --fail-fast can cancel the
+            #: ones still in flight.
+            pending: set[asyncio.Task[Any]] = {
+                asyncio.create_task(submit(item)) for item in submittable
+            }
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
                 )
-                for message in kept:
-                    click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
-                stub_line = _stub_context_line(refined, selection, manifest)
-                if stub_line:
-                    click.secho(f"    {stub_line}", dim=True)
-                if (
-                    not response.okay
-                    and not response.lean_messages.errors
-                    and response.failed_declarations
-                ):
-                    click.echo(
-                        f"    failed declarations: {', '.join(response.failed_declarations)}"
+                processed_in_batch = 0
+                for task in done:
+                    processed_in_batch += 1
+                    item, response, elapsed = task.result()
+                    label, selection, payload, refined, _granted = item
+                    if not response.okay:
+                        report.failed += 1
+                    for printed, node, decl in _printed_lines(label, selection, manifest):
+                        if node is None:
+                            status = (
+                                click.style("OK", fg="green")
+                                if response.okay
+                                else click.style("FAIL", fg="red")
+                            )
+                        else:
+                            status = _decl_verdict(node, decl, response, payload)
+                        click.echo(
+                            f"{report.counter()} {printed:<{width}}  {status}"
+                            f"  {_timing_text(elapsed)}"
+                        )
+                    kept, _ = _split_stub_warnings(
+                        [
+                            *response.lean_messages.errors,
+                            *response.lean_messages.warnings,
+                        ],
+                        payload,
+                        stub_map,
                     )
-                rid = (response.info or {}).get("request_id")
-                await _mint_share_link(service, rid, share_links, enabled=share)
-                _print_share_line(share_links, rid)
+                    for message in kept:
+                        click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
+                    stub_line = _stub_context_line(refined, selection, manifest)
+                    if stub_line:
+                        click.secho(f"    {stub_line}", dim=True)
+                    if (
+                        not response.okay
+                        and not response.lean_messages.errors
+                        and response.failed_declarations
+                    ):
+                        click.echo(
+                            f"    failed declarations: {', '.join(response.failed_declarations)}"
+                        )
+                    rid = (response.info or {}).get("request_id")
+                    await _mint_share_link(service, rid, share_links, enabled=share)
+                    _print_share_line(share_links, rid)
+                    #: --fail-fast: the first failed selection cancels
+                    #: every submission still in flight and stops the
+                    #: run; adds already-done but as yet unreported
+                    #: tasks to the cancelled count.
+                    if fail_fast and not response.okay:
+                        report.cancelled = len(pending) + len(done) - processed_in_batch
+                        click.secho(
+                            f"    fail-fast: cancelled {report.cancelled} "
+                            "remaining selection(s)",
+                            dim=True,
+                        )
+                        for left in pending:
+                            left.cancel()
+                        if pending:
+                            await asyncio.gather(*pending, return_exceptions=True)
+                        return
 
     started = time.monotonic()
     try:
@@ -974,10 +1021,14 @@ def check(
     total = len(checks)
     total_timing = _timing_text(time.monotonic() - started)
     skipped_note = f", {report.skipped} skipped" if report.skipped else ""
+    cancelled_note = (
+        f", {report.cancelled} cancelled by fail-fast" if report.cancelled else ""
+    )
     if report.failed:
         click.secho(
             f"Checked {total} selection(s): {report.failed} failed, "
-            f"{total - report.failed} OK{skipped_note} in {total_timing}",
+            f"{total - report.failed - report.cancelled} OK"
+            f"{skipped_note}{cancelled_note} in {total_timing}",
             fg="red",
         )
         _print_share_summary(share_links)
@@ -1315,6 +1366,18 @@ def _verify_scope(
         "each selection's most recent cached verification."
     ),
 )
+@click.option(
+    "--fail-fast",
+    "-x",
+    "fail_fast",
+    is_flag=True,
+    default=False,
+    help=(
+        "Stop at the first failing selection: cancel all ongoing "
+        "submissions and report the failure instead of finishing the "
+        "rest of the run."
+    ),
+)
 def verify(
     no_compile: bool,
     incremental: bool,
@@ -1323,6 +1386,7 @@ def verify(
     force: bool,
     select: str | None,
     share: bool,
+    fail_fast: bool,
 ) -> None:
     """Verify proofs at kernel level via the Axle API.
 
@@ -1339,6 +1403,10 @@ def verify(
     environment, and the global options; a later verify skips
     selections whose declarations are all still validly cached, unless
     --force re-runs them.
+
+    With --fail-fast (-x), the first failed selection cancels every
+    submission still in flight and stops the run early — remaining
+    selections are reported as cancelled in the summary.
     """
     project_root = Path.cwd()
     try:
@@ -1475,40 +1543,10 @@ def verify(
                         share_links,
                         enabled=share,
                     )
-
-            semaphore = asyncio.Semaphore(service.max_concurrency)
-
-            async def submit(
-                item: tuple[str, Selection, Payload, dict, str | None, _VerifyScope],
-            ) -> tuple[
-                tuple[str, Selection, Payload, dict, str | None, _VerifyScope],
-                Any,
-                float,
-            ]:
-                label, _selection, payload, _refined, _granted, scope = item
-                async with semaphore:
-                    # The formal statement is the payload with exactly
-                    # the to-verify theorems' proofs stripped; cached,
-                    # permitted, and stubbed declarations stay as they
-                    # are (and are excused from the sweep).
-                    mark = time.monotonic()
-                    spec = await service.theorem2sorry(
-                        payload.content,
-                        context=label,
-                        theorems_only=True,
-                        names=scope.to_verify,
-                    )
-                    response = await service.verify_proof(
-                        spec.content,
-                        payload.content,
-                        context=label,
-                        permitted_sorries=scope.permitted,
-                    )
-                return item, response, time.monotonic() - mark
-
             #: Selections judged without a submission report first; the
             #: streamed verdicts print the moment each submission
             #: completes, in completion order, with its elapsed time.
+            stopped = False
             for label, _selection, payload, _refined, granted, scope in items:
                 if granted is not None:
                     report.skipped += 1
@@ -1538,6 +1576,17 @@ def verify(
                             f"    declaration '{name}' has a `sorry`; "
                             "verify requires complete proofs"
                         )
+                    #: --fail-fast: a local failure stops the run before
+                    #: any submission is made.
+                    if fail_fast:
+                        report.cancelled = report.line_total - report.printed
+                        click.secho(
+                            f"    fail-fast: cancelled {report.cancelled} "
+                            "remaining selection(s)",
+                            dim=True,
+                        )
+                        stopped = True
+                        break
                     continue
                 if not scope.to_verify:
                     report.cached += 1
@@ -1551,56 +1600,130 @@ def verify(
                         _print_share_line(share_links, rid, earlier_run=True)
                     continue
 
-            for future in asyncio.as_completed([submit(item) for item in submittable]):
-                item, response, elapsed = await future
-                label, selection, payload, refined, _granted, scope = item
-                rid = (response.info or {}).get("request_id")
-                # A provable negation means the statement is vacuous — the
-                # outcome is reported only when the API ran the negation check.
-                vacuous = response.negation is not None and response.negation.okay
-                if response.okay and not vacuous:
-                    now = datetime.now(timezone.utc)
-                    for name in scope.to_verify:
-                        stamps[name] = (sig_of(node_of_decl[name]), now, rid)
-                    cached_note = f", {len(scope.cached)} cached" if scope.cached else ""
-                    click.echo(
-                        f"{report.counter()} {label:<{width}}  "
-                        f"{click.style('OK', fg='green')}{cached_note}"
-                        f"  {_timing_text(elapsed)}"
-                    )
-                else:
-                    report.failed += 1
-                    click.echo(
-                        f"{report.counter()} {label:<{width}}  "
-                        f"{click.style('FAIL', fg='red')}  {_timing_text(elapsed)}"
-                    )
-                    if vacuous:
-                        click.echo(
-                            "    the negation is also provable; the statement is vacuous"
+            if not stopped:
+                semaphore = asyncio.Semaphore(service.max_concurrency)
+
+                async def submit(
+                    item: tuple[str, Selection, Payload, dict, str | None, _VerifyScope],
+                ) -> tuple[
+                    tuple[str, Selection, Payload, dict, str | None, _VerifyScope],
+                    Any,
+                    float,
+                ]:
+                    label, _selection, payload, _refined, _granted, scope = item
+                    async with semaphore:
+                        # The formal statement is the payload with exactly
+                        # the to-verify theorems' proofs stripped; cached,
+                        # permitted, and stubbed declarations stay as they
+                        # are (and are excused from the sweep).
+                        mark = time.monotonic()
+                        spec = await service.theorem2sorry(
+                            payload.content,
+                            context=label,
+                            theorems_only=True,
+                            names=scope.to_verify,
                         )
-                kept, _ = _split_stub_warnings(
-                    [
-                        *response.lean_messages.errors,
-                        *response.lean_messages.warnings,
-                    ],
-                    payload,
-                    stub_map,
-                )
-                for message in kept:
-                    click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
-                stub_line = _stub_context_line(refined, selection, manifest)
-                if stub_line:
-                    click.secho(f"    {stub_line}", dim=True)
-                if (
-                    not response.okay
-                    and not response.lean_messages.errors
-                    and response.failed_declarations
-                ):
-                    click.echo(
-                        f"    failed declarations: {', '.join(response.failed_declarations)}"
+                        response = await service.verify_proof(
+                            spec.content,
+                            payload.content,
+                            context=label,
+                            permitted_sorries=scope.permitted,
+                        )
+                    return item, response, time.monotonic() - mark
+
+                #: Results print the moment each submission completes,
+                #: in completion order, each line with its elapsed time.
+                #: Tasks are created explicitly so --fail-fast can cancel
+                #: the ones still in flight.
+                pending: set[asyncio.Task[Any]] = {
+                    asyncio.create_task(submit(item)) for item in submittable
+                }
+                while pending:
+                    done, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
                     )
-                await _mint_share_link(service, rid, share_links, enabled=share)
-                _print_share_line(share_links, rid)
+                    processed_in_batch = 0
+                    for task in done:
+                        processed_in_batch += 1
+                        item, response, elapsed = task.result()
+                        label, selection, payload, refined, _granted, scope = item
+                        rid = (response.info or {}).get("request_id")
+                        # A provable negation means the statement is
+                        # vacuous — the outcome is reported only when
+                        # the API ran the negation check.
+                        vacuous = (
+                            response.negation is not None and response.negation.okay
+                        )
+                        if response.okay and not vacuous:
+                            now = datetime.now(timezone.utc)
+                            for name in scope.to_verify:
+                                stamps[name] = (sig_of(node_of_decl[name]), now, rid)
+                            cached_note = (
+                                f", {len(scope.cached)} cached" if scope.cached else ""
+                            )
+                            click.echo(
+                                f"{report.counter()} {label:<{width}}  "
+                                f"{click.style('OK', fg='green')}{cached_note}"
+                                f"  {_timing_text(elapsed)}"
+                            )
+                        else:
+                            report.failed += 1
+                            click.echo(
+                                f"{report.counter()} {label:<{width}}  "
+                                f"{click.style('FAIL', fg='red')}  {_timing_text(elapsed)}"
+                            )
+                            if vacuous:
+                                click.echo(
+                                    "    the negation is also provable; "
+                                    "the statement is vacuous"
+                                )
+                        kept, _ = _split_stub_warnings(
+                            [
+                                *response.lean_messages.errors,
+                                *response.lean_messages.warnings,
+                            ],
+                            payload,
+                            stub_map,
+                        )
+                        for message in kept:
+                            click.echo(
+                                f"    {_rewrite_message_position(message, payload, paths)}"
+                            )
+                        stub_line = _stub_context_line(refined, selection, manifest)
+                        if stub_line:
+                            click.secho(f"    {stub_line}", dim=True)
+                        if (
+                            not response.okay
+                            and not response.lean_messages.errors
+                            and response.failed_declarations
+                        ):
+                            click.echo(
+                                f"    failed declarations: {', '.join(response.failed_declarations)}"
+                            )
+                        await _mint_share_link(
+                            service, rid, share_links, enabled=share
+                        )
+                        _print_share_line(share_links, rid)
+                        #: --fail-fast: the first failed selection cancels
+                        #: every submission still in flight and stops the
+                        #: run; already-done but unreported tasks count as
+                        #: cancelled too.
+                        if fail_fast and not (response.okay and not vacuous):
+                            report.cancelled = (
+                                len(pending) + len(done) - processed_in_batch
+                            )
+                            click.secho(
+                                f"    fail-fast: cancelled {report.cancelled} "
+                                "remaining selection(s)",
+                                dim=True,
+                            )
+                            for left in pending:
+                                left.cancel()
+                            if pending:
+                                await asyncio.gather(
+                                    *pending, return_exceptions=True
+                                )
+                            return
 
     started = time.monotonic()
     try:
@@ -1652,13 +1775,16 @@ def verify(
 
     total = len(items)
     total_timing = _timing_text(time.monotonic() - started)
-    ok = total - report.failed - report.skipped
+    ok = total - report.failed - report.skipped - report.cancelled
     skipped_note = f", {report.skipped} skipped" if report.skipped else ""
+    cancelled_note = (
+        f", {report.cancelled} cancelled by fail-fast" if report.cancelled else ""
+    )
     cached_note = f" ({report.cached} cached)" if report.cached else ""
     if report.failed:
         click.secho(
             f"Verified {total} selection(s): {report.failed} failed, {ok} OK"
-            f"{skipped_note} in {total_timing}",
+            f"{skipped_note}{cancelled_note} in {total_timing}",
             fg="red",
         )
         _print_share_summary(share_links)

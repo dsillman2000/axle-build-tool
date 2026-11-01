@@ -73,6 +73,7 @@ Run modes (shared by `compile`, `check`, `verify`):
 * `--incremental` (default) — re-extract only new and changed files; a clean tree makes no API calls.
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
 * `--no-compile` (check/verify) — take the existing manifest at face value.
+* `--fail-fast` / `-x` (check/verify) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`).
 
 ### Streaming results
 

@@ -911,3 +911,131 @@ class TestStreaming:
         # the whole run.
         assert _delay(streamed[1]) > _delay(streamed[0])
         assert re.search(r"Verified 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)
+
+
+class TestFailFast:
+    """--fail-fast (-x): the first failed selection cancels the rest."""
+
+    TARGETS_CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+      - C.t3
+"""
+
+    FILES = {
+        "M/A.lean": "theorem t1 : 1 = 1 := rfl\n",
+        "M/B.lean": "import A\ntheorem t2 : 1 = 1 := rfl\n",
+        "M/C.lean": "import A\nimport B\ntheorem t3 : 1 = 1 := rfl\n",
+    }
+
+    DOCS = {
+        "theorem t1 : 1 = 1": {
+            "t1": make_document("t1", kind="theorem", line_pos=1, end_line_pos=1)
+        },
+        "theorem t2 : 1 = 1": {
+            "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+        },
+        "theorem t3 : 1 = 1": {
+            "t3": make_document("t3", kind="theorem", line_pos=5, end_line_pos=5)
+        },
+    }
+
+    def test_first_failure_cancels_in_flight_submissions(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The failing result streams first and cuts the run short.
+
+        The first failure is reported with its timing; submissions
+        still in flight are cancelled rather than finished, and the
+        summary accounts for what was not judged.
+        """
+        root = make_project(tmp_path, self.TARGETS_CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        fake_axle.request_ids.clear()
+        fake_axle.verify_result = make_response(
+            VerifyProofResponse, okay=False, negation=None
+        )
+        fake_axle.verify_delays = {"theorem t2 : 1 = 1": 0.5, "theorem t3 : 1 = 1": 0.5}
+
+        result = runner.invoke(main, ["verify", "-x"])
+
+        assert result.exit_code == 1, result.output
+        # The delayed submissions were cancelled in flight (t1's formal
+        # statement roundtrip completed; its verify never returned for
+        # the others).
+        assert len(fake_axle.request_ids) == 1
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        assert len(streamed) == 1
+        assert "M.A.t1" in streamed[0]
+        assert "FAIL" in streamed[0]
+        assert "fail-fast: cancelled 2 remaining selection(s)" in result.output
+        assert re.search(
+            r"Verified 3 selection\(s\): 1 failed, 0 OK, "
+            r"2 cancelled by fail-fast in \d+\.\d{3}s",
+            result.output,
+        )
+
+    def test_sorried_local_failure_stops_before_any_submission(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A `sorry` failure cuts the run off before any submission.
+
+        The local sorry guard reports the first failing selection with
+        no API calls at all, and the remaining selections report as
+        cancelled.
+        """
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify", "--fail-fast"])
+
+        assert result.exit_code == 1, result.output
+        # Failed locally: no submissions at all ran (the environment
+        # resolution upfront is the only API touch).
+        assert not [
+            m for m, _ in fake_axle.calls if m in ("theorem2sorry", "verify_proof")
+        ]
+        assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
+        assert "fail-fast: cancelled 1 remaining selection(s)" in result.output
+        assert re.search(
+            r"Verified 2 selection\(s\): 1 failed, 0 OK, "
+            r"1 cancelled by fail-fast in \d+\.\d{3}s",
+            result.output,
+        )
+
+    def test_fail_fast_leaves_happy_runs_untouched(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["verify", "--fail-fast"])
+
+        assert result.exit_code == 0, result.output
+        assert "Verified 2 selection(s): all OK" in result.output
