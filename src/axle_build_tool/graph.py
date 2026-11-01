@@ -466,7 +466,13 @@ __AXBT_LEGEND__
     container: document.getElementById("graph"),
     boxSelectionEnabled: false,
     autoungrabify: true,
-    elements: payload.nodes.concat(payload.edges),
+    elements: payload.nodes
+      .map(function (node) { return { data: node, classes: node.state }; })
+      .concat(
+        payload.edges.map(function (edge) {
+          return { data: edge, classes: edge.kind };
+        })
+      ),
     style: [
       { selector: "node", style: {
         label: "data(label)", "font-size": 11, "text-valign": "center", "text-halign": "center",

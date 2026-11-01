@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -683,6 +684,114 @@ class TestLiveTierSplit:
         assert base_holds.verified_sig is not None
         assert base_holds.checked_sig == base_holds.verified_sig
         assert base_holds.checked_request_id != base_holds.verified_request_id
+
+
+class TestLiveGraphPage:
+    """The generated page must actually render with the real Cytoscape.js.
+
+    Offline tests assert text; this one downloads the pinned, SRI-hashed
+    CDN script and replays the page's own application script through the
+    genuine Cytoscape (headless) to prove every node/edge ingests and
+    containment/classes resolve — the regression class a text assertion
+    can never see (a page that renders its legend but no data)."""
+
+    @pytest.fixture(autouse=True)
+    def _require_node(self) -> None:
+        if shutil.which("node") is None:
+            pytest.skip("node is unavailable")
+
+    CDN_BYTES: list[bytes] = []
+
+    def test_page_renders_through_real_cytoscape(
+        self, tmp_path: Path, make_live_project
+    ) -> None:
+        import base64
+        import hashlib
+        import subprocess
+        import urllib.request
+        from datetime import datetime, timezone
+
+        from axle_build_tool.graph import CYTOSCAPE_INTEGRITY, CYTOSCAPE_URL, graph_html
+        from axle_build_tool.manifest import (
+            ExtractedDecl,
+            Manifest,
+            ManifestNode,
+            save_manifest,
+        )
+
+        # Fetch the pinned script; its digest must equal the embedded SRI.
+        downloaded = urllib.request.urlopen(CYTOSCAPE_URL, timeout=60).read()
+        digest = "sha512-" + base64.b64encode(hashlib.sha512(downloaded).digest()).decode()
+        assert digest == CYTOSCAPE_INTEGRITY, (
+            "the pinned CDN script's digest no longer matches the SRI "
+            f"hash embedded in graph pages: {digest} vs {CYTOSCAPE_INTEGRITY}"
+        )
+
+        # A manifest with the three stamp states; no API calls at all.
+        now = datetime.now(timezone.utc)
+        declarations = [
+            ExtractedDecl(
+                name=name,
+                kind=kind,
+                is_sorry=False,
+                line_pos=index + 1,
+                end_line_pos=index + 1,
+                signature=f"def {name} := 1" if kind == "def" else f"theorem {name}",
+                dependencies=[],
+                checked_sig="c" * 32,
+                checked_at=now,
+                verified_sig=("v" * 32 if name == "verified_one" else None),
+                verified_at=(now if name == "verified_one" else None),
+            )
+            for index, (name, kind) in enumerate(
+                [("verified_one", "theorem"), ("checked_one", "def"), ("unchecked_one", "theorem")],
+                start=2,
+            )
+        ]
+        manifest = Manifest(
+            generated_at=now,
+            nodes=[
+                ManifestNode(
+                    name="M.File",
+                    module="M",
+                    path="M/File.lean",
+                    md5="0" * 32,
+                    status="new",
+                    declarations=declarations,
+                ),
+                ManifestNode(
+                    name="M.Empty",
+                    module="M",
+                    path="M/Empty.lean",
+                    md5="1" * 32,
+                    status="clean",
+                    declarations=[],
+                ),
+            ],
+        )
+        _ = make_live_project({}, environment=None)
+        save_manifest(manifest, Path.cwd())
+        page_path = Path.cwd() / ".axbt" / "graph.html"
+        page_path.write_text(graph_html(manifest, manifest.nodes), encoding="utf-8")
+
+        script_path = tmp_path / "cytoscape.min.js"
+        script_path.write_bytes(downloaded)
+
+        result = subprocess.run(
+            [
+                "node",
+                str(Path(__file__).parent / "graph_runtime_harness.js"),
+                str(page_path),
+                str(script_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"the generated page failed real Cytoscape ingestion:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "OK:" in result.stdout
 
 
 class TestLiveDependencyNames:
