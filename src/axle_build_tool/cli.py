@@ -8,6 +8,7 @@ Command-line mechanics are implemented with `click`. The CLI ships
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import time
@@ -70,6 +71,10 @@ theorem hello_axbt : True := True.intro
 @click.version_option(package_name="axle-build-tool", prog_name="axbt")
 def main() -> None:
     """axbt — the Axle Build Tool for Lean 4 projects."""
+    # Diagnostics mode: AXBT_DEBUG=1 turns on per-node request logging
+    # (dispatch/completion timings) for compile/check/verify runs.
+    if os.environ.get("AXBT_DEBUG"):
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
 
 @main.command()

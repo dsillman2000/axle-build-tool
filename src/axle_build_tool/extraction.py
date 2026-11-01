@@ -3,16 +3,22 @@
 Files that use intra-project imports cannot be evaluated standalone by
 the Axle API (their project references would not resolve), so
 `apply_extraction` submits an *isolated payload* per node (assembled by
-`axle_build_tool.payloads`): the node's transitive dependencies inlined
-in topological order, followed by the node's own source.
-
-Extracted declarations are attributed back to the node's own file by
-line-span and shifted back into original-file coordinates; documents
-belonging to inlined dependencies are dropped (they are extracted under
-their own nodes). Any per-node failure (transport error, API error, or
-Lean errors reported in the response) is collected with file context; if
-any node failed, the whole extraction fails so the command can exit
-non-zero without persisting a partially-extracted manifest.
+`axle_build_tool.payloads`) with the dependencies' declarations
+**stubbed to their signatures**: extraction only consumes the node's own
+spans and signatures, dependency documents are dropped, and proof
+bodies (the most expensive thing to elaborate) never need to reach a
+Lean worker during extraction.  The node's own declarations are
+extracted from its real, unstubbed source.
+The node's transitive
+dependencies are nonetheless inlined in topological order (their
+signature skeletons supply the referenced symbols), and any per-node
+failure (transport error, API error, or Lean errors reported in the
+response) is collected with file context; if any node failed, the whole
+extraction fails so the command can exit non-zero without persisting a
+partially-extracted manifest. Note that with stubbed dependencies the
+payload's Lean-errors verdict no longer certifies the dependencies'
+proofs — each dependency's own extraction (and later check/verify) does
+that.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from pathlib import Path
 
 from axle.types import Document
@@ -106,11 +113,26 @@ async def _extract_node(
     semaphore: asyncio.Semaphore,
 ) -> tuple[ManifestNode, str | None]:
     """Extract one node. Returns (updated_node, failure_message_or_None)."""
+    started: float | None = None
     try:
-        payload = build_file_payload(node, manifest, project_root)
+        payload = build_file_payload(node, manifest, project_root, stub_dependencies=True)
         async with semaphore:
+            logger.info(
+                "dispatch %s (%d payload lines)",
+                node.name,
+                len(payload.lines),
+            )
+            started = time.monotonic()
             response = await service.extract_decls(payload.content, context=node.path)
+            logger.info(
+                "extracted %s in %.1fs (%d declarations)",
+                node.name,
+                time.monotonic() - started,
+                len(response.documents),
+            )
     except AxleServiceError as exc:
+        elapsed = time.monotonic() - started if started is not None else -1.0
+        logger.info("extraction %s FAILED after %.1fs (%s)", node.name, elapsed, exc)
         return node, f"{node.path}: {exc}"
     except OSError as exc:
         return node, f"{node.path}: could not read source: {exc}"

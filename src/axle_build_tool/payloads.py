@@ -21,7 +21,7 @@ from typing import Sequence
 
 from axle_build_tool.config import CACHE_DIRNAME
 from axle_build_tool.manifest import Manifest, ManifestNode
-from axle_build_tool.stubbing import stubbed_source
+from axle_build_tool.stubbing import PROOF_KINDS, stubbed_source
 
 _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:--.*)?$")
 
@@ -149,9 +149,37 @@ def build_file_payload(
     node: ManifestNode,
     manifest: Manifest,
     project_root: Path,
+    *,
+    stub_dependencies: bool = False,
 ) -> Payload:
-    """A payload for a single node (the per-file form of `build_payload`)."""
-    return build_payload([node], manifest, project_root)
+    """A payload for a single node (the per-file form of `build_payload`).
+
+    With `stub_dependencies=True`, every *other* node's **proof bodies**
+    (theorem/lemma/example) are stubbed down to `:= by sorry` — the `--sorry`
+    machinery, applied in reverse — while the dependencies' definitions,
+    abbrevs, instances, and structures stay real (downstream elaboration
+    unfolds and projects on them, so erasing those breaks compilation, as
+    observed with type abbrevs like `CombVertex` and Prop-valued defs like
+    `IsMassDist`). Extraction only consumes the selected node's own spans
+    and signatures — dependency documents are dropped — and skipping the
+    dependencies' proof elaboration is where extraction's cost lives for
+    large closures. Used by `apply_extraction`; check/verify still build
+    full payloads.
+    """
+    stubbed: dict[str, frozenset[str] | None] | None = None
+    if stub_dependencies:
+        stubbed = {}
+        for other in manifest.nodes:
+            if other.name == node.name:
+                continue
+            proofs = frozenset(
+                declaration.name
+                for declaration in other.declarations
+                if declaration.kind in PROOF_KINDS
+            )
+            if proofs:
+                stubbed[other.name] = proofs
+    return build_payload([node], manifest, project_root, stubbed=stubbed)
 
 
 def compiled_payload_dir(project_root: Path) -> Path:
