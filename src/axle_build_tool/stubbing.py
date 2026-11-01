@@ -1,4 +1,4 @@
-"""Stubbing of declaration bodies for isolated payloads (plan §5).
+"""Stubbing of declaration bodies for isolated payloads (`--sorry`).
 
 Passing `--sorry <selector>` trades upstream completeness for speed:
 the selected dependency subtree's proof and definition bodies are

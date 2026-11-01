@@ -1,4 +1,4 @@
-"""Resolution of `--select` selectors against the manifest (plan §6).
+"""Resolution of `--select` selectors against the manifest.
 
 A selector is dot-separated and resolved against the manifest:
 

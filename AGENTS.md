@@ -4,7 +4,8 @@
 
 `axbt` is a dbt-inspired build/orchestration tool for Lean 4 projects,
 executed through the Axle (Axiom Lean Engine) API. The authoritative
-spec is `GEMINI_PLAN.md` (§6 = command architecture, §7 = demos).
+documentation is `README.md`; the GitHub issues carry the design
+history.
 
 ## Layout
 
@@ -41,11 +42,21 @@ spec is `GEMINI_PLAN.md` (§6 = command architecture, §7 = demos).
 
 - Python >= 3.12; deps: `click`, `pydantic` (config validation via `axbt_project.yml` — extend models, never ad-hoc parse), `pyyaml`. Manage everything with `uv` (`uv sync`, `uv run`).
 - Keep both the `axbt` and `axle-build-tool` script aliases working.
-- New user-facing behavior needs: offline tests (fake-client driven), a live test when it touches the API's semantics, and README + `GEMINI_PLAN.md` §6 updates.
-- Code/docstrings/comments must not reference planning documents' section/phase numbering — write normal prose.
+- New user-facing behavior needs: offline tests (fake-client driven), a live test when it touches the API's semantics, and README updates.
+- Code/docstrings/comments must not reference planning documents or their section/phase numbering — write normal prose. (The planning docs were removed; the code, README, and issues carry the full context.)
 
 ## Git policy
 
 - Feature branches prefixed `opencode/`, merged via PRs into `main` (CI gates: offline tests, live suite, per-demo pipelines — all unconditional).
 - Imperative commit messages. **Never use backticks inside `git commit -m`** — zsh command substitution; write the message to a file and use `git commit -F <file>`.
 - Small user-requested fixes may land directly on `main` when the user asks for it.
+
+## Agent conventions
+
+- **Branch prefix:** agent-driven development branches are always prefixed `opencode/` (e.g. `opencode/manifest-outcome-records`) and land via PRs into `main` (see Git policy).
+- **Sign-off:** every GitHub artifact an agent produces — issues, PR descriptions, comments, and review replies — ends with a horizontal rule and an italicized sign-off, matching exactly:
+
+  ```
+  ---
+  *Written by OpenCode.*
+  ```

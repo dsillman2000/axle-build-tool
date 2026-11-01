@@ -133,4 +133,4 @@ AXLE_API_KEY=… uv run pytest -m live   # live suite against the real API
 
 CI runs the offline suite on every PR, the live suite and the demo pipeline (`compile && check && verify` per demo) on every PR and push to `main`.
 
-See [`GEMINI_PLAN.md`](GEMINI_PLAN.md) for the full design document (architecture, manifest/DAG engine, CLI grammar, roadmap), and the GitHub issues for the phase-by-phase history.
+See the GitHub issues for the phase-by-phase history.

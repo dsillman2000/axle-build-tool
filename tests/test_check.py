@@ -542,7 +542,7 @@ axle:
 
 
 class TestSorry:
-    """`--sorry <selector>`: stub dependency subtrees (plan §5)."""
+    """`--sorry <selector>`: stub dependency subtrees."""
 
     SORRY_FILES = {
         "M/A.lean": "def base := 1\ntheorem base_holds : base = 1 := rfl\n",

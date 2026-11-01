@@ -9,7 +9,8 @@ allows imports at the beginning of a file; intra-project imports are
 replaced by the inlined content).
 
 Payloads are persisted under `.axbt/compiled/` so the exact code sent to
-the Axle API is inspectable (plan §3, "Inspection Support").
+the Axle API is inspectable ("Inspection Support" of compile's
+incremental plan).
 """
 
 from __future__ import annotations

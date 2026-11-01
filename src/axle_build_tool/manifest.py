@@ -255,7 +255,8 @@ def build_manifest(
     nodes = []
     for name, facts in sorted(scanned.items()):
         # Unchanged files carry their previous extraction data forward, so
-        # they are not re-extracted (plan §3's incremental promise). A
+        # they are not re-extracted (incremental compilation's core
+        # promise). A
         # persisted manifest only ever contains valid extraction data:
         # compile saves nothing unless every node extracted cleanly.
         prior = previous_nodes.get(name)
@@ -344,7 +345,7 @@ def verification_signature(
 
 
 def topological_order(nodes: list[ManifestNode]) -> list[ManifestNode]:
-    """Order `nodes` dependencies-first (plan §6's flattening order).
+    """Order `nodes` dependencies-first (the DAG's flattening order).
 
     Parents outside the selected set are treated as satisfied — a filtered
     view stays well-ordered without pulling its dependencies in. The

@@ -1,4 +1,4 @@
-"""Unit tests for declaration stubbing (plan §5's `--sorry` machinery).
+"""Unit tests for declaration stubbing (the `--sorry` machinery).
 
 `stubbed_source` replaces each stubbed declaration's line span with a
 single stub line built from the extracted signature — span replacement
