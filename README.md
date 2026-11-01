@@ -73,13 +73,29 @@ Run modes (shared by `compile`, `check`, `verify`):
 * `--incremental` (default) — re-extract only new and changed files; a clean tree makes no API calls.
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
 * `--no-compile` (check/verify) — take the existing manifest at face value.
+* `--fail-fast` / `-x` (check/verify) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`).
+
+### Streaming results
+
+`axbt check` / `axbt verify` print each result the moment its submission completes — in completion order, so progress appears live during long runs. Every result line carries a progress counter and its own elapsed time; the summary carries the total:
+
+```text
+[1/3] M.A.t1  OK  0.312s
+[2/3] M.B.t2  FAIL  1.234s
+    [line 3, col 5 of M/B.lean] ...
+[3/3] M.C.t3  SKIP
+Checked 3 selection(s): 1 failed, 2 OK in 1.589s
+```
+
+* The `[n/m]` counter numbers every printed line, so submissions already settled locally (skips, cached selections, `sorry` failures) report first, before the API submissions stream in.
+* Timings measure each submission individually — waiting on the concurrency limit doesn't hide in them.
 
 ### Sharing a run
 
 `axbt check --share` / `axbt verify --share` print a share link for every submission — a URL to the Axle web app showing that exact run (source, messages, verdict):
 
 ```text
-M.User.derived_holds  OK
+[1/1] M.User.derived_holds  OK  0.42s
     share: https://axle.axiommath.ai/check#r=e00f26e7-b2b6-47b2-9197-0dd5518434ec
 ```
 

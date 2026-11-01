@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from axle.types import CheckResponse, Messages
@@ -78,7 +79,10 @@ class TestTargetsDefault:
         # check call per configured target.
         methods = [method for method, _ in fake_axle.calls]
         assert methods == ["get_latest_environment", "check", "check"]
-        first, second = check_calls(fake_axle)
+        # Submissions stream in completion order, so identify calls by
+        # their focused declaration rather than by log position.
+        by_names = {c["names"][0]: c for c in check_calls(fake_axle)}
+        first, second = by_names["t1"], by_names["t2"]
         # Each target is a standalone payload: dependencies are inlined,
         # the target's own section is present, unrelated files are not.
         assert "def t1 := 1" in first["content"]
@@ -894,6 +898,29 @@ class TestShare:
         assert "share: https://axle.test/check#r=fake-req-" in result.output
         assert "Share link(s) minted: 1" in result.output
 
+    def test_share_mint_retries_a_transient_not_found(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Streaming mints fire right when the run completes.
+
+        The share service may not have the run persisted in that
+        instant and answers "request not found" — the mint retries
+        instead of giving up immediately, and links once the run
+        shows up.
+        """
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.share_status = [404, 201]
+
+        result = runner.invoke(main, ["check", "--select", "M.A", "--share"])
+
+        assert result.exit_code == 0, result.output
+        assert len(fake_axle.share_requests) == 2  # first attempt, retry
+        assert "share: https://axle.test/check#r=fake-req-" in result.output
+        assert "Share link(s) minted: 1" in result.output
+
     def test_share_failure_warns_but_leaves_the_exit_code(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -956,3 +983,135 @@ class TestShare:
 
         assert result.exit_code == 0, result.output
         assert manifest_path(root).read_bytes() == before
+
+
+class TestStreaming:
+    def test_results_print_in_completion_order_with_timing(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Each result prints as its submission completes, with timing.
+
+        B's submission finishes first, so its report line prints before
+        A's — completion order, not selection order — and every result
+        line carries its progress counter and elapsed time, with the
+        total in the summary.
+        """
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["check"]).exit_code == 0
+        # A's own-file marker routes the delay to A only; the marker
+        # routing picks the one occurring latest in a payload, and B's
+        # payload (dependencies inlined) ends with `def t2 := t1`.
+        fake_axle.check_delays = {"def t1 := 1": 0.15, "def t2 := t1": 0.0}
+
+        result = runner.invoke(main, ["check"])
+
+        assert result.exit_code == 0, result.output
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        # B completes first and streams first, each line numbered and timed.
+        assert ["M.B.t2", "M.A.t1"] == [line.split()[1] for line in streamed]
+        for position, line in enumerate(streamed, 1):
+            assert re.match(rf"\[\s*{position}/2\] ", line), line
+            assert re.search(r"\d+\.\d{3}s$", line), line
+        def _delay(line: str) -> float:
+            return float(line.split()[-1].removesuffix("s"))
+        # A carried the artificial delay; the timing is per item, not
+        # the whole run.
+        assert _delay(streamed[1]) > _delay(streamed[0])
+        assert re.search(r"Checked 2 selection\(s\): all OK in \d+\.\d{3}s", result.output)
+
+
+class TestFailFast:
+    """--fail-fast (-x): the first failed selection cancels the rest."""
+
+    TARGETS_CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+      - C.t3
+"""
+
+    FILES = {
+        "M/A.lean": "def t1 := 1\n",
+        "M/B.lean": "import A\ndef t2 := t1\n",
+        "M/C.lean": "import A\nimport B\ndef t3 := t2\n",
+    }
+
+    DOCS = {
+        "def t1 := 1": {
+            "t1": make_document(
+                "t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1"
+            )
+        },
+        "def t2 := t1": {
+            "t2": make_document(
+                "t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2"
+            )
+        },
+        "def t3 := t2": {
+            "t3": make_document(
+                "t3", kind="def", line_pos=5, end_line_pos=5, signature="def t3"
+            )
+        },
+    }
+
+    def test_first_failure_cancels_in_flight_submissions(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The failing result streams first and cuts the run short.
+
+        The first failure is reported with its timing and message
+        block; submissions still in flight are cancelled rather than
+        finished, and the summary accounts for what was not judged.
+        """
+        root = make_project(tmp_path, self.TARGETS_CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        fake_axle.request_ids.clear()
+        fake_axle.check_result = make_response(CheckResponse, okay=False)
+        fake_axle.check_delays = {"def t2 := t1": 0.5, "def t3 := t2": 0.5}
+
+        result = runner.invoke(main, ["check", "-x"])
+
+        assert result.exit_code == 1, result.output
+        # The delayed submissions were cancelled in flight: they never
+        # came back from the API (request ids mint on response only).
+        assert len(fake_axle.request_ids) == 1
+        streamed = [
+            line
+            for line in result.output.splitlines()
+            if re.match(r"\[\s*\d+/\d+\] ", line)
+        ]
+        assert len(streamed) == 1
+        assert "M.A.t1" in streamed[0]
+        assert "FAIL" in streamed[0]
+        assert "fail-fast: cancelled 2 remaining selection(s)" in result.output
+        assert re.search(
+            r"Checked 3 selection\(s\): 1 failed, 0 OK, "
+            r"2 cancelled by fail-fast in \d+\.\d{3}s",
+            result.output,
+        )
+
+    def test_fail_fast_leaves_happy_runs_untouched(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, TARGETS_CONFIG, TWO_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--fail-fast"])
+
+        assert result.exit_code == 0, result.output
+        assert "Checked 2 selection(s): all OK" in result.output
