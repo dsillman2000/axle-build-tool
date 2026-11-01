@@ -284,6 +284,19 @@ class TestGraphRender:
         # The default path was not written to.
         assert not (graph_project / ".axbt" / "graph.html").exists()
 
+    def test_decl_edge_toggle_is_wired_in_page(self, graph_project: Path) -> None:
+        output, html_text = run_graph(graph_project)
+
+        # The legend carries the checkbox (default: arrows shown), the
+        # CSS knows the hidden treatment, and the script looks the id up.
+        assert 'id="toggle-decl-edges" checked' in html_text
+        assert "declaration dependency arrows" in html_text
+        assert "edge.hidden" in html_text
+        assert html_text.count("toggle-decl-edges") >= 2
+        # The tap handler runs the reveal-or-restore rule through the
+        # same visibility function the checkbox drives.
+        assert "refreshEdgeVisibility" in html_text
+
     def test_missing_manifest_fails_with_compile_hint(
         self, make_project, tmp_path: Path, monkeypatch
     ) -> None:

@@ -26,11 +26,11 @@ if (!pagePath || !cytoscapePath) {
   process.exit(2);
 }
 const cytoscape = require(cytoscapePath);
+// fcose's UMD build reads the `cytoscape` global at load time (the
+// browser's script tag order provides it); mirror that here before
+// requiring the extension.
+globalThis.cytoscape = cytoscape;
 const fcose = fcosePath ? require(fcosePath) : null;
-if (fcose) {
-  // The page registers the extension itself via window.cytoscape.use;
-  // nothing to do here beyond loading the module.
-}
 
 const page = fs.readFileSync(pagePath, "utf8");
 const docMatch = page.match(/<script type="application\/json" id="graph-data">(.*?)<\/script>/s);
@@ -48,6 +48,17 @@ const script = jsMatch[1].replace(
   "headless: true"
 );
 
+// The legend checkbox behaves like a real input: `checked` state and a
+// recorded change listener the harness can fire later to drive the
+// reveal/hide rules.
+const toggle = { checked: true, listeners: {}, style: {}, value: "" };
+toggle.addEventListener = (name, handler) => {
+  toggle.listeners[name] = handler;
+};
+toggle.fireChange = () => {
+  if (toggle.listeners.change) { toggle.listeners.change(); }
+};
+
 // A delegating wrapper so the harness keeps the constructed instance
 // while the page script calls `window.cytoscape` (and its `.use`)
 // exactly as the browser would.
@@ -63,6 +74,9 @@ const documentStub = {
   getElementById(id) {
     if (id === "graph-data") {
       return { id, textContent: docMatch[1], style: {} };
+    }
+    if (id === "toggle-decl-edges") {
+      return toggle;
     }
     return { id, style: {} };
   },
@@ -115,13 +129,18 @@ for (const element of payload.nodes.concat(payload.edges)) {
 // The per-file force pass: declarations moved off their preset stacks
 // and the renormalization kept every member inside its cell.
 const cellsById = {};
+const clusterSizes = {};
 for (const node of payload.nodes) {
   if (node.group === "file" && node.cell) {
     cellsById[node.id] = node.cell;
   }
+  if (node.group === "declaration") {
+    clusterSizes[node.parent] = (clusterSizes[node.parent] || 0) + 1;
+  }
 }
 let moved = 0;
 let spreadable = 0;
+let spreadableClusters = 0;
 for (const node of payload.nodes) {
   if (node.group !== "declaration") {
     continue;
@@ -133,25 +152,98 @@ for (const node of payload.nodes) {
     Math.abs(now.x - node.position.x) + Math.abs(now.y - node.position.y) > 0.5;
   if (hasCell) {
     spreadable += 1;
-  }
-  if (movedHere) {
-    moved += 1;
-  }
-  if (hasCell && fcose) {
-    if (
-      now.x < cell.x1 - 4 ||
-      now.x > cell.x2 + 4 ||
-      now.y < cell.y1 - 4 ||
-      now.y > cell.y2 + 4
-    ) {
-      errors.push(
-        `declaration ${node.id} escaped its cell: (${now.x}, ${now.y}) not within (${cell.x1}, ${cell.y1})-(${cell.x2}, ${cell.y2})`
-      );
+    if (movedHere) {
+      moved += 1;
+    }
+    if (fcose) {
+      if (
+        now.x < cell.x1 - 4 ||
+        now.x > cell.x2 + 4 ||
+        now.y < cell.y1 - 4 ||
+        now.y > cell.y2 + 4
+      ) {
+        errors.push(
+          `declaration ${node.id} escaped its cell: (${now.x}, ${now.y}) not within (${cell.x1}, ${cell.y1})-(${cell.x2}, ${cell.y2})`
+        );
+      }
     }
   }
 }
-if (fcose && spreadable >= 2 && moved === 0) {
+for (const fileId of Object.keys(clusterSizes)) {
+  if (cellsById[fileId] !== undefined && clusterSizes[fileId] >= 2) {
+    spreadableClusters += 1;
+  }
+}
+if (fcose && spreadableClusters > 0 && moved === 0) {
   errors.push("the per-file fcose layout never moved a declaration");
+}
+
+// --- The declaration-edge checkbox: reveal / hide / restore --------------
+function report(message) {
+  console.log(`  toggle: ${message}`);
+}
+const dependsEdges = cy.edges('[kind = "depends"]');
+const toggleEdgeError = (message) => {
+  errors.push(`toggle: ${message}`);
+};
+
+if (dependsEdges.length && toggle.listeners.change) {
+  // 1. Default (checked): no depends-edge is hidden.
+  if (dependsEdges.some((edge) => edge.hasClass("hidden"))) {
+    toggleEdgeError("edges are hidden while the box is ticked");
+  } else {
+    report("ticked by default: all depends-edges visible");
+  }
+
+  // 2. Un-tick: every depends-edge hides.
+  toggle.checked = false;
+  toggle.fireChange();
+  const hiddenAll = dependsEdges.every((edge) => edge.hasClass("hidden"));
+  if (!hiddenAll) {
+    toggleEdgeError("un-ticking did not hide every depends-edge");
+  } else {
+    report("un-ticked: every depends-edge hidden");
+  }
+
+  // 3. Click a declaration with dependencies: its neighborhood (the
+  // dependency side AND the dependents side) reveals while the rest
+  // stays hidden.
+  const tapped = dependsEdges.first().source();
+  tapped.emit("tap");
+  const revealed = tapped
+    .connectedEdges('[kind = "depends"]')
+    .filter((edge) => !edge.hasClass("hidden"));
+  if (revealed.length !== tapped.connectedEdges('[kind = "depends"]').length) {
+    toggleEdgeError(
+      `tapping '${tapped.data("id")}' revealed ${revealed.length} of its ${tapped.connectedEdges('[kind = "depends"]').length} dependency edges`
+    );
+  }
+  const stillHiddenOutside = dependsEdges
+    .filter((edge) => tapped.connectedEdges('[kind = "depends"]').filter((mine) => mine.id() === edge.id()).length === 0)
+    .every((edge) => edge.hasClass("hidden"));
+  if (!stillHiddenOutside) {
+    toggleEdgeError("edges outside the tapped neighborhood lost their hidden treatment");
+  }
+  if (revealed.length) {
+    report(`tap-reveal works: ${revealed.length} edges shown for the tapped declaration`);
+  }
+
+  // 4. Clicking the background restores the hidden treatment.
+  cy.emit("tap");
+  if (!dependsEdges.every((edge) => edge.hasClass("hidden"))) {
+    toggleEdgeError("a background tap did not restore the hidden treatment");
+  } else {
+    report("background tap: reveal collapses back to hidden");
+  }
+
+  // 5. Re-ticking shows everything again.
+  toggle.checked = true;
+  toggle.fireChange();
+  if (dependsEdges.some((edge) => edge.hasClass("hidden"))) {
+    toggleEdgeError("re-ticking did not unhide the depends-edges");
+  } else {
+    report("re-ticked: arrows visible again");
+  }
 }
 
 if (errors.length) {
@@ -159,5 +251,5 @@ if (errors.length) {
   process.exit(1);
 }
 console.log(
-  `OK: ${cy.nodes().length} nodes, ${cy.edges().length} edges ingested; containment, states, ids, cells resolve (${moved} declarations re-spread${fcose ? ", fcose replayed" : ", degraded preset"})`
+  `OK: ${cy.nodes().length} nodes, ${cy.edges().length} edges ingested; containment, states, ids, cells resolve (${moved} declarations re-spread${fcose ? ", fcose replayed" : ", degraded preset"}; ${dependsEdges.length} toggle-able depends-edges checked)`
 );

@@ -481,14 +481,26 @@ def _embed(data: dict[str, Any]) -> str:
 
 
 def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
-    """The in-page legend: one chip per state."""
+    """The in-page legend: one chip per state, plus the edge control.
+
+    The checkbox is static content (no manifest-derived text), so it is
+    emitted verbatim; the page script wires its change handler.
+    """
     items = "".join(
         f'<div class="item"><span class="chip {entry["state"]}"></span>'
         f'{html.escape(entry["text"])}</div>'
         for entry in legend
     )
     note = html.escape(f"{star} marks files whose source is new or changed")
-    return f'<div class="title">color = outcome stamps only</div>{items}<div class="note">{note}</div>'
+    checkbox = (
+        '<label class="item ctrl"><input type="checkbox" id="toggle-decl-edges" '
+        "checked> declaration dependency arrows (untick to hide; click a "
+        "declaration to reveal its dependency neighborhood)</label>"
+    )
+    return (
+        f'<div class="title">color = outcome stamps only</div>{items}{checkbox}'
+        f'<div class="note">{note}</div>'
+    )
 
 
 def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt graph") -> str:
@@ -561,6 +573,9 @@ _HTML_TEMPLATE = """<!doctype html>
             border: 1px solid #d6d1c8; border-radius: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.9;
             max-width: 340px; }
   #legend .title { font-weight: 600; margin-bottom: 2px; }
+  #legend .item { line-height: 1.9; }
+  #legend label.ctrl { display: block; margin: 4px 0 1px; line-height: 1.5; cursor: pointer; }
+  #legend label.ctrl input { vertical-align: -1px; margin-right: 5px; }
   #legend .note { color: #6b6257; border-top: 1px solid #e2ddd4; margin-top: 4px; padding-top: 4px; }
   #legend .star { color: #c92a2a; }
   .chip { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -.5px; }
@@ -632,7 +647,8 @@ __AXBT_LEGEND__
       { selector: "node:parent[state='unchecked']", style: { "background-color": "#e8590c", "background-opacity": 0.14, "border-color": "#e8590c" } },
       { selector: "node:parent[state='empty']", style: { "background-color": "#c8c3bc", "background-opacity": 0.25, "border-color": "#9b958c" } },
       { selector: ".highlighted", style: { "border-color": "#1c7ed6", "border-width": 2 } },
-      { selector: "edge.highlighted", style: { width: 2.4, "line-color": "#1c7ed6", "target-arrow-color": "#1c7ed6", opacity: 1 } }
+      { selector: "edge.highlighted", style: { width: 2.4, "line-color": "#1c7ed6", "target-arrow-color": "#1c7ed6", opacity: 1 } },
+      { selector: "edge.hidden", style: { display: "none" } }
     ],
     layout: {
       // Positions are computed at build time (module columns, dependency
@@ -713,16 +729,45 @@ __AXBT_LEGEND__
   cy.on("mouseout", "node", function () { tooltip.style.display = "none"; });
 
   var marked = [];
+  var declToggle = document.getElementById("toggle-decl-edges");
+  var depsHidden = declToggle ? !declToggle.checked : false;
+
+  // `marked` is always a plain array of elements: a reached-for
+  // Cytoscape collection could be used for membership checks, but its
+  // `indexOf` throws for elements outside it — and `refreshEdgeVisibility`
+  // asks about every depends-edge, known member or not.
+  // The hidden class only applies while a depends-edge is neither
+  // checkbox-visible nor part of the current reveal (a clicked
+  // declaration's dependency neighborhood is always shown). `display:
+  // none` keeps the elements traversable but unclickable.
+  function refreshEdgeVisibility() {
+    cy.batch(function () {
+      cy.edges('[kind = "depends"]').forEach(function (edge) {
+        var revealed = marked.indexOf(edge) !== -1;
+        edge.toggleClass("hidden", depsHidden && !revealed);
+      });
+    });
+  }
   function clearMark() {
-    for (var i = 0; i < marked.length; i++) { marked[i].removeClass("highlighted"); }
+    cy.batch(function () {
+      for (var i = 0; i < marked.length; i++) { marked[i].removeClass("highlighted"); }
+    });
     marked = [];
+    refreshEdgeVisibility();
   }
   cy.on("tap", function (e) {
     if (e.target === cy) { clearMark(); return; }
     clearMark();
-    marked = e.target.closedNeighborhood();
+    marked = e.target.closedNeighborhood().toArray();
     for (var i = 0; i < marked.length; i++) { marked[i].addClass("highlighted"); }
+    refreshEdgeVisibility();
   });
+  if (declToggle) {
+    declToggle.addEventListener("change", function () {
+      depsHidden = !declToggle.checked;
+      clearMark();
+    });
+  }
   cy.on("resize", function () { cy.fit(undefined, 40); });
 })();
 </script>
