@@ -196,17 +196,34 @@ class TestGraphRender:
     ) -> None:
         output, html_text = run_graph(graph_project)
 
-        # The only external reference: the pinned, SRI-hashed CDN tag.
+        # The only external references: the pinned, SRI-hashed CDN
+        # scripts (Cytoscape core + the fcose dependency chain).
         assert (
             "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.31.0/cytoscape.min.js"
+            in html_text
+        )
+        assert (
+            "https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"
+            in html_text
+        )
+        assert (
+            "https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"
+            in html_text
+        )
+        assert (
+            "https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"
             in html_text
         )
         assert 'integrity="' in html_text and 'crossorigin="anonymous"' in html_text
         # No other network references anywhere in the page.
         urls = re.findall(r"https?://[^\s\"']+ ", html_text)
-        assert urls == [] or all(
-            url.startswith("https://cdnjs.cloudflare.com") for url in urls
+        allowed = (
+            "https://cdnjs.cloudflare.com",
+            "https://cdn.jsdelivr.net/npm/layout-base",
+            "https://cdn.jsdelivr.net/npm/cose-base",
+            "https://cdn.jsdelivr.net/npm/cytoscape-fcose",
         )
+        assert urls == [] or all(url.startswith(allowed) for url in urls)
 
         data = graph_data(html_text)
         ids = [node["id"] for node in data["nodes"]]
@@ -340,8 +357,10 @@ class TestGraphRender:
 
         output, html_text = run_graph(root)
 
-        # Exactly three script elements: CDN, data block, application.
-        assert html_text.count("</script>") == 3
+        # Exactly six script elements: the four pinned CDN scripts
+        # (Cytoscape + its fcose dependency chain), the data block, and
+        # the application script.
+        assert html_text.count("</script>") == 6
         data = graph_data(html_text)
         (declaration,) = [n for n in data["nodes"] if n["group"] == "declaration"]
         assert declaration["id"].endswith("evil</script><img>")
@@ -532,8 +551,7 @@ class TestLayout:
             self.node("App.AppFile", ("Core.CoreFile",), ["two"]),
             self.node("Zoom.ZoomFile", ("Core.CoreFile",), ["three"]),
         ]
-        positions = _layout_positions(files)
-
+        positions, _cells = _layout_positions(files)
         core_x = positions["file:Core.CoreFile"]["x"]
         app_x = positions["file:App.AppFile"]["x"]
         zoom_x = positions["file:Zoom.ZoomFile"]["x"]
@@ -543,8 +561,7 @@ class TestLayout:
 
     def test_declarations_stack_top_to_bottom_inside_their_file(self) -> None:
         files = [self.node("Core.CoreFile", (), ["beta", "alpha"])]
-        positions = _layout_positions(files)
-
+        positions, _cells = _layout_positions(files)
         alpha, beta = positions["decl:Core.CoreFile:alpha"], positions["decl:Core.CoreFile:beta"]
         assert alpha["y"] < beta["y"]  # sorted by declaration name
         assert alpha["x"] == beta["x"]  # one aligned dot-list
@@ -553,8 +570,7 @@ class TestLayout:
         self,
     ) -> None:
         files = [self.node("Core.CoreFile", ()), self.node("Core.Empty", ("Core.CoreFile",))]
-        positions = _layout_positions(files)
-
+        positions, _cells = _layout_positions(files)
         # Both files share their module column; the declaration-free one
         # is placed below its importing sibling without overlapping it.
         assert positions["file:Core.Empty"]["y"] > positions["file:Core.CoreFile"]["y"]
@@ -564,7 +580,7 @@ class TestLayout:
             self.node("Core.CoreFile", ()),
             self.node("Core.Empty", ("Core.CoreFile",)),
         ]
-        positions = _layout_positions(files)
+        positions, _cells = _layout_positions(files)
         assert set(positions) == {
             "file:Core.CoreFile",
             "file:Core.Empty",

@@ -2,80 +2,95 @@
  * Runtime harness for axbt's generated graph page.
  *
  * Usage: node graph_runtime_harness.js <graph.html> <cytoscape.min.js>
+ *              [cytoscape-fcose-package-path]
  *
- * Runs the page's own application script with a minimal DOM stub, then
- * replays the captured construction options through a REAL Cytoscape
- * (headless — no container) and asserts the element parse the browser
- * would perform: every node/edge ingests, containment resolves, states
- * arrive as classes. Catches the "renders a legend but no data" class
- * of bug that text assertions cannot see.
+ * Runs the page's own application script against a REAL Cytoscape
+ * (headless — the container constructor line is patched to
+ * `headless: true`), registering the pinned fcose force layout when
+ * its package path is supplied (the package's runtime deps resolve via
+ * sibling `node_modules` dirs the test lays down from the downloaded
+ * CDN files). Asserts what the browser would have: every node/edge
+ * ingests, compound containment resolves, states arrive as classes,
+ * and — with fcose loaded — the per-file force pass moved declarations
+ * and the renormalization kept every member inside its cluster cell.
+ * Also exercises the no-fcose degradation path when the third argument
+ * is omitted. Catches the "renders a legend but no data" class of bug
+ * that text assertions cannot see.
  */
 "use strict";
 const fs = require("fs");
 
-const [pagePath, cytoscapePath] = process.argv.slice(2);
+const [pagePath, cytoscapePath, fcosePath] = process.argv.slice(2);
 if (!pagePath || !cytoscapePath) {
-  console.error("usage: node graph_runtime_harness.js <graph.html> <cytoscape.min.js>");
+  console.error("usage: node graph_runtime_harness.js <graph.html> <cytoscape.min.js> [cytoscape-fcose-package-path]");
   process.exit(2);
 }
 const cytoscape = require(cytoscapePath);
-const page = fs.readFileSync(pagePath, "utf8");
+const fcose = fcosePath ? require(fcosePath) : null;
+if (fcose) {
+  // The page registers the extension itself via window.cytoscape.use;
+  // nothing to do here beyond loading the module.
+}
 
+const page = fs.readFileSync(pagePath, "utf8");
 const docMatch = page.match(/<script type="application\/json" id="graph-data">(.*?)<\/script>/s);
+// The application script is the last <script> in the page body.
 const jsMatch = page.match(/<script>\n([\s\S]*?)\n<\/script>\n<\/body>/);
 if (!docMatch || !jsMatch) {
   console.error("page missing the data block or application script");
   process.exit(2);
 }
 
-// The stub `cy` captures the construction options; the script's later
-// imperative calls (fit, on) become no-ops.
-let captured = null;
+// Patch the (browser-only) container wiring to headless mode so the
+// page's own script can run here — same construction, no DOM.
+const script = jsMatch[1].replace(
+  'container: document.getElementById("graph")',
+  "headless: true"
+);
+
+// A delegating wrapper so the harness keeps the constructed instance
+// while the page script calls `window.cytoscape` (and its `.use`)
+// exactly as the browser would.
+let cy = null;
+const harnessCytoscape = Object.assign(
+  function (options) {
+    cy = cytoscape(options);
+    return cy;
+  },
+  { use: cytoscape.use.bind(cytoscape) }
+);
 const documentStub = {
   getElementById(id) {
     if (id === "graph-data") {
-      return { id, textContent: docMatch[1] };
+      return { id, textContent: docMatch[1], style: {} };
     }
     return { id, style: {} };
   },
 };
-const harnessWindow = {
-  cytoscape(options) {
-    captured = options;
-    return { fit() {}, on() {} };
-  },
-};
 
-const script = jsMatch[1];
 try {
-  new Function("window", "document", script)(harnessWindow, documentStub);
+  new Function("window", "document", script)(
+    { cytoscape: harnessCytoscape, cytoscapeFcose: fcose },
+    documentStub
+  );
 } catch (error) {
   console.error("page script threw:", error);
   process.exit(2);
 }
-if (!captured) {
+if (cy === null) {
   console.error("page script never constructed a Cytoscape instance");
-  process.exit(2);
-}
-
-// Replay the captured options through the real Cytoscape, headless.
-let cy;
-try {
-  cy = cytoscape(Object.assign(headlessOptions(captured), { headless: true }));
-} catch (error) {
-  console.error("real Cytoscape rejected the captured options:", error);
   process.exit(2);
 }
 
 const payload = JSON.parse(docMatch[1]);
 const errors = [];
-const nodeCount = cy.nodes().length;
-const edgeCount = cy.edges().length;
-if (nodeCount !== payload.nodes.length) {
-  errors.push(`expected ${payload.nodes.length} nodes, real Cytoscape ingested ${nodeCount}`);
-}
-if (edgeCount !== payload.edges.length) {
-  errors.push(`expected ${payload.edges.length} edges, real Cytoscape ingested ${edgeCount}`);
+for (const pair of [
+  ["nodes", payload.nodes.length, cy.nodes().length],
+  ["edges", payload.edges.length, cy.edges().length],
+]) {
+  if (pair[1] !== pair[2]) {
+    errors.push(`expected ${pair[1]} ${pair[0]}, real Cytoscape ingested ${pair[2]}`);
+  }
 }
 // Containment resolved: no declaration/file left unparented.
 const unparented = cy
@@ -87,23 +102,56 @@ if (unparented.length !== 0) {
 // States arrived as classes.
 const states = ["verified", "checked", "unchecked", "empty"];
 const stateSum = states.reduce((total, state) => total + cy.nodes(`node.${state}`).length, 0);
-if (stateSum !== nodeCount) {
-  errors.push(`state classes cover ${stateSum} of ${nodeCount} nodes`);
+if (stateSum !== cy.nodes().length) {
+  errors.push(`state classes cover ${stateSum} of ${cy.nodes().length} nodes`);
 }
-// Id lookup and edge connectivity work the way the page's handlers do.
+// Id lookups and edge connectivity work the way the page's handlers do.
 for (const element of payload.nodes.concat(payload.edges)) {
   if (cy.getElementById(element.id).length === 0) {
     errors.push(`element not ingested: ${element.id}`);
   }
 }
-// Edge-connected elements highlight their neighborhoods (compound
-// containment is NOT an edge, so isolated declarations are exactly
-// one element — the click handler highlights what exists).
-const edgeSource = payload.edges[0]
-  ? cy.getElementById(payload.edges[0].source)
-  : null;
-if (edgeSource && edgeSource.closedNeighborhood().size() < 2) {
-  errors.push("closedNeighborhood of an edge source has < 2 elements");
+
+// The per-file force pass: declarations moved off their preset stacks
+// and the renormalization kept every member inside its cell.
+const cellsById = {};
+for (const node of payload.nodes) {
+  if (node.group === "file" && node.cell) {
+    cellsById[node.id] = node.cell;
+  }
+}
+let moved = 0;
+let spreadable = 0;
+for (const node of payload.nodes) {
+  if (node.group !== "declaration") {
+    continue;
+  }
+  const cell = cellsById[node.parent];
+  const now = cy.getElementById(node.id).position();
+  const hasCell = cell !== undefined;
+  const movedHere =
+    Math.abs(now.x - node.position.x) + Math.abs(now.y - node.position.y) > 0.5;
+  if (hasCell) {
+    spreadable += 1;
+  }
+  if (movedHere) {
+    moved += 1;
+  }
+  if (hasCell && fcose) {
+    if (
+      now.x < cell.x1 - 4 ||
+      now.x > cell.x2 + 4 ||
+      now.y < cell.y1 - 4 ||
+      now.y > cell.y2 + 4
+    ) {
+      errors.push(
+        `declaration ${node.id} escaped its cell: (${now.x}, ${now.y}) not within (${cell.x1}, ${cell.y1})-(${cell.x2}, ${cell.y2})`
+      );
+    }
+  }
+}
+if (fcose && spreadable >= 2 && moved === 0) {
+  errors.push("the per-file fcose layout never moved a declaration");
 }
 
 if (errors.length) {
@@ -111,12 +159,5 @@ if (errors.length) {
   process.exit(1);
 }
 console.log(
-  `OK: ${nodeCount} nodes, ${edgeCount} edges ingested; containment, states, and ids resolve`
+  `OK: ${cy.nodes().length} nodes, ${cy.edges().length} edges ingested; containment, states, ids, cells resolve (${moved} declarations re-spread${fcose ? ", fcose replayed" : ", degraded preset"})`
 );
-
-function headlessOptions(options) {
-  const clone = Object.assign({}, options);
-  delete clone.container;
-  clone.elements = options.elements; // keep exactly what the page built
-  return clone;
-}

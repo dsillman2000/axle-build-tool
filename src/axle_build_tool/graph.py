@@ -48,12 +48,28 @@ from axle_build_tool.stubbing import bare_name
 #: Generated graph artifacts live in the cache alongside the payloads.
 GRAPH_FILENAME = "graph.html"
 
-#: Cytoscape.js from a CDN (pinned version; SRI hash from cdnjs), loaded
-#: by the generated page — never bundled into axbt, never fetched by it.
+#: The page's scripts from a CDN (pinned versions; SRI hashes computed
+#: from the served bytes) — never bundled into axbt, never fetched by
+#: it. Load order matters: `cytoscape-fcose`'s UMD build binds its
+#: dependencies by global name, so `layout-base` and `cose-base` must
+#: precede it; fcose (the compound-aware force layout) spreads each
+#: file's cluster.
 CYTOSCAPE_URL = "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.31.0/cytoscape.min.js"
 CYTOSCAPE_INTEGRITY = (
     "sha512-SRHUEtWi7EdmapdotitmlD7tNoeRXCtll4Y0yl2YYJB+m+IuIEvvHjZ7V34/k5ZFBtMN/"
     "uehjaerdJGr7hgt1g=="
+)
+LAYOUT_BASE_URL = "https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"
+LAYOUT_BASE_INTEGRITY = (
+    "sha512-3QjpeCBhZ3yEArsOt12EqgfXoQjlH9RhU2o+Y7zu2G3COjWD4kbcwY0pd9ExrIwGB0RT69BEhQIKrnu2VQXhvQ=="
+)
+COSE_BASE_URL = "https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"
+COSE_BASE_INTEGRITY = (
+    "sha512-wxZH0Y/3GE1Xx2eC0b++JqX7aLO96mykVCuzEpJQPyYXT4ZoGROZmMlcXpfSLgqW57yznXw36jB8DCdH3bjzEg=="
+)
+FCOSE_URL = "https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"
+FCOSE_INTEGRITY = (
+    "sha512-RJqr1GzAaYbgpUAEvIzqTNMSTaVsAjcrK2JWOQ1suACA1LS4QSqhNelbAi+BT0GAeO4+nqVl19JaRA8R8TsDUw=="
 )
 
 #: weakest -> strongest; containers roll up to the weakest constituent.
@@ -162,8 +178,12 @@ def _status_text(node: ManifestNode) -> str:
 #: Layout constants (pixels). Columns per module: `_CELL_W` is the
 #: reserved per-module width (labels may bleed into the `_COLUMN_GAP`
 #: gutter), `_DOT_X` the declaration dot's inset, `_HEADER_H` the
-#: space above the first declaration row of a file cluster.
+#: space above the first declaration row of a file cluster. Each file's
+#: cluster also emits a `cell` rectangle (`_CELL_SPREAD` wide to the
+#: left) that the page's per-file euler layout may spread its
+#: declarations through.
 _CELL_W = 280
+_CELL_SPREAD = 24
 _COLUMN_GAP = 110
 _COLUMN_PAD = 10
 _LAYOUT_TOP = 40
@@ -176,14 +196,16 @@ _CLUSTER_GAP = 42
 def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
     """Deterministic module-column positions, computed at build time.
 
-    Cytoscape's generic graph layouts place every leaf on the canvas and
-    ignore compound containment, which scatters declarations away from
-    their files. So the page skips JS layout entirely: each module is a
-    column (modules ordered left-to-right by dependency depth, so
-    cross-module import/dependency edges always flow left-to-right),
-    files stack top-to-bottom within their module ordered by
-    internal import depth, and the file's declarations form an aligned
-    dot-list inside the file's cluster box.
+    The page's JS layouting covers only the inside of file clusters
+    (per-file euler, confined to the emitted `cell` rectangles); the
+    macro structure is fixed here: each module is a column (modules
+    ordered left-to-right by dependency depth, so cross-module edges
+    flow left-to-right), files stack top-to-bottom within their module
+    ordered by internal import depth, and the file's declarations get
+    preset positions seeding the per-file force pass. Returns
+    (element id -> (x, y), file id -> cell rect); file compounds' own
+    positions only matter when a file has no declarations (otherwise
+    the renderer surrounds them with their members).
     """
     by_name = {node.name: node for node in files}
     modules = sorted({node.module for node in files})
@@ -212,6 +234,7 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
         )
 
     positions: dict[str, dict[str, int]] = {}
+    cells: dict[str, dict[str, int]] = {}
     x = 0
     for module in sorted(modules, key=lambda name: (module_level(name), name)):
         column_x = x
@@ -231,13 +254,23 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
                     "x": dot_x,
                     "y": dot_y + _DECL_ROW * index,
                 }
+            # The cell the page's per-file euler layout may spread this
+            # file's declarations through: the preset stack seeds it,
+            # the cell bounds confine it ((x1, y1)-(x2, y2) in page
+            # coordinates).
+            cells[f"file:{member.name}"] = {
+                "x1": dot_x - _CELL_SPREAD,
+                "y1": y + 4,
+                "x2": column_x + _CELL_W - 8,
+                "y2": y + cluster_h - 4,
+            }
             y += cluster_h + _CLUSTER_GAP
         # Module compounds' positions are derived from their files by
         # the renderer; an (impossible) empty module column would still
         # need a coordinate.
         positions[f"module:{module}"] = {"x": column_x + _DOT_X, "y": _LAYOUT_TOP}
         x += _CELL_W + _COLUMN_GAP
-    return positions
+    return positions, cells
 
 
 def build_graph_data(manifest: Manifest, files: list[ManifestNode]) -> dict[str, Any]:
@@ -334,9 +367,11 @@ def build_graph_data(manifest: Manifest, files: list[ManifestNode]) -> dict[str,
     ]
     #: Cytoscape requires compound parents to precede their children.
     nodes = [*module_nodes, *file_nodes, *decl_nodes]
-    layout = _layout_positions(files)
+    positions, cells = _layout_positions(files)
     for node in nodes:
-        node["position"] = layout[node["id"]]
+        node["position"] = positions[node["id"]]
+        if node["group"] == "file":
+            node["cell"] = cells[node["id"]]
 
     # --- file-level import edges ----------------------------------------
     file_names = {node.name for node in files}
@@ -470,6 +505,12 @@ def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt
         "__AXBT_DATA__": _embed(data),
         "__AXBT_CDN__": CYTOSCAPE_URL,
         "__AXBT_INTEGRITY__": CYTOSCAPE_INTEGRITY,
+        "__AXBT_LAYOUT_BASE__": LAYOUT_BASE_URL,
+        "__AXBT_LAYOUT_BASE_INTEGRITY__": LAYOUT_BASE_INTEGRITY,
+        "__AXBT_COSE_BASE__": COSE_BASE_URL,
+        "__AXBT_COSE_BASE_INTEGRITY__": COSE_BASE_INTEGRITY,
+        "__AXBT_FCOSE__": FCOSE_URL,
+        "__AXBT_FCOSE_INTEGRITY__": FCOSE_INTEGRITY,
     }
     page = _HTML_TEMPLATE
     for token, value in replacements.items():
@@ -509,7 +550,10 @@ _HTML_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>__AXBT_TITLE__</title>
+<script src="__AXBT_LAYOUT_BASE__" integrity="__AXBT_LAYOUT_BASE_INTEGRITY__" crossorigin="anonymous"></script>
+<script src="__AXBT_COSE_BASE__" integrity="__AXBT_COSE_BASE_INTEGRITY__" crossorigin="anonymous"></script>
 <script src="__AXBT_CDN__" integrity="__AXBT_INTEGRITY__" crossorigin="anonymous"></script>
+<script src="__AXBT_FCOSE__" integrity="__AXBT_FCOSE_INTEGRITY__" crossorigin="anonymous"></script>
 <style>
   body { margin: 0; height: 100vh; font-family: ui-sans-serif, system-ui, sans-serif; background: #faf8f4; }
   #graph { position: fixed; inset: 0; }
@@ -545,6 +589,8 @@ __AXBT_LEGEND__
   "use strict";
   var payload = JSON.parse(document.getElementById("graph-data").textContent);
   var tooltip = document.getElementById("tooltip");
+
+  if (window.cytoscapeFcose) { window.cytoscape.use(window.cytoscapeFcose); }
 
   var cy = window.cytoscape({
     container: document.getElementById("graph"),
@@ -595,6 +641,60 @@ __AXBT_LEGEND__
       name: "preset", padding: 40, fit: true
     }
   });
+
+  // Per-file force layout: spread each file's declarations inside the
+  // cell the build pre-allocated for the cluster, with the file's own
+  // dependency edges pulling neighbors closer. fCoSE's `randomize:
+  // false` seeds the sim from the preset positions, so the page is
+  // deterministic; the post-pass renormalizes every member into the
+  // cell if the sim drifted out (fcose has no bounding-box constraint).
+  // A failed/absent fcose CDN script degrades to the preset stacks.
+  if (window.cytoscapeFcose) {
+    var cells = {};
+    payload.nodes.forEach(function (node) {
+      if (node.group === "file" && node.cell) { cells[node.id] = node.cell; }
+    });
+    var clusterMembers = {};
+    cy.nodes('[group = "declaration"]').forEach(function (decl) {
+      (clusterMembers[decl.data("parent")] = clusterMembers[decl.data("parent")] || []).push(decl);
+    });
+    Object.keys(clusterMembers).forEach(function (fileId) {
+      var cell = cells[fileId];
+      var members = cy.collection(clusterMembers[fileId]);
+      if (!cell || members.length < 2) { return; }
+      var intra = members.connectedEdges('[kind = "depends"]').filter(function (edge) {
+        return edge.source().data("parent") === fileId
+          && edge.target().data("parent") === fileId;
+      });
+      members.union(intra).layout({
+        name: "fcose", animate: false, randomize: false, fit: false,
+        packComponents: false, quality: "default", numIter: 500,
+        idealEdgeLength: 110, nodeRepulsion: 18000
+      }).run();
+
+      // Renormalize: translate/scale the cluster into its cell.
+      var xs = members.map(function (m) { return m.position("x"); });
+      var ys = members.map(function (m) { return m.position("y"); });
+      var minX = Math.min.apply(null, xs); var maxX = Math.max.apply(null, xs);
+      var minY = Math.min.apply(null, ys); var maxY = Math.max.apply(null, ys);
+      var width = Math.max(maxX - minX, 1);
+      var height = Math.max(maxY - minY, 1);
+      var cellW = cell.x2 - cell.x1;
+      var cellH = cell.y2 - cell.y1;
+      var scale = Math.min(1, cellW / width, cellH / height);
+      var cx = (minX + maxX) / 2;
+      var cyCenter = (minY + maxY) / 2;
+      var cellCx = (cell.x1 + cell.x2) / 2;
+      var cellCy = (cell.y1 + cell.y2) / 2;
+      members.forEach(function (m) {
+        var p = m.position();
+        m.position({
+          x: cellCx + (p.x - cx) * scale,
+          y: cellCy + (p.y - cyCenter) * scale
+        });
+      });
+    });
+  }
 
   cy.fit(undefined, 40);
 
