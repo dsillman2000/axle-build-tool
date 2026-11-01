@@ -22,6 +22,7 @@ from typing import Sequence
 
 from axle_build_tool.config import CACHE_DIRNAME
 from axle_build_tool.manifest import Manifest, ManifestNode
+from axle_build_tool.minify import Minified, minify_lines
 from axle_build_tool.stubbing import PROOF_KINDS, stubbed_source
 
 _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:--.*)?$")
@@ -58,6 +59,7 @@ def build_payload(
     project_root: Path,
     stubbed: dict[str, frozenset[str] | None] | None = None,
     warnings: list[str] | None = None,
+    minify: bool = False,
 ) -> Payload:
     """Assemble a standalone payload covering `nodes` plus their full
     transitive dependency closure.
@@ -73,6 +75,12 @@ def build_payload(
     declaration. A stubbed node's section is built from its
     stubbed source; line maps still refer to the *original* file
     (stub lines have no counterpart there).
+
+    `minify` runs the best-effort comment/blank-line stripper per file
+    (after stubbing, since manifest spans are keyed to raw source); the
+    line maps are built from the surviving lines' original numbers, so
+    attribution stays exact on the smaller text. Files that don't track
+    cleanly are submitted unminified.
     """
     by_name = manifest.by_name()
     order: list[ManifestNode] = []
@@ -98,12 +106,17 @@ def build_payload(
             source = stubbed_source(
                 member, source, stubbed[member.name], warnings=warnings
             )
+        tagged: list[tuple[int, str]]
+        if minify and (stripped := minify_lines(source)) is not None:
+            tagged = list(zip(stripped.source_lines, stripped.lines))
+        else:
+            tagged = list(enumerate(source.splitlines(), start=1))
         internal_stems = {
             dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
         }
         section: list[str] = []
         line_numbers: list[int] = []
-        for number, line in enumerate(source.splitlines(), start=1):
+        for number, line in tagged:
             match = _IMPORT_LINE.match(line)
             if match is None:
                 section.append(line)
@@ -202,7 +215,9 @@ def compiled_filename(
     return f"{base}_{variant}.lean"
 
 
-def write_compiled_payloads(manifest: Manifest, project_root: Path) -> list[Path]:
+def write_compiled_payloads(
+    manifest: Manifest, project_root: Path, minify: bool = False
+) -> list[Path]:
     """Persist per-file isolated payloads under `.axbt/compiled/`.
 
     Returns the written paths, in manifest (name-sorted) order.
@@ -211,7 +226,7 @@ def write_compiled_payloads(manifest: Manifest, project_root: Path) -> list[Path
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for node in manifest.nodes:
-        payload = build_payload([node], manifest, project_root)
+        payload = build_payload([node], manifest, project_root, minify=minify)
         path = out_dir / compiled_filename(node.module, dotted_stem_of(node))
         path.write_text(payload.content, encoding="utf-8")
         written.append(path)

@@ -82,6 +82,9 @@ class ProjectConfig(BaseModel):
     version: str | None = None
     modules: dict[str, ModuleConfig] = Field(min_length=1)
     axle: AxleConfig = Field(default_factory=AxleConfig)
+    #: Whether submissions minify their payloads (comments/blank lines
+    #: stripped), best-effort; overridable per run with `--no-minify`.
+    minify: bool = True
 
     def module_path(self, project_root: Path, name: str) -> Path:
         """Return the resolved source directory of module `name`."""
@@ -95,6 +98,7 @@ class _ProjectMeta(BaseModel):
 
     name: str | None = None
     version: str | None = None
+    minify: bool = True
 
 
 class _Document(BaseModel):
@@ -174,6 +178,7 @@ def load_config(project_root: Path) -> ProjectConfig:
         version=document.project.version,
         modules=document.modules,
         axle=document.axle,
+        minify=document.project.minify,
     )
 
 

@@ -423,6 +423,44 @@ class TestVerificationCache:
         assert len(verify_calls(fake_axle)) == 2
         assert "(cached)" not in result.output
 
+    def test_minify_mode_changes_the_cache_signature(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The effective minify setting rides in the cache signature: a
+        cached selection verifies in the mode it was stamped in, and
+        flipping the mode re-verifies."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        assert runner.invoke(main, ["verify"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        # Same mode: cached.
+        cached_run = runner.invoke(main, ["verify"])
+        assert cached_run.exit_code == 0, cached_run.output
+        assert verify_calls(fake_axle) == []
+        assert cached_run.output.count("(cached)") == 2
+        fake_axle.calls.clear()
+        # Raw mode: the stamped proof certifies minified submissions;
+        # off-mode payloads re-verify.
+        raw = runner.invoke(main, ["verify", "--no-minify"])
+        assert raw.exit_code == 0, raw.output
+        assert len(verify_calls(fake_axle)) == 2
+        fake_axle.calls.clear()
+        # ...and flipping back re-verifies too: the single stamp tier
+        # records the latest run's signature material, so each flip
+        # re-verifies once and then reuses while the mode holds.
+        back = runner.invoke(main, ["verify"])
+        assert back.exit_code == 0, back.output
+        assert len(verify_calls(fake_axle)) == 2
+        fake_axle.calls.clear()
+        held = runner.invoke(main, ["verify"])
+        assert held.exit_code == 0, held.output
+        assert verify_calls(fake_axle) == []
+        assert held.output.count("(cached)") == 2
+
     def test_dependency_edit_invalidates_the_cache(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:

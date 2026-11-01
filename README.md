@@ -76,6 +76,7 @@ Run modes (shared by `compile`, `check`, `verify`):
 * `--no-compile` (check/verify) — take the existing manifest at face value.
 * `--fail-fast` / `-x` (check/verify) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`).
 * `--sorry <selector>` (repeatable) — grant a dependency subtree: theorem proof bodies become `sorry` stubs in the submitted payload (signatures intact), and the granted declarations are excused — skipped under check, auto-permitted under verify. Def/abbrev bodies stay real: they are definitional content that downstream proofs unfold (anonymous constructors, projections, `rfl`), so stubbing them would break the very elaboration the grants are meant to leave working. Verify theorems against trusted dependency signatures, or check without paying for slow or broken upstream proofs.
+* `--minify/--no-minify` (check/verify) — payload minification is on by default: comments and blank lines are stripped from the submitted content (declaration docstrings and indentation stay put), shrinking request bodies and the `.axbt/compiled/` inspection artifacts. Attribution is unaffected — line maps are built from the surviving lines' original numbers, and files that don't track cleanly are submitted unminified. `--no-minify` opts a run out; set `minify: false` under `project:` in `axbt_project.yml` to change the default. The cached/stamped signature material includes the effective setting, so flipping the mode re-verifies once under the new payload shape.
 
 ### Streaming results
 
@@ -159,7 +160,9 @@ axbt_project.yml      # project + modules + axle settings
 M/…                   # module source directories (`.lean` files)
 .axbt/                # cache (gitignore it):
   manifest.json       #   the DAG: nodes, md5 fingerprints, extraction metadata
+                      #   (compact single-line JSON; inspect via `python -m json.tool`)
   compiled/           #   the exact standalone payloads submitted to the API
+                      #   (minified by default, like the submissions)
 ```
 
 ## Development

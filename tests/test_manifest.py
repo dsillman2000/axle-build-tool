@@ -227,6 +227,23 @@ class TestStatusTracking:
         assert [d.name for d in carried.declarations] == ["sample_decl"]
 
 
+class TestManifestFormat:
+    def test_the_saved_file_is_compact_single_line_json(
+        self, simple_project: Path
+    ) -> None:
+        """The manifest is an internal cache artifact: written as
+        single-line JSON with no filler whitespace (inspect with
+        `python -m json.tool`)."""
+        manifest = build_manifest(simple_project, config_of(simple_project))
+        save_manifest(manifest, simple_project)
+
+        raw = manifest_path(simple_project).read_text(encoding="utf-8")
+        assert raw.endswith("\n")
+        assert raw.count("\n") == 1  # one physical line plus the newline
+        assert '": ' not in raw  # no `: ` separator spacing
+        assert load_manifest(simple_project) == manifest
+
+
 class TestPersistence:
     def test_save_and_load_round_trip(self, simple_project: Path) -> None:
         manifest = build_manifest(simple_project, config_of(simple_project))

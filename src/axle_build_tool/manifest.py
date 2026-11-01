@@ -144,10 +144,15 @@ def load_manifest(project_root: Path) -> Manifest:
 
 
 def save_manifest(manifest: Manifest, project_root: Path) -> Path:
-    """Write `manifest` to `.axbt/manifest.json`, creating `.axbt/` if needed."""
+    """Write `manifest` to `.axbt/manifest.json`, creating `.axbt/` if needed.
+
+    Compact (single-line JSON): the manifest is an internal cache
+    artifact, and compaction cuts roughly a third of its size. For hand
+    inspection, pipe it through `python -m json.tool`.
+    """
     path = manifest_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    path.write_text(manifest.model_dump_json() + "\n", encoding="utf-8")
     return path
 
 

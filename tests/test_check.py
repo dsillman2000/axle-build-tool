@@ -185,6 +185,110 @@ class TestSelection:
         assert "Checked 1 selection(s): all OK" in result.output
 
 
+class TestMinification:
+    """Payload minification is on by default; `--no-minify` opts a run
+    out (and both document the exact escape-hatch behavior)."""
+
+    RAGGED = "-- intro\ndef t1 := 1\n\ndef helper := 2 -- tweak\n"
+    DOCS = {
+        "def t1 := 1": {
+            "t1": make_document("t1", kind="theorem", line_pos=2, end_line_pos=2)
+        },
+        "def helper := 2": {
+            "helper": make_document("helper", kind="def", line_pos=3, end_line_pos=3)
+        },
+    }
+
+    def run_check(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle, flags=()
+    ):
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": self.RAGGED})
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        result = runner.invoke(main, ["check", "--select", "M.A", *flags])
+        return root, result
+
+    def test_default_run_submits_minified(self, make_project, tmp_path, monkeypatch, fake_axle) -> None:
+        root, result = self.run_check(make_project, tmp_path, monkeypatch, fake_axle)
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert content == "def t1 := 1\ndef helper := 2\n"
+        # The persisted inspection artifact went through the same
+        # minifier (config default applies there too).
+        persisted = (root / ".axbt/compiled/M_A_isolated.lean").read_text(
+            encoding="utf-8"
+        )
+        assert persisted == content
+
+    def test_no_minify_submits_raw(self, make_project, tmp_path, monkeypatch, fake_axle) -> None:
+        _root, result = self.run_check(
+            make_project, tmp_path, monkeypatch, fake_axle, flags=["--no-minify"]
+        )
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        assert content == self.RAGGED
+
+    def test_offline_config_also_opts_out(self, make_project, tmp_path, monkeypatch, fake_axle) -> None:
+        root = make_project(
+            tmp_path,
+            "project:\n  name: proj\n  minify: false\nmodules:\n  M:\n    targets: []\n",
+            {"M/A.lean": self.RAGGED},
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        result = runner.invoke(main, ["check", "--select", "M.A"])
+
+        assert result.exit_code == 0, result.output
+        assert check_calls(fake_axle)[0]["content"] == self.RAGGED
+
+    def test_error_attribution_survives_minification(self, make_project, tmp_path, monkeypatch, fake_axle) -> None:
+        root = make_project(
+            tmp_path,
+            NO_TARGETS_CONFIG,
+            {
+                "M/A.lean": (
+                    "import Mathlib\n"       # 1 (hoisted)
+                    "\n"                      # 2
+                    "-- setup\n"              # 3
+                    "def t1 := 1\n"           # 4
+                    "def broken := x\n"       # 5
+                )
+            },
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "def broken := x": {
+                "broken": make_document(
+                    # Extraction docs are payload-relative; the raw
+                    # extraction payload places `broken` on its line 6.
+                    "broken", kind="def", line_pos=6, end_line_pos=6, signature="def broken"
+                )
+            }
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        # In the minified payload, `def broken := x` sits on line 4
+        # (header, blank separator; source lines 2-3 dropped). The API
+        # quotes it; attribution must land on source line 5.
+        fake_axle.check_result = make_response(
+            CheckResponse,
+            okay=False,
+            lean_messages=Messages(["-:4:2: error: unknown identifier 'x'"], [], []),
+        )
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--select", "M.A"])
+
+        assert result.exit_code == 1
+        assert "    M/A.lean:5:2: error: unknown identifier 'x'" in result.output
+        assert status_line(result.output, "M.A.broken") == "M.A.broken FAIL"
+
+
 class TestFailureReporting:
     def test_failure_prints_attributed_messages_and_exits_1(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1288,13 +1392,16 @@ class TestCheckStamps:
 
     def expected_sig(self, root: Path, node_name: str) -> str:
         """The closure signature a stamped declaration should carry."""
+        from axle_build_tool.cli import _signature_options
         from axle_build_tool.manifest import closure_signature
 
         return closure_signature(
             load_manifest(root).by_name()[node_name],
             load_manifest(root),
             "lean-4.35.0",
-            load_config(root).axle.global_options,
+            # Default runs minify (config default); the marker rides in
+            # the options material exactly as the run composes it.
+            _signature_options(load_config(root), True),
         )
 
     def test_file_selection_stamps_its_own_declarations_only(
