@@ -100,6 +100,35 @@ def with_declarations(manifest, names_by_node: dict[str, list[str]]):
     )
 
 
+def _decl_record(manifest, decl_name: str):
+    """The single `ExtractedDecl` whose extracted name is `decl_name`.
+
+    Stamp assertions want the record itself (several tests across the
+    check/verify suites unwind it the same way), so this lives here —
+    and asserts uniqueness so a name collision is caught loudly.
+    """
+    matches = [
+        d
+        for node in manifest.nodes
+        for d in node.declarations
+        if d.name == decl_name
+    ]
+    assert len(matches) == 1, (
+        f"declaration {decl_name!r} matched {len(matches)} record(s) in the manifest"
+    )
+    return matches[0]
+
+
+def checked_stamp_of(manifest, decl_name: str):
+    """The manifest record of `decl_name`, for asserting check stamps."""
+    return _decl_record(manifest, decl_name)
+
+
+def verified_stamp_of(manifest, decl_name: str):
+    """The manifest record of `decl_name`, for asserting verify stamps."""
+    return _decl_record(manifest, decl_name)
+
+
 def normalized_lines(output: str) -> list[str]:
     """`output` as whitespace-collapsed, non-empty lines.
 
@@ -148,8 +177,19 @@ def make_document(
     line_pos: int = 1,
     end_line_pos: int = 2,
     signature: str = "theorem sample_decl : True",
+    *,
+    local_type_dependencies: list[str] | None = None,
+    local_value_dependencies: list[str] | None = None,
+    external_type_dependencies: list[str] | None = None,
+    external_value_dependencies: list[str] | None = None,
+    local_syntactic_dependencies: list[str] | None = None,
+    external_syntactic_dependencies: list[str] | None = None,
 ) -> Document:
-    """Build a `Document` with all fields the SDK response type requires."""
+    """Build a `Document` with all fields the SDK response type requires.
+
+    The dependency lists default to empty; pass them to model what the
+    API reports for declarations that reference other declarations.
+    """
     return Document(
         name=name,
         kind=kind,
@@ -170,12 +210,12 @@ def make_document(
         tactic_counts={},
         wall_ms=0,
         heartbeats=0,
-        local_type_dependencies=[],
-        local_value_dependencies=[],
-        external_type_dependencies=[],
-        external_value_dependencies=[],
-        local_syntactic_dependencies=[],
-        external_syntactic_dependencies=[],
+        local_type_dependencies=local_type_dependencies or [],
+        local_value_dependencies=local_value_dependencies or [],
+        external_type_dependencies=external_type_dependencies or [],
+        external_value_dependencies=external_value_dependencies or [],
+        local_syntactic_dependencies=local_syntactic_dependencies or [],
+        external_syntactic_dependencies=external_syntactic_dependencies or [],
         declaration_messages=Messages([], [], []),
         theorem_messages=Messages([], [], []),
     )

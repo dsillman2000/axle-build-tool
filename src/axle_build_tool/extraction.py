@@ -103,6 +103,29 @@ def _decl_from_document(
     else:
         # Out-of-section ends keep the declaration's own length.
         end_line_pos = line_pos + (end - keyword_line)
+    # The document's local dependency lists (type / value / syntactic)
+    # union into one deduplicated, sorted list — the split itself is
+    # tooltip-grade detail, the graph only needs the names. The
+    # external variants are kept separately so graph consumers can
+    # render them without node explosion. Names come from the
+    # payload's content, whose dependency closure is signature-stubbed
+    # (extraction stubs dependencies' bodies), so a dependency's
+    # reported name is exactly what its own declaration (or stub line)
+    # declares — the same bare name an extracting API reports for it.
+    dependencies = sorted(
+        {
+            *doc.local_type_dependencies,
+            *doc.local_value_dependencies,
+            *doc.local_syntactic_dependencies,
+        }
+    )
+    external_dependencies = sorted(
+        {
+            *doc.external_type_dependencies,
+            *doc.external_value_dependencies,
+            *doc.external_syntactic_dependencies,
+        }
+    )
     return ExtractedDecl(
         name=doc.name,
         kind=doc.kind,
@@ -110,6 +133,8 @@ def _decl_from_document(
         line_pos=line_pos,
         end_line_pos=end_line_pos,
         signature=doc.signature,
+        dependencies=dependencies,
+        external_dependencies=external_dependencies,
     )
 
 

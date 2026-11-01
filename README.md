@@ -63,8 +63,8 @@ axle:
 | --- | --- |
 | `axbt init [PATH]` | Scaffold a new project (config + starter module). |
 | `axbt compile` | Scan modules, extract declarations via the API, write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/`. |
-| `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every configured target — or a `--select`ion — as a standalone payload with dependencies inlined. |
-| `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. For final validation, release gates, and CI. |
+| `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every configured target — or a `--select`ion — as a standalone payload with dependencies inlined. Clean outcomes are recorded per declaration in the manifest. |
+| `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
 | `axbt list` | Print the parsed declaration tree — kinds, file-accurate positions, `sorry` markers — dependencies first. Offline and read-only. |
 | `axbt debug` | Verify `AXLE_API_KEY` is set and accepted by the API; print the project's configuration and `.axbt/` cache state. |
 
@@ -101,7 +101,17 @@ Checked 3 selection(s): 1 failed, 2 OK in 1.589s
 
 * Sharing is best-effort: a failed mint prints a dim warning and never changes the exit code.
 * `verify --share` also links each cached selection to its most recent recorded verification (marked "(from the earlier run)") — no re-submission.
-* Nothing is written to the manifest; links live in the transcript where you copy them from.
+* Sharing writes nothing to the manifest; links live in the transcript where you copy them from.
+
+### Outcome records in the manifest
+
+The manifest records three kinds of per-declaration facts (all additive, optional fields — old manifests load unchanged, and new runs backfill them):
+
+* **Dependencies** (`compile`) — every extracted declaration carries `dependencies` (the deduplicated, sorted union of the API's local type/value/syntactic dependency lists; declaration names as the API reports them, cross-file edges included) and `external_dependencies` (names outside the project — tooltip material, not graph nodes).
+* **Check stamps** (`check`) — a payload that passed clean stamps every declaration it judged with `checked_sig`/`checked_at`/`checked_request_id`. The signature covers the file dependency closure's content, the resolved environment, and the global options — the same key material the verify cache uses. `--sorry`-stubbed and failing payloads record nothing.
+* **Verify stamps** (`verify`) — kernel-level successes get `verified_sig`/`verified_at`/`verified_request_id`. They are consulted by the verify cache and never by check's records.
+
+The two tiers are distinct facts: a `sorry` passes check and fails verify, so `checked_sig` without `verified_sig` means "checked-clean, still awaiting kernel verification" — the state the per-declaration status graph renders as its "in progress" color.
 
 ### Selecting what to check
 

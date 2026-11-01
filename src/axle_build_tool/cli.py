@@ -38,10 +38,10 @@ from axle_build_tool.manifest import (
     ManifestNode,
     build_manifest,
     check_targets,
+    closure_signature,
     load_manifest,
     save_manifest,
     topological_order,
-    verification_signature,
 )
 from axle_build_tool.payloads import (
     Payload,
@@ -545,6 +545,12 @@ def _decl_verdict(node: ManifestNode, decl: ExtractedDecl, response: Any, payloa
     split is derived from the response: the declaration's own entry in
     `failed_declarations`, or a Lean error whose payload position maps
     (through the line map) into the declaration's file span.
+
+    This judgment is report-only: a declaration that passes it while
+    the payload failed overall (`response.okay` is false) is *not*
+    recorded as checked in the manifest — outcome records are stamped
+    only from the submission's actual cleanliness, not from this
+    response-attribution heuristic.
     """
     if response.okay:
         return click.style("OK", fg="green")
@@ -820,6 +826,13 @@ def check(
     checked in full context. This is the fast, lightweight tier;
     kernel-level proof verification is `axbt verify`.
 
+    Clean outcomes are recorded in the manifest per declaration
+    (`checked_sig`/`checked_at`/`checked_request_id`), keyed on the
+    declaration's file-closure content, the environment, and the global
+    options. Only fully unstubbed payloads that actually passed stamp
+    their judged declarations — `--sorry`-granted and failing runs
+    record nothing.
+
     Declaration-level selections pass `names=[<declaration>]` so Axle
     focuses the check; Axle resolves names against theorems/lemmas only
     (a `def` name is rejected with "Theorem '<name>' not found"), so
@@ -870,6 +883,7 @@ def check(
         return
 
     paths = {node.name: node.path for node in manifest.nodes}
+    by_name = manifest.by_name()
     service = make_axle_service(config.axle)
 
     #: Pad labels so the status column aligns across the report. The
@@ -893,10 +907,30 @@ def check(
     )
     report = _StreamingReport(line_total=line_total)
     share_links: dict[str, str | AxleServiceError] = {}
+    #: Check stamps ride the submission completion loop: declaration
+    #: name -> (closure signature, timestamp, request id). Mirrors
+    #: verify's `stamps` flow, without verify's cache short-circuits.
+    checked_stamps: dict[str, tuple[str, datetime, str | None]] = {}
 
     async def submit_all() -> None:
         async with service:
             await service.validate_environment()
+            # Check records settle on the verify cache's same signature
+            # material (file dependency closure, environment, global
+            # options) — the resolved environment feeds it.
+            environment = await service.resolve_environment()
+            sig_cache: dict[str, str] = {}
+
+            def sig_of(node_name: str) -> str:
+                if node_name not in sig_cache:
+                    sig_cache[node_name] = closure_signature(
+                        by_name[node_name],
+                        manifest,
+                        environment,
+                        config.axle.global_options,
+                    )
+                return sig_cache[node_name]
+
             semaphore = asyncio.Semaphore(service.max_concurrency)
 
             async def submit(
@@ -980,6 +1014,27 @@ def check(
                             f"    failed declarations: {', '.join(response.failed_declarations)}"
                         )
                     rid = (response.info or {}).get("request_id")
+                    #: Stamp the judged declarations on a clean verdict:
+                    #: only a fully unstubbed payload that passed is the
+                    #: full-context fact `checked_sig` claims. A `--sorry`
+                    #: grant inside the payload (or any failure) leaves
+                    #: every judged declaration unstamped, mirroring
+                    #: verify's only-successes-get-stamped contract.
+                    if response.okay and not any(
+                        name in payload.sections for name in refined
+                    ):
+                        judged = (
+                            [(selection.node_name, selection.declaration)]
+                            if selection.declaration is not None
+                            else [
+                                (node.name, decl.name)
+                                for node in selection.payload_nodes(manifest)
+                                for decl in node.declarations
+                            ]
+                        )
+                        now = datetime.now(timezone.utc)
+                        for node_name, decl_name in judged:
+                            checked_stamps[decl_name] = (sig_of(node_name), now, rid)
                     await _mint_share_link(service, rid, share_links, enabled=share)
                     _print_share_line(share_links, rid)
                     #: --fail-fast: the first failed selection cancels
@@ -1017,6 +1072,38 @@ def check(
                 )
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
+
+    if checked_stamps:
+        stamped = set(checked_stamps)
+        node_of_decl = {
+            d.name: node.name for node in manifest.nodes for d in node.declarations
+        }
+        nodes = []
+        for node in manifest.nodes:
+            node_stamps = {n for n in stamped if node_of_decl.get(n) == node.name}
+            if not node_stamps:
+                nodes.append(node)
+                continue
+            sig, now, rid = next(checked_stamps[n] for n in node_stamps)
+            declarations = [
+                d.model_copy(
+                    update={
+                        "checked_sig": sig,
+                        "checked_at": now,
+                        "checked_request_id": rid,
+                    }
+                )
+                if d.name in node_stamps
+                else d
+                for d in node.declarations
+            ]
+            nodes.append(node.model_copy(update={"declarations": declarations}))
+        manifest = manifest.model_copy(update={"nodes": nodes})
+        try:
+            save_manifest(manifest, project_root)
+        except OSError as exc:
+            raise click.ClickException(str(exc)) from exc
+        click.secho(f"Recorded {len(checked_stamps)} check stamp(s) in the manifest", dim=True)
 
     total = len(checks)
     total_timing = _timing_text(time.monotonic() - started)
@@ -1448,7 +1535,7 @@ def verify(
 
     def sig_of(node_name: str) -> str:
         if node_name not in sig_cache:
-            sig_cache[node_name] = verification_signature(
+            sig_cache[node_name] = closure_signature(
                 by_name[node_name],
                 manifest,
                 environment,

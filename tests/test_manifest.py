@@ -10,6 +10,7 @@ import pytest
 
 from axle_build_tool.config import ProjectConfig, load_config
 from axle_build_tool.manifest import (
+    MANIFEST_VERSION,
     Manifest,
     ManifestError,
     ManifestNode,
@@ -233,6 +234,79 @@ class TestPersistence:
 
         loaded = load_manifest(simple_project)
         assert loaded == manifest
+
+    def test_extracted_decl_outcome_fields_round_trip(
+        self, simple_project: Path
+    ) -> None:
+        """Dependency lists and both stamp tiers survive persistence
+        (all additive optional fields on the v2 declaration model)."""
+        manifest = build_manifest(simple_project, config_of(simple_project))
+        declaration = ExtractedDecl(
+            name="sample_decl",
+            kind="theorem",
+            is_sorry=False,
+            line_pos=1,
+            end_line_pos=2,
+            signature="theorem sample_decl : True",
+            dependencies=["x", "y"],
+            external_dependencies=["Nat", "Eq"],
+            checked_sig="abc123",
+            checked_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            checked_request_id="req-check",
+            verified_sig="def456",
+            verified_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+            verified_request_id="req-verify",
+        )
+        stamped = manifest.model_copy(
+            update={
+                "nodes": [
+                    node.model_copy(update={"declarations": [declaration]})
+                    for node in manifest.nodes
+                ]
+            }
+        )
+        save_manifest(stamped, simple_project)
+
+        assert load_manifest(simple_project) == stamped
+
+    def test_manifest_from_before_the_change_loads_with_defaults(
+        self, simple_project: Path
+    ) -> None:
+        """The additive contract: manifest JSON written before the
+        dependency and outcome fields existed — without those keys —
+        validates with every one of them defaulted."""
+        import json
+
+        manifest = build_manifest(simple_project, config_of(simple_project))
+        save_manifest(manifest, simple_project)
+        raw = json.loads(manifest_path(simple_project).read_text(encoding="utf-8"))
+        new_fields = (
+            "dependencies",
+            "external_dependencies",
+            "checked_sig",
+            "checked_at",
+            "checked_request_id",
+            "verified_sig",
+            "verified_at",
+            "verified_request_id",
+        )
+        for node in raw["nodes"]:
+            for decl in node["declarations"]:
+                for field in new_fields:
+                    decl.pop(field, None)
+        manifest_path(simple_project).write_text(
+            json.dumps(raw, indent=2), encoding="utf-8"
+        )
+
+        reloaded = load_manifest(simple_project)
+        assert reloaded.version == MANIFEST_VERSION
+        for decl in (d for node in reloaded.nodes for d in node.declarations):
+            assert decl.dependencies == []
+            assert decl.external_dependencies == []
+            for field in new_fields:
+                if field in ("dependencies", "external_dependencies"):
+                    continue
+                assert getattr(decl, field) is None
 
     def test_load_missing_manifest_raises(self, simple_project: Path) -> None:
         with pytest.raises(ManifestError, match="manifest.json"):
