@@ -472,24 +472,53 @@ class TestGraphColors:
     def test_stamp_states_and_container_rollup(self, graph_project: Path) -> None:
         apply_stamps(
             graph_project,
-            {"base": "verified", "base_thm": "checked", "gap": "checked"},
+            {"base": "checked", "base_thm": "checked", "gap": "verified"},
         )
 
         output, html_text = run_graph(graph_project)
 
-        data = graph_data(html_text)
-        assert by_id(data, "decl:M.A:base")["state"] == "verified"
+        # A checked def is DONE (green): `verify` can never judge it, so
+        # a clean check is its terminal tier — yellow is reserved for
+        # kernally-verification-pending kinds.
+        assert by_id(data := graph_data(html_text), "decl:M.A:base")["state"] == "done"
         assert by_id(data, "decl:M.A:base_thm")["state"] == "checked"
         assert by_id(data, "decl:M.B:middle_thm")["state"] == "unchecked"
-        # A sorried theorem checked clean is yellow: check and verify
-        # are distinct tiers, and this one passed exactly one of them.
-        assert by_id(data, "decl:M.C:gap")["state"] == "checked"
+        # A verified theorem is green as always.
+        assert by_id(data, "decl:M.C:gap")["state"] == "verified"
         # Container rollup: the weakest constituent color. A's mix is
-        # checked, B is unchecked, and the declaration-free D is empty.
+        # checked (a kernel-pending theorem), B is unchecked, and the
+        # declaration-free D is empty.
         assert by_id(data, "file:M.A")["state"] == "checked"
         assert by_id(data, "file:M.B")["state"] == "unchecked"
         assert by_id(data, "file:M.D")["state"] == "empty"
         assert by_id(data, "module:M")["state"] == "unchecked"
+
+    def test_kernel_pending_theorem_keeps_its_file_yellow(
+        self, graph_project: Path
+    ) -> None:
+        """A checked def reads done (green), but its file still carries
+        an unchecked theorem — the container honestly reads the weakest
+        member state, not the def's green."""
+        apply_stamps(graph_project, {"base": "checked"})
+
+        output, html_text = run_graph(graph_project)
+
+        data = graph_data(html_text)
+        assert by_id(data, "decl:M.A:base")["state"] == "done"
+        assert by_id(data, "decl:M.A:base_thm")["state"] == "unchecked"
+        assert by_id(data, "file:M.A")["state"] == "unchecked"
+
+    def test_verified_stamps_on_defs_stay_green(
+        self, graph_project: Path
+    ) -> None:
+        """A verified stamp on a def is practically impossible (verify
+        refuses defs), but if a manifest carries one, green is still the
+        honest rendering, keyed only on the stamps."""
+        apply_stamps(graph_project, {"base": "verified"})
+
+        output, html_text = run_graph(graph_project)
+
+        assert by_id(graph_data(html_text), "decl:M.A:base")["state"] == "verified"
 
     def test_stamps_are_surfaced_in_the_tooltip(self, graph_project: Path) -> None:
         apply_stamps(graph_project, {"base": "verified"})
@@ -516,16 +545,17 @@ class TestGraphColors:
     def test_legend_is_rendered_in_page(self, graph_project: Path) -> None:
         output, html_text = run_graph(graph_project)
 
-        for state in ("verified", "checked", "unchecked", "empty"):
+        for state in ("verified", "checked", "done", "unchecked", "empty"):
             assert f"chip {state}" in html_text
         assert "outcome stamps" in html_text
+        assert "never verifiable" in html_text
 
     def test_state_of_keys_only_on_stamps(self, graph_project: Path) -> None:
-        bare = ExtractedDecl(
+        bare_theorem = ExtractedDecl(
             name="d", kind="theorem", is_sorry=False, line_pos=1, end_line_pos=1
         )
-        assert state_of(bare) == "unchecked"
-        checked = bare.model_copy(
+        assert state_of(bare_theorem) == "unchecked"
+        checked = bare_theorem.model_copy(
             update={"checked_sig": "c", "checked_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
         )
         assert state_of(checked) == "checked"
@@ -533,6 +563,12 @@ class TestGraphColors:
             update={"verified_sig": "v", "verified_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
         )
         assert state_of(verified) == "verified"
+
+        # The never-verifiable sibling kinds: checked reads `done`, not
+        # the kernel-verification-pending yellow.
+        bare_def = bare_theorem.model_copy(update={"kind": "def"})
+        assert state_of(bare_def) == "unchecked"
+        assert state_of(bare_def.model_copy(update={"checked_sig": "c", "checked_at": checked.checked_at})) == "done"
 
 
 class TestGraphEdges:
@@ -563,16 +599,20 @@ class TestRollup:
 
     def test_weakest_constituent_state_wins(self) -> None:
         assert rollup_state(["verified"]) == "verified"
+        assert rollup_state(["verified", "done"]) == "verified"
         assert rollup_state(["verified", "checked"]) == "checked"
+        assert rollup_state(["done", "checked"]) == "checked"
         assert rollup_state(["verified", "checked", "unchecked"]) == "unchecked"
 
     def test_declaration_free_containers_are_empty(self) -> None:
         assert rollup_state([]) == "empty"
 
     def test_def_only_containers_roll_up_naturally(self) -> None:
-        """A def-only file checked clean: all members are `checked`,
-        and the container reads yellow — its terminal on that tier."""
-        assert rollup_state(["checked", "checked"]) == "checked"
+        """A def-only file checked clean: all members are `done`, and
+        the container reads green — its terminal on that tier."""
+        assert rollup_state(["done", "done"]) == "done"
+        # A kernel-pending theorem keeps the container yellow.
+        assert rollup_state(["done", "checked"]) == "checked"
 
 
 class TestLayout:

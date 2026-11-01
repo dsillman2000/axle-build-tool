@@ -123,7 +123,7 @@ if (unparented.length !== 0) {
   errors.push(`${unparented.length} member node(s) left unparented`);
 }
 // States arrived as classes.
-const states = ["verified", "checked", "unchecked", "empty"];
+const states = ["verified", "checked", "done", "unchecked", "empty"];
 const stateSum = states.reduce((total, state) => total + cy.nodes(`node.${state}`).length, 0);
 if (stateSum !== cy.nodes().length) {
   errors.push(`state classes cover ${stateSum} of ${cy.nodes().length} nodes`);

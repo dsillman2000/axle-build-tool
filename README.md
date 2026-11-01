@@ -128,9 +128,10 @@ axbt graph --select my-project.Utils    # one file + its dependency closure
 
 Colors are read straight from the manifest's per-declaration outcome stamps — nothing is inferred:
 
-* **green = verified** — `verified_sig` present (kernel-level).
-* **yellow = checked** — `checked_sig` present but not verified: passed `check`, awaiting `verify`
-  (definitions included, their terminal tier).
+* **green = verified** — `verified_sig` present (kernel-level), or **done**: a checked-clean
+  declaration of a never-verifiable kind (defs, instances, structures — a clean check is their
+  final tier, so they read the same green).
+* **yellow = checked** — `checked_sig` present but not verified: passed `check`, awaiting `verify`.
 * **orange = unchecked** — neither stamp: never judged by a full, unstubbed check.
 * Containers roll up to the weakest constituent color; declaration-free files/modules are grey.
 
