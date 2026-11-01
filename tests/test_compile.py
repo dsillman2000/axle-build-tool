@@ -47,6 +47,31 @@ def extract_calls(fake) -> int:
 
 SIMPLE_FILES = {"M/A.lean": "def x := 1\n", "M/B.lean": "import A\ndef y := x\n"}
 
+# An import-only aggregate: a docstring plus imports, no declaration
+# keyword anywhere in the source.
+AGGREGATE_FILES = {
+    "M/A.lean": "def x := 1\n",
+    "M/B.lean": "import A\ndef y := x\n",
+    "M/Agg.lean": (
+        "\n/-! # Aggregate\n\n"
+        "A one-line import for the whole module area; declarations live\n"
+        "in their own files. -/\n"
+        "import A\n"
+        "import B\n"
+    ),
+}
+
+# A file with no actual declarations whose docstring *mentions* one —
+# the conservative direction keeps it in the extraction flow.
+DOCSTRING_MENTION_FILES = {
+    **SIMPLE_FILES,
+    "M/Doc.lean": (
+        "\n/-! # Notes\n\n"
+        "The `def` of nothing appears in this docstring only; the file\n"
+        "declares nothing itself. -/\n"
+    ),
+}
+
 
 class TestHelp:
     def test_help_lists_init_and_compile(self) -> None:
@@ -291,6 +316,64 @@ class TestCompileBehavior:
         assert result.exit_code == 0, result.output
         assert "no .lean files" in result.output
         assert load_manifest(root).nodes == []
+
+
+class TestDeclarationFreeNodes:
+    """Import-only aggregate files (docstring plus imports, no
+    declaration keyword anywhere) skip their extraction request: they'd
+    otherwise pay a full dependency-closure extraction payload for an
+    empty document set. Detection errs toward extraction."""
+
+    def test_aggregate_skips_extraction_and_is_recorded_empty(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, SIMPLE_CONFIG, AGGREGATE_FILES)
+        monkeypatch.chdir(root)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert extract_calls(fake_axle) == 2  # A and B only; Agg skipped
+        manifest = load_manifest(root)
+        aggregate = next(node for node in manifest.nodes if node.name == "M.Agg")
+        assert aggregate.declarations == []
+        assert aggregate.request_id is None
+
+    def test_skipped_aggregate_carries_over_clean(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A second compile makes no extraction calls at all: the
+        skipped node's recorded (empty) metadata is carried over by MD5
+        like any extracted node's."""
+        root = make_project(tmp_path, SIMPLE_CONFIG, AGGREGATE_FILES)
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert extract_calls(fake_axle) == 0
+
+    def test_docstring_mention_still_extracts(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A file with no declarations whose docstring mentions `def`
+        keeps its extraction request (the conservative direction: never
+        skip a file that could have declarations)."""
+        root = make_project(tmp_path, SIMPLE_CONFIG, DOCSTRING_MENTION_FILES)
+        monkeypatch.chdir(root)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert extract_calls(fake_axle) == 3
+        submitted_content = [
+            kwargs["content"]
+            for method, kwargs in fake_axle.calls
+            if method == "extract_decls"
+        ]
+        assert any("declares nothing itself" in content for content in submitted_content)
 
 
 class TestExtraction:

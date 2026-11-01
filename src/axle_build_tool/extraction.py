@@ -19,6 +19,14 @@ partially-extracted manifest. Note that with stubbed dependencies the
 payload's Lean-errors verdict no longer certifies the dependencies'
 proofs — each dependency's own extraction (and later check/verify) does
 that.
+
+Declaration-free nodes (import-only aggregates: a docstring plus
+imports) skip their extraction request entirely — they'd otherwise pay
+a full dependency-closure extraction payload for an empty document set.
+Detection is on the whole source text, so it errs toward extraction:
+any declaration keyword anywhere (even one mentioned in a docstring)
+keeps the normal request. Skipped nodes are recorded with an empty
+declaration list, like an extraction that found nothing.
 """
 
 from __future__ import annotations
@@ -105,6 +113,28 @@ def _decl_from_document(
     )
 
 
+#: Declaration keywords as they can appear anywhere in Lean source. Used
+#: only for the conservative declaration-free check: a file is skipped
+#: when none of these words occur at all.
+_DECLARATION_KEYWORD_SEARCH = re.compile(
+    r"\b(?:theorem|lemma|def|abbrev|instance|structure|class|inductive|example)\b"
+)
+
+
+def _source_has_declarations(project_root: Path, node: ManifestNode) -> bool:
+    """Whether a node's source text mentions any declaration keyword.
+
+    Reading is forgiving: on an OSError the safest answer is `True`, so
+    the normal extraction path runs and surfaces a proper per-node
+    failure message.
+    """
+    try:
+        source = (project_root / node.path).read_text(encoding="utf-8")
+    except OSError:
+        return True
+    return _DECLARATION_KEYWORD_SEARCH.search(source) is not None
+
+
 async def _extract_node(
     service: AxleService,
     node: ManifestNode,
@@ -177,13 +207,33 @@ async def apply_extraction(
     if not pending:
         return manifest
 
+    submitted: list[ManifestNode] = []
+    results: list[tuple[ManifestNode, str | None]] = []
+    for node in pending:
+        if _source_has_declarations(project_root, node):
+            submitted.append(node)
+        else:
+            logger.info(
+                "skipping extraction of %s (declaration-free: no declaration "
+                "keywords in the source)",
+                node.name,
+            )
+            results.append(
+                (
+                    node.model_copy(update={"declarations": [], "request_id": None}),
+                    None,
+                )
+            )
+
     semaphore = asyncio.Semaphore(service.max_concurrency)
-    results = await asyncio.gather(
-        *(
-            _extract_node(service, node, manifest, project_root, semaphore)
-            for node in pending
+    if submitted:
+        submitted_results = await asyncio.gather(
+            *(
+                _extract_node(service, node, manifest, project_root, semaphore)
+                for node in submitted
+            )
         )
-    )
+        results = [*results, *submitted_results]
 
     failures = [message for _, message in results if message is not None]
     if failures:
