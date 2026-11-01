@@ -95,7 +95,7 @@ Run modes (shared by `compile`, `check`, `verify`):
 
 ### Sharing a run
 
-`axbt check --share` / `axbt verify --share` print a share link for every submission — a URL to the Axle web app showing that exact run (source, messages, verdict). The route steers the web page: check runs link to the check UI, verify runs (including the cached-selection links) to the verify UI:
+`axbt check --share` / `axbt verify --share` print a share link for every submission — a URL to the Axle web app showing that exact run (source, messages, verdict). The route names the platform tool that served the request: check runs link to the check UI, verify runs (including the cached-selection links) to the verify_proof UI:
 
 ```text
 14:22:10.021 [ 1/1] M.User.derived_holds  OK  0.42s
@@ -103,7 +103,7 @@ Run modes (shared by `compile`, `check`, `verify`):
 ```
 
 * Sharing is best-effort: a failed mint prints a dim warning and never changes the exit code.
-* `verify --share` also links each cached selection to its most recent recorded verification (marked "(from the earlier run)") — no re-submission; its link opens the verify UI like every verify mint.
+* `verify --share` also links each cached selection to its most recent recorded verification (marked "(from the earlier run)") — no re-submission; its link opens the verify_proof UI like every verify mint.
 * Sharing writes nothing to the manifest; links live in the transcript where you copy them from.
 
 ### Outcome records in the manifest

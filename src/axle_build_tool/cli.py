@@ -1666,7 +1666,7 @@ def verify(
                         _latest_verified_request_id(manifest, scope.cached),
                         share_links,
                         enabled=share,
-                        kind="verify",
+                        kind="verify_proof",
                     )
             #: Selections judged without a submission report first; the
             #: streamed verdicts print the moment each submission
@@ -1841,7 +1841,7 @@ def verify(
                                 f"    failed declarations: {', '.join(response.failed_declarations)}"
                             )
                         await _mint_share_link(
-                            service, rid, share_links, enabled=share, kind="verify"
+                            service, rid, share_links, enabled=share, kind="verify_proof"
                         )
                         _print_share_line(share_links, rid)
                         #: --fail-fast: the first failed selection cancels

@@ -249,10 +249,11 @@ class AxleService:
         actually served (it keeps its own log); the caller is expected
         to treat failures as a warning, not a run failure.
 
-        `kind` selects the web route the link opens: `check` for
-        typecheck runs and `verify` for kernel-level runs (the stored
-        request itself knows what was served; the route only steers the
-        web UI).
+        `kind` selects the web route the link opens: it must be the
+        platform tool that served the request — `check` for typecheck
+        runs and `verify_proof` for kernel-level ones (the stored
+        request id already knows what was served; the route only steers
+        the web UI, which dispatches by tool name).
         """
         url = f"{self.client.url}/v1/shared-links"
         session = self.client._session

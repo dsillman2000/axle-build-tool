@@ -979,7 +979,7 @@ class TestShare:
 
         assert result.exit_code == 0, result.output
         assert len(verify_calls(fake_axle)) == 2
-        assert result.output.count("share: https://axle.test/verify#r=fake-req-") == 2
+        assert result.output.count("share: https://axle.test/verify_proof#r=fake-req-") == 2
         assert "Share link(s) minted: 2" in result.output
         # Successful verifications record their run's request id.
         manifest = load_manifest(root)
@@ -1010,7 +1010,7 @@ class TestShare:
         fake_axle.calls.clear()
         verify_result = runner.invoke(main, ["verify", "--select", "M.A", "--share"])
         assert verify_result.exit_code == 0, verify_result.output
-        assert "share: https://axle.test/verify#r=" in verify_result.output
+        assert "share: https://axle.test/verify_proof#r=" in verify_result.output
 
     def test_share_on_cached_run_mints_from_the_recorded_run(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1077,7 +1077,7 @@ class TestShare:
         # t1's guard failure fails the run; only the sibling t2
         # submitted, so exactly one link exists.
         assert result.exit_code == 1
-        assert result.output.count("share: https://axle.test/verify#r=") == 1
+        assert result.output.count("share: https://axle.test/verify_proof#r=") == 1
 
 
 class TestStreaming:
