@@ -329,6 +329,11 @@ def build_graph_data(manifest: Manifest, files: list[ManifestNode]) -> dict[str,
                     "parent": f"file:{node.name}",
                     "state": state_of(decl),
                     "changed": changed,
+                    # Shapes split by verifiability (see the template's
+                    # style sheet): verifiable proof kinds render as
+                    # circles, never-verifiable declarations (defs,
+                    # instances, structures, ...) as rounded squares.
+                    "kind": decl.kind,
                     "tooltip": _tooltip(
                         decl.name,
                         [
@@ -487,6 +492,17 @@ def _embed(data: dict[str, Any]) -> str:
 #: data reachable). The checkbox is static content (no manifest-derived
 #: text), so it is emitted verbatim; the page script wires its change
 #: handler.
+#: Verifiable declaration kinds — the circles of the graph; everything
+#: else (defs, instances, structures, ...) renders as a rounded square
+#: since `axbt verify` can never judge it.
+_SHAPES_LEGEND = (
+    '<div class="item shapes"><span class="glyph round"></span>'
+    "theorem / lemma / example &mdash; verifiable"
+    '<span class="glyph square"></span>'
+    "other declarations (defs, instances, &hellip;) &mdash; never verifiable</div>"
+)
+
+
 def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
     items = "".join(
         f'<div class="item"><span class="chip {entry["state"]}"></span>'
@@ -504,7 +520,7 @@ def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
         "reset layout</button>"
     )
     return (
-        f'<div class="title">color = outcome stamps only</div>{items}{checkbox}'
+        f'<div class="title">color = outcome stamps only</div>{items}{_SHAPES_LEGEND}{checkbox}'
         f"{reset}<div class=\"note\">{note}</div>"
     )
 
@@ -593,6 +609,11 @@ _HTML_TEMPLATE = """<!doctype html>
   .chip.checked { background: #f2b705; }
   .chip.unchecked { background: #e8590c; }
   .chip.empty { background: #c8c3bc; }
+  .glyph { display: inline-block; width: 10px; height: 10px; background: #c8c3bc;
+           margin: 0 4px 0 1px; vertical-align: -.5px; border: 1px solid #9b958c; }
+  .glyph.round { border-radius: 6px; }
+  .glyph.square { border-radius: 2px; }
+  .shapes { margin-top: 2px; }
   #tooltip { position: fixed; z-index: 20; display: none; max-width: 380px; background: #fffdf9;
              border: 1px solid #d6d1c8; border-radius: 8px; padding: 8px 11px; font-size: 12px; line-height: 1.55;
              box-shadow: 0 6px 16px rgba(0,0,0,.12); pointer-events: none; }
@@ -636,8 +657,11 @@ __AXBT_LEGEND__
         "text-background-padding": "2px", "text-background-shape": "roundrectangle",
         "font-family": "ui-sans-serif, system-ui, sans-serif", shape: "ellipse" } },
       { selector: "node[group='declaration']", style: {
-        width: 12, height: 12, "font-size": 11,
-        "text-valign": "center", "text-halign": "right", "text-margin-x": 12 } },
+        width: 13, height: 13, "font-size": 11,
+        "text-valign": "center", "text-halign": "right", "text-margin-x": 12,
+        shape: "roundrectangle" } },
+      { selector: "node[kind='theorem'], node[kind='lemma'], node[kind='example']", style: {
+        shape: "ellipse" } },
       { selector: "node[group='file']", style: { shape: "roundrectangle", width: 26, height: 26, "font-size": 12 } },
       { selector: "node[state='verified']", style: { "background-color": "#2f9e44", "border-color": "#237032", "border-width": 1 } },
       { selector: "node[state='checked']", style: { "background-color": "#f2b705", "border-color": "#c58a00", "border-width": 1 } },

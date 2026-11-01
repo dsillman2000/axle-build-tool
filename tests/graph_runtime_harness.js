@@ -128,6 +128,31 @@ const stateSum = states.reduce((total, state) => total + cy.nodes(`node.${state}
 if (stateSum !== cy.nodes().length) {
   errors.push(`state classes cover ${stateSum} of ${cy.nodes().length} nodes`);
 }
+// Shapes split by verifiability: verifiable kinds render as circles
+// (ellipse), never-verifiable declarations as rounded squares. Since a
+// headless render cannot draw shapes, this asserts the data plumbing
+// (every declaration carries its kind) plus the page's shape rules.
+const verifiableKinds = new Set(["theorem", "lemma", "example"]);
+const shapeMismatches = [];
+for (const node of payload.nodes) {
+  if (node.group !== "declaration") {
+    continue;
+  }
+  const nodeKind = cy.getElementById(node.id).data("kind");
+  if (nodeKind !== node.kind || !node.kind) {
+    shapeMismatches.push(`${node.id} carries kind ${JSON.stringify(nodeKind)} (manifest: ${JSON.stringify(node.kind)})`);
+  }
+  void verifiableKinds;
+}
+if (shapeMismatches.length) {
+  errors.push(`declaration kinds not plumbed: ${shapeMismatches.join("; ")}`);
+}
+const shapePageRules =
+  page.includes("node[kind='theorem'], node[kind='lemma'], node[kind='example']") &&
+  page.includes('shape: "roundrectangle"');
+if (!shapePageRules) {
+  errors.push("the page's style sheet does not split declaration shapes by kind");
+}
 // Id lookups and edge connectivity work the way the page's handlers do.
 for (const element of payload.nodes.concat(payload.edges)) {
   if (cy.getElementById(element.id).length === 0) {

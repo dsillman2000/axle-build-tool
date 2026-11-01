@@ -299,6 +299,31 @@ class TestGraphRender:
         # same visibility function the checkbox drives.
         assert "refreshEdgeVisibility" in html_text
 
+    def test_defs_and_theorems_render_different_shapes(
+        self, graph_project: Path
+    ) -> None:
+        """Verify-verifiable kinds (theorem/lemma/example) are circles;
+        never-verifiable declarations (defs, instances, ...) are
+        rounded squares — a color-independent distinction the legend
+        spells out."""
+        output, html_text = run_graph(graph_project)
+
+        data = graph_data(html_text)
+        kinds = {
+            node["id"]: node["kind"]
+            for node in data["nodes"]
+            if node["group"] == "declaration"
+        }
+        assert kinds["decl:M.A:base"] == "def"
+        assert kinds["decl:M.A:base_thm"] == "theorem"
+        # The legend explains the shape split.
+        assert "verifiable" in html_text
+        assert "never verifiable" in html_text
+        # The style sheet drives the split (round default -> circles for
+        # the proof kinds via data-kind selectors).
+        assert 'shape: "roundrectangle" } }' in html_text
+        assert "node[kind='theorem'], node[kind='lemma'], node[kind='example']" in html_text
+
     def test_dragging_is_enabled_with_a_reset_control(
         self, graph_project: Path
     ) -> None:
