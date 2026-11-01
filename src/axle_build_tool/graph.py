@@ -480,12 +480,14 @@ def _embed(data: dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e")
 
 
+#: The in-page legend: one chip per state, plus the edge control.
+#:
+#: The decl-level arrows default OFF (they typically overload the
+#: picture; the per-declaration reveal-on-click keeps the dependency
+#: data reachable). The checkbox is static content (no manifest-derived
+#: text), so it is emitted verbatim; the page script wires its change
+#: handler.
 def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
-    """The in-page legend: one chip per state, plus the edge control.
-
-    The checkbox is static content (no manifest-derived text), so it is
-    emitted verbatim; the page script wires its change handler.
-    """
     items = "".join(
         f'<div class="item"><span class="chip {entry["state"]}"></span>'
         f'{html.escape(entry["text"])}</div>'
@@ -493,13 +495,17 @@ def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
     )
     note = html.escape(f"{star} marks files whose source is new or changed")
     checkbox = (
-        '<label class="item ctrl"><input type="checkbox" id="toggle-decl-edges" '
-        "checked> declaration dependency arrows (untick to hide; click a "
-        "declaration to reveal its dependency neighborhood)</label>"
+        '<label class="item ctrl"><input type="checkbox" id="toggle-decl-edges"> '
+        "declaration dependency arrows (tick to show; clicking a declaration "
+        "always reveals its dependency neighborhood)</label>"
+    )
+    reset = (
+        '<button type="button" class="ctrl" id="reset-positions">'
+        "reset layout</button>"
     )
     return (
         f'<div class="title">color = outcome stamps only</div>{items}{checkbox}'
-        f'<div class="note">{note}</div>'
+        f"{reset}<div class=\"note\">{note}</div>"
     )
 
 
@@ -576,6 +582,10 @@ _HTML_TEMPLATE = """<!doctype html>
   #legend .item { line-height: 1.9; }
   #legend label.ctrl { display: block; margin: 4px 0 1px; line-height: 1.5; cursor: pointer; }
   #legend label.ctrl input { vertical-align: -1px; margin-right: 5px; }
+  #legend button.ctrl { display: block; width: calc(100% - 4px); margin: 4px 0 2px; font: 500 12px/1.5 ui-sans-serif, system-ui,
+                        sans-serif; color: #4a443c; background: #fffdf9; border: 1px solid #d6d1c8; border-radius: 6px;
+                        padding: 3px 8px; cursor: pointer; }
+  #legend button.ctrl:hover { border-color: #a89f8f; background: #f6f1e9; }
   #legend .note { color: #6b6257; border-top: 1px solid #e2ddd4; margin-top: 4px; padding-top: 4px; }
   #legend .star { color: #c92a2a; }
   .chip { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -.5px; }
@@ -610,7 +620,6 @@ __AXBT_LEGEND__
   var cy = window.cytoscape({
     container: document.getElementById("graph"),
     boxSelectionEnabled: false,
-    autoungrabify: true,
     elements: payload.nodes
       .map(function (node) {
         return { data: node, classes: node.state, position: node.position };
@@ -658,14 +667,28 @@ __AXBT_LEGEND__
     }
   });
 
+  // Layout bookkeeping before anything repositions nodes: every
+  // non-compound node's construction position (the build-time preset).
+  // The values are COPIES: `node.position()` returns the live internal
+  // object, so capturing it directly would alias the position and the
+  // presets would move right along with every drag. Compounds need no
+  // restore: they re-center around their (restored) members.
+  var initialPositions = {};
+  cy.nodes().forEach(function (node) {
+    if (!node.isParent()) {
+      initialPositions[node.id()] = { x: node.position("x"), y: node.position("y") };
+    }
+  });
+
   // Per-file force layout: spread each file's declarations inside the
   // cell the build pre-allocated for the cluster, with the file's own
   // dependency edges pulling neighbors closer. fCoSE's `randomize:
-  // false` seeds the sim from the preset positions, so the page is
+  // false` seeds the sim from the current positions, so the result is
   // deterministic; the post-pass renormalizes every member into the
   // cell if the sim drifted out (fcose has no bounding-box constraint).
   // A failed/absent fcose CDN script degrades to the preset stacks.
-  if (window.cytoscapeFcose) {
+  function spreadFileClusters() {
+    if (!window.cytoscapeFcose) { return; }
     var cells = {};
     payload.nodes.forEach(function (node) {
       if (node.group === "file" && node.cell) { cells[node.id] = node.cell; }
@@ -712,26 +735,7 @@ __AXBT_LEGEND__
     });
   }
 
-  cy.fit(undefined, 40);
-
-  function moveTooltip(e) {
-    var ev = e.originalEvent;
-    if (!ev || typeof ev.clientX !== "number") { return; }
-    tooltip.style.left = ev.clientX + 14 + "px";
-    tooltip.style.top = ev.clientY + 14 + "px";
-  }
-  cy.on("mouseover", "node", function (e) {
-    tooltip.innerHTML = e.target.data("tooltip") || "";
-    tooltip.style.display = "block";
-    moveTooltip(e);
-  });
-  cy.on("mousemove", "node", function (e) { moveTooltip(e); });
-  cy.on("mouseout", "node", function () { tooltip.style.display = "none"; });
-
-  var marked = [];
-  var declToggle = document.getElementById("toggle-decl-edges");
-  var depsHidden = declToggle ? !declToggle.checked : false;
-
+  // -- interaction state -------------------------------------------------
   // `marked` is always a plain array of elements: a reached-for
   // Cytoscape collection could be used for membership checks, but its
   // `indexOf` throws for elements outside it — and `refreshEdgeVisibility`
@@ -739,7 +743,13 @@ __AXBT_LEGEND__
   // The hidden class only applies while a depends-edge is neither
   // checkbox-visible nor part of the current reveal (a clicked
   // declaration's dependency neighborhood is always shown). `display:
-  // none` keeps the elements traversable but unclickable.
+  // none` keeps the elements traversable but unclickable. The
+  // decl-level arrows default OFF — they overload the picture — so the
+  // checkbox default (unticked) applies immediately below.
+  var marked = [];
+  var declToggle = document.getElementById("toggle-decl-edges");
+  var depsHidden = declToggle ? !declToggle.checked : false;
+
   function refreshEdgeVisibility() {
     cy.batch(function () {
       cy.edges('[kind = "depends"]').forEach(function (edge) {
@@ -755,6 +765,19 @@ __AXBT_LEGEND__
     marked = [];
     refreshEdgeVisibility();
   }
+  function moveTooltip(e) {
+    var ev = e.originalEvent;
+    if (!ev || typeof ev.clientX !== "number") { return; }
+    tooltip.style.left = ev.clientX + 14 + "px";
+    tooltip.style.top = ev.clientY + 14 + "px";
+  }
+
+  if (declToggle) {
+    declToggle.addEventListener("change", function () {
+      depsHidden = !declToggle.checked;
+      clearMark();
+    });
+  }
   cy.on("tap", function (e) {
     if (e.target === cy) { clearMark(); return; }
     clearMark();
@@ -762,12 +785,39 @@ __AXBT_LEGEND__
     for (var i = 0; i < marked.length; i++) { marked[i].addClass("highlighted"); }
     refreshEdgeVisibility();
   });
-  if (declToggle) {
-    declToggle.addEventListener("change", function () {
-      depsHidden = !declToggle.checked;
+  cy.on("mouseover", "node", function (e) {
+    tooltip.innerHTML = e.target.data("tooltip") || "";
+    tooltip.style.display = "block";
+    moveTooltip(e);
+  });
+  cy.on("mousemove", "node", function (e) { moveTooltip(e); });
+  cy.on("mouseout", "node", function () { tooltip.style.display = "none"; });
+
+  var resetButton = document.getElementById("reset-positions");
+  if (resetButton) {
+    resetButton.addEventListener("click", function () {
       clearMark();
+      // Restore the construction presets; compounds re-center around
+      // their (restored) members, then the same deterministic fcose
+      // pass re-spreads from the same seeds — the fresh-render look.
+      cy.batch(function () {
+        cy.nodes().forEach(function (node) {
+          var preset = initialPositions[node.id()];
+          if (preset !== undefined) { node.position(preset); }
+        });
+      });
+      spreadFileClusters();
+      cy.fit(undefined, 40);
     });
   }
+
+  // The decl-level arrows start hidden (the checkbox default).
+  refreshEdgeVisibility();
+
+  // ---- The first layout: deterministic per-file spread + fit ----------
+  spreadFileClusters();
+  cy.fit(undefined, 40);
+
   cy.on("resize", function () { cy.fit(undefined, 40); });
 })();
 </script>

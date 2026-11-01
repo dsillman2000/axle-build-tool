@@ -287,15 +287,31 @@ class TestGraphRender:
     def test_decl_edge_toggle_is_wired_in_page(self, graph_project: Path) -> None:
         output, html_text = run_graph(graph_project)
 
-        # The legend carries the checkbox (default: arrows shown), the
-        # CSS knows the hidden treatment, and the script looks the id up.
-        assert 'id="toggle-decl-edges" checked' in html_text
+        # The legend carries the checkbox UNTICKED (the arrows overload
+        # the picture by default), the CSS knows the hidden treatment,
+        # and the script looks the id up and applies the state once.
+        assert 'id="toggle-decl-edges"' in html_text
         assert "declaration dependency arrows" in html_text
+        assert 'type="checkbox" id="toggle-decl-edges" checked' not in html_text
         assert "edge.hidden" in html_text
         assert html_text.count("toggle-decl-edges") >= 2
         # The tap handler runs the reveal-or-restore rule through the
         # same visibility function the checkbox drives.
         assert "refreshEdgeVisibility" in html_text
+
+    def test_dragging_is_enabled_with_a_reset_control(
+        self, graph_project: Path
+    ) -> None:
+        output, html_text = run_graph(graph_project)
+
+        # Nodes and compounds must be grabbable: the explicit
+        # autoungrabify flag is gone, and a reset button restores the
+        # deterministic spread after rearranging.
+        assert "autoungrabify" not in html_text
+        assert 'id="reset-positions"' in html_text
+        assert "reset layout" in html_text
+        assert html_text.count("reset-positions") >= 2
+        assert "spreadFileClusters()" in html_text
 
     def test_missing_manifest_fails_with_compile_hint(
         self, make_project, tmp_path: Path, monkeypatch

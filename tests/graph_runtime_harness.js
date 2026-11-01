@@ -48,15 +48,21 @@ const script = jsMatch[1].replace(
   "headless: true"
 );
 
-// The legend checkbox behaves like a real input: `checked` state and a
-// recorded change listener the harness can fire later to drive the
-// reveal/hide rules.
-const toggle = { checked: true, listeners: {}, style: {}, value: "" };
+// The legend controls behave like real widgets: `checked` state and
+// recorded change/click listeners the harness can fire later.
+const toggle = { checked: false, listeners: {}, style: {} };
 toggle.addEventListener = (name, handler) => {
   toggle.listeners[name] = handler;
 };
 toggle.fireChange = () => {
   if (toggle.listeners.change) { toggle.listeners.change(); }
+};
+const resetButton = { listeners: {}, style: {} };
+resetButton.addEventListener = (name, handler) => {
+  resetButton.listeners[name] = handler;
+};
+resetButton.fireClick = () => {
+  if (resetButton.listeners.click) { resetButton.listeners.click(); }
 };
 
 // A delegating wrapper so the harness keeps the constructed instance
@@ -77,6 +83,9 @@ const documentStub = {
     }
     if (id === "toggle-decl-edges") {
       return toggle;
+    }
+    if (id === "reset-positions") {
+      return resetButton;
     }
     return { id, style: {} };
   },
@@ -178,7 +187,7 @@ if (fcose && spreadableClusters > 0 && moved === 0) {
   errors.push("the per-file fcose layout never moved a declaration");
 }
 
-// --- The declaration-edge checkbox: reveal / hide / restore --------------
+// --- The declaration-edge checkbox: hidden by default -------------------
 function report(message) {
   console.log(`  toggle: ${message}`);
 }
@@ -188,40 +197,41 @@ const toggleEdgeError = (message) => {
 };
 
 if (dependsEdges.length && toggle.listeners.change) {
-  // 1. Default (checked): no depends-edge is hidden.
-  if (dependsEdges.some((edge) => edge.hasClass("hidden"))) {
-    toggleEdgeError("edges are hidden while the box is ticked");
+  // 1. Default (un-ticked): every depends-edge is hidden.
+  const hiddenAtStart = dependsEdges.filter((edge) => edge.hasClass("hidden"));
+  if (hiddenAtStart.length !== dependsEdges.length) {
+    toggleEdgeError("the default (unticked) did not hide every depends-edge");
   } else {
-    report("ticked by default: all depends-edges visible");
+    report("unticked by default: all depends-edges hidden");
   }
 
-  // 2. Un-tick: every depends-edge hides.
+  // 2. Ticking shows everything again.
+  toggle.checked = true;
+  toggle.fireChange();
+  if (dependsEdges.some((edge) => edge.hasClass("hidden"))) {
+    toggleEdgeError("ticking did not unhide the depends-edges");
+  } else {
+    report("ticked: arrows visible");
+  }
+
+  // 3. Un-ticking hides them again; a tap then reveals the tapped
+  // declaration's dependency neighborhood (both direction sides) while
+  // everything else stays hidden.
   toggle.checked = false;
   toggle.fireChange();
-  const hiddenAll = dependsEdges.every((edge) => edge.hasClass("hidden"));
-  if (!hiddenAll) {
-    toggleEdgeError("un-ticking did not hide every depends-edge");
-  } else {
-    report("un-ticked: every depends-edge hidden");
-  }
-
-  // 3. Click a declaration with dependencies: its neighborhood (the
-  // dependency side AND the dependents side) reveals while the rest
-  // stays hidden.
   const tapped = dependsEdges.first().source();
   tapped.emit("tap");
-  const revealed = tapped
-    .connectedEdges('[kind = "depends"]')
-    .filter((edge) => !edge.hasClass("hidden"));
-  if (revealed.length !== tapped.connectedEdges('[kind = "depends"]').length) {
+  const connected = tapped.connectedEdges('[kind = "depends"]');
+  const revealed = connected.filter((edge) => !edge.hasClass("hidden"));
+  if (revealed.length !== connected.length) {
     toggleEdgeError(
-      `tapping '${tapped.data("id")}' revealed ${revealed.length} of its ${tapped.connectedEdges('[kind = "depends"]').length} dependency edges`
+      `tapping '${tapped.data("id")}' revealed ${revealed.length} of its ${connected.length} dependency edges`
     );
   }
-  const stillHiddenOutside = dependsEdges
-    .filter((edge) => tapped.connectedEdges('[kind = "depends"]').filter((mine) => mine.id() === edge.id()).length === 0)
+  const outsideStillHidden = dependsEdges
+    .filter((edge) => connected.filter((mine) => mine.id() === edge.id()).length === 0)
     .every((edge) => edge.hasClass("hidden"));
-  if (!stillHiddenOutside) {
+  if (!outsideStillHidden) {
     toggleEdgeError("edges outside the tapped neighborhood lost their hidden treatment");
   }
   if (revealed.length) {
@@ -236,14 +246,51 @@ if (dependsEdges.length && toggle.listeners.change) {
     report("background tap: reveal collapses back to hidden");
   }
 
-  // 5. Re-ticking shows everything again.
+  // 5. Ticking once more shows everything again.
   toggle.checked = true;
   toggle.fireChange();
   if (dependsEdges.some((edge) => edge.hasClass("hidden"))) {
     toggleEdgeError("re-ticking did not unhide the depends-edges");
-  } else {
-    report("re-ticked: arrows visible again");
   }
+  toggle.checked = false;
+  toggle.fireChange(); // leave the page in its default state
+}
+
+// --- Draggability and the reset control ---------------------------------
+// Nodes AND compounds must be grabbable (a misplaced `autoungrabify`
+// would make the whole interaction moot).
+const firstCompound = cy.nodes('[group = "file"]').first();
+const firstDeclaration = cy.nodes('[group = "declaration"]').first();
+if (!firstDeclaration.grabbable() || (firstCompound.length && !firstCompound.grabbable())) {
+  errors.push("nodes/compounds are not grabbable (dragging is disabled)");
+}
+
+// Snapshot the freshly-spread positions; drag both a declaration and a
+// file compound (a compound drag must carry its children), then reset.
+const snapshot = {};
+cy.nodes().forEach((node) => {
+  if (!node.isParent()) {
+    snapshot[node.id()] = {
+      x: node.position("x"),
+      y: node.position("y"),
+    };
+  }
+});
+if (firstDeclaration.length && firstCompound.length && resetButton.listeners.click) {
+  firstDeclaration.position({ x: firstDeclaration.position("x") + 40, y: firstDeclaration.position("y") + 40 });
+  firstCompound.position({ x: firstCompound.position("x") + 120, y: firstCompound.position("y") + 120 });
+  const draggedChild = firstCompound.children().first();
+  if (draggedChild.length && Math.abs(draggedChild.position("x") - payload.nodes.find((n) => n.id === draggedChild.id()).position.x) < 119) {
+    errors.push("dragging a file compound did not move its declarations");
+  }
+  resetButton.fireClick();
+  cy.nodes().forEach((node) => {
+    if (node.isParent()) { return; }
+    const home = snapshot[node.id()];
+    if (Math.abs(node.position("x") - home.x) > 0.5 || Math.abs(node.position("y") - home.y) > 0.5) {
+      errors.push(`reset layout left ${node.id()} away from its spread position`);
+    }
+  });
 }
 
 if (errors.length) {
