@@ -1,0 +1,36 @@
+README.md
+  h_4cc74772b10fd4 66-67,104-114
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 41,548-553,829-835,886,910-913,918-933,1017-1037,1076-1107,1538
+src/axle_build_tool/extraction.py
+  h_4cc74772b10fd4 106-128,136-137
+src/axle_build_tool/manifest.py
+  h_4cc74772b10fd4 35-56,67-71,334,340,344-349
+tests/conftest.py
+  h_4cc74772b10fd4 103-131,180-186,188-192,213-218
+tests/test_check.py
+  h_4cc74772b10fd4 12,14,972,975-980,982-983,985-1023,1156-1360
+tests/test_compile.py
+  h_4cc74772b10fd4 450-547
+tests/test_list.py
+  h_4cc74772b10fd4 11,138-187
+tests/test_live.py
+  h_4cc74772b10fd4 621-746
+tests/test_manifest.py
+  h_4cc74772b10fd4 13,238-310
+tests/test_selection.py
+  h_4cc74772b10fd4 142-188
+tests/test_verify.py
+  h_4cc74772b10fd4 13-14,474-577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "72bb56b3ce9e212fc780b823b1c23eb3d55d850c",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
