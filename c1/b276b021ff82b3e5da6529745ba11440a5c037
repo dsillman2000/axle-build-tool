@@ -1,0 +1,28 @@
+AGENTS.md
+  h_4cc74772b10fd4 37
+README.md
+  h_4cc74772b10fd4 78
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 55,349,485,788-791,1340,1448-1452
+src/axle_build_tool/stubbing.py
+  h_4cc74772b10fd4 4-7,19-29,49-52,119,122-127,134
+tests/test_check.py
+  h_4cc74772b10fd4 610,632-633,647,674,738,764
+tests/test_compile.py
+  h_4cc74772b10fd4 523
+tests/test_stubbing.py
+  h_4cc74772b10fd4 14,90,162,167,171-174,178,220-223
+tests/test_verify.py
+  h_4cc74772b10fd4 876
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c1b276b021ff82b3e5da6529745ba11440a5c037",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
