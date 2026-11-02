@@ -370,6 +370,60 @@ def closure_signature(
     return hashlib.md5(material.encode("utf-8")).hexdigest()
 
 
+def _resolve_declaration_names(manifest: "Manifest", name: str) -> list[str]:
+    """Resolve a (possibly bare or qualified) declaration name to the
+    extracted declaration names it refers to. Returns every candidate on
+    ambiguity so callers can be conservative."""
+    names = [decl.name for node in manifest.nodes for decl in node.declarations]
+    if name in names:
+        return [name]
+    matches: list[str] = []
+    for candidate in names:
+        if candidate == name or candidate.rsplit(".", 1)[-1] == name:
+            matches.append(candidate)
+    if not matches:
+        for candidate in names:
+            if candidate.endswith("." + name):
+                matches.append(candidate)
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    result: list[str] = []
+    for candidate in matches:
+        if candidate not in seen:
+            seen.add(candidate)
+            result.append(candidate)
+    return result
+
+
+def reachable_declarations(manifest: "Manifest", roots) -> set[str]:
+    """The transitive closure of declaration dependencies starting at
+    `roots`.
+
+    `roots` may contain extracted (qualified) names or bare suffixes;
+    each is resolved against the manifest's extracted declarations.
+    Dependencies recorded per declaration (`ExtractedDecl.dependencies`)
+    are followed transitively. Returns the set of kept declaration
+    names (qualified, as stored in the manifest).
+    """
+    decl_by_name = {
+        decl.name: decl for node in manifest.nodes for decl in node.declarations
+    }
+    closure: set[str] = set()
+    stack: list[str] = [str(root) for root in (roots if roots is not None else [])]
+    while stack:
+        item = stack.pop()
+        candidates = _resolve_declaration_names(manifest, item)
+        if not candidates:
+            continue
+        for candidate in candidates:
+            if candidate in closure or candidate not in decl_by_name:
+                continue
+            closure.add(candidate)
+            for dependency in decl_by_name[candidate].dependencies:
+                stack.append(dependency)
+    return closure
+
+
 def topological_order(nodes: list[ManifestNode]) -> list[ManifestNode]:
     """Order `nodes` dependencies-first (the DAG's flattening order).
 

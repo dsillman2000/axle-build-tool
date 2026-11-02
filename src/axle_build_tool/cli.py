@@ -1068,6 +1068,20 @@ def check(
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         stub_warnings: list[str] = []
         applied: set[str] = set()
+        #: Declaration-level trimming for `--select` runs: keep the
+        #: selected declaration(s) plus their transitive dependency
+        #: closure; unrelated declarations in the same file are dropped.
+        trim_roots: list[str] | None = None
+        if select is not None:
+            _sel = resolve_selection(select, config, manifest)
+            if _sel.declaration is not None:
+                trim_roots = [_sel.declaration]
+            else:
+                trim_roots = [
+                    d.name
+                    for node in _sel.payload_nodes(manifest)
+                    for d in node.declarations
+                ]
         checks: list[tuple[str, Selection, Payload | None, dict, str | None]] = []
         for label, selection, explicit in plan:
             refined = _refine_stub_map(
@@ -1086,6 +1100,7 @@ def check(
                 stubbed=refined or None,
                 warnings=stub_warnings,
                 minify=minified,
+                selected_declarations=trim_roots,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
@@ -1590,9 +1605,15 @@ def _verify_scope(
 ) -> _VerifyScope:
     by_name = manifest.by_name()
     closure = [by_name[node_name] for node_name in payload.sections]
-    verifiable = [
-        d for node in closure for d in node.declarations if d.kind in _VERIFY_KINDS
-    ]
+    verifiable = []
+    for node in closure:
+        kept = payload.kept.get(node.name)
+        if not kept:
+            kept = {d.name for d in node.declarations}
+        verifiable.extend(
+            d for d in node.declarations
+            if d.kind in _VERIFY_KINDS and d.name in kept
+        )
     # Declarations stubbed by `--sorry` are sorried by construction:
     # they are excused in the verification and skipped by the local
     # guard (their recorded is_sorry refers to the original source).
@@ -1668,7 +1689,9 @@ def _verify_scope(
         d.name
         for node in closure
         for d in node.declarations
-        if d.kind in _VERIFY_KINDS and cache_valid(d, node.name)
+        if d.kind in _VERIFY_KINDS
+        and cache_valid(d, node.name)
+        and (node.name not in payload.kept or d.name in payload.kept[node.name])
     ]
     permitted = stubbed_names | set(user_permitted) | set(cached)
     to_verify = [d.name for d in verifiable if d.name not in permitted]
@@ -1825,6 +1848,17 @@ def verify(
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
+        trim_roots: list[str] | None = None
+        if select is not None:
+            _sel = resolve_selection(select, config, manifest)
+            if _sel.declaration is not None:
+                trim_roots = [_sel.declaration]
+            else:
+                trim_roots = [
+                    d.name
+                    for node in _sel.payload_nodes(manifest)
+                    for d in node.declarations
+                ]
         stub_warnings: list[str] = []
         applied: set[str] = set()
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
@@ -1898,6 +1932,7 @@ def verify(
                 stubbed=refined or None,
                 warnings=stub_warnings,
                 minify=minified,
+                selected_declarations=trim_roots,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
@@ -1906,6 +1941,8 @@ def verify(
                 d.name
                 for node_name in payload.sections
                 for d in by_name[node_name].declarations
+                if node_name not in payload.kept
+                or d.name in payload.kept[node_name]
             }
             missing = user_permitted - closure_decls
             if missing:
@@ -2199,6 +2236,7 @@ def verify(
             for _, selection, payload, _, _, _ in items:
                 if payload is None:
                     continue
+
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / selection.compiled_filename_variant("stubbed")).write_text(

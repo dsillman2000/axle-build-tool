@@ -537,9 +537,10 @@ class TestLiveScopedStatements:
         root = Path.cwd()
         persisted = root / ".axbt" / "compiled" / "M_A_stubbed.lean"
         content = persisted.read_text(encoding="utf-8")
-        # The sibling and the sorried gap are stubbed inside the namespace...
-        assert "theorem gap : 2 + 2 = 5 := by sorry" in content
-        assert "theorem uses_sibling : sibling = 1 := by sorry" in content
+        # Trimming drops the unreachable siblings; only the selection
+        # (and its scope) survives.
+        assert "theorem gap : 2 + 2 = 5 := by sorry" not in content
+        assert "theorem uses_sibling : sibling = 1 := by sorry" not in content
         # ...and the selection's real proof survives.
         assert "theorem helper : n = n := rfl" in content
 
@@ -860,6 +861,47 @@ class TestLiveGraphPage:
             f"the page's no-fcose degradation broke:\n{degraded.stdout}\n{degraded.stderr}"
         )
         assert "degraded preset" in degraded.stdout
+
+
+class TestLiveTrimming:
+    """`--select <file>.<decl>` trims declarations unreachable from the
+    selected declaration out of the submitted payload (issue #30)."""
+
+    SOURCE = (
+        "namespace Algebra\n"
+        "\n"
+        "theorem gap : 2 + 2 = 5 := by sorry\n"
+        "\n"
+        "theorem helper : 1 + 1 = 2 := by rfl\n"
+        "\n"
+        "end Algebra\n"
+    )
+
+    def test_verify_trims_unreachable_sorried_declaration(
+        self, make_live_project
+    ) -> None:
+        """A sorried, unreachable declaration in the same file does not
+        poison a declaration-level verification of the reachable one."""
+        make_live_project({"M/A.lean": self.SOURCE}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        # With trimming, `gap` is dropped from the payload and `helper`
+        # verifies; without trimming, `gap`'s `sorry` fails the run.
+        result = runner.invoke(main, ["verify", "--select", "M.A.helper"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+
+    def test_check_trims_unreachable_declaration(self, make_live_project) -> None:
+        """Check on a single declaration submits a payload without the
+        unreachable sibling."""
+        make_live_project({"M/A.lean": self.SOURCE}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--select", "M.A.helper"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
 
 
 class TestLiveDependencyNames:

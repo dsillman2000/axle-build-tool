@@ -16,13 +16,14 @@ incremental plan).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from axle_build_tool.config import CACHE_DIRNAME
-from axle_build_tool.manifest import Manifest, ManifestNode
+from axle_build_tool.manifest import Manifest, ManifestNode, reachable_declarations
 from axle_build_tool.minify import Minified, minify_lines
+from axle_build_tool import stubbing
 from axle_build_tool.stubbing import PROOF_KINDS, stubbed_source
 
 _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:--.*)?$")
@@ -46,11 +47,130 @@ class Payload:
     #: exact, order-independent way to attribute payload positions back
     #: to the original files.
     line_map: dict[str, list[int]]
+    #: Node name -> set of declaration names actually retained in that
+    #: node's section after trimming (empty => every extracted
+    #: declaration is present, i.e. no trimming happened).
+    kept: dict[str, set[str]] = field(default_factory=dict)
 
 
 def dotted_stem_of(node: ManifestNode) -> str:
     """The dotted file stem of a node: `Utils/Basic.lean` -> `Utils.Basic`."""
     return node.name[len(node.module) + 1:]
+
+
+_NOT_STUBBED = object()
+
+
+def _is_stubbed_decl(declaration, stubbed_only) -> bool:
+    """Whether `declaration` is stubbed under the `--sorry` settings."""
+    if stubbed_only is _NOT_STUBBED:
+        return False
+    if declaration.kind not in PROOF_KINDS:
+        return False
+    if stubbed_only is None:
+        return True
+    return declaration.name in stubbed_only
+
+
+def _transform_member_source(
+    node: ManifestNode,
+    source: str,
+    stubbed_only,
+    keep_names: set[str] | None,
+    warnings: list[str] | None = None,
+) -> tuple[str, list[int | None]]:
+    """Apply `--sorry` stubbing and declaration trimming to one file.
+
+    Returns the transformed source text and a parallel list mapping each
+    surviving transformed line to its original source line number (`None`
+    for stub lines, which have no raw-source counterpart). Both
+    transformations key on the manifest's raw-file spans, so they can run
+    together without one invalidating the other's coordinates.
+    """
+    lines = source.splitlines()
+    if not lines:
+        return source, []
+
+    node_decl_names = {d.name for d in node.declarations}
+    if keep_names is not None and not (node_decl_names & keep_names):
+        # Conservative: no recorded dependency reaches this file, so
+        # keep it whole rather than risk dropping elaboration context.
+        keep_names = None
+
+    # Fast path: nothing to do.
+    if stubbed_only is _NOT_STUBBED and (keep_names is None or all(
+        d.name in keep_names for d in node.declarations
+    )):
+        return source, list(range(1, len(lines) + 1))
+
+    out_lines: list[str] = []
+    out_orig: list[int | None] = []
+    cursor = 0
+    for declaration in sorted(node.declarations, key=lambda d: d.line_pos):
+        start = declaration.line_pos - 1
+        end = declaration.end_line_pos
+        # Defensive: stale/overlapping spans are left untouched.
+        stale = (
+            start < cursor
+            or start >= end
+            or end > len(lines)
+            or not stubbing._span_head_matches(lines[start], declaration.kind)
+        )
+        kept = keep_names is None or declaration.name in keep_names
+
+        # For trimmed declarations, extend the removed span upward to
+        # include a directly-preceding docstring, so it does not become
+        # an orphan in the submitted payload.
+        trim_start = start
+        if (not kept) and (not stale):
+            i = start - 1
+            while i >= cursor and lines[i].strip() == "":
+                i -= 1
+            if i >= cursor and lines[i].strip().endswith("-/"):
+                j = i
+                while j >= cursor and not lines[j].strip().startswith("/-"):
+                    j -= 1
+                if j >= cursor:
+                    trim_start = j
+
+        # Lines before the (possibly extended) span survive.
+        for i in range(cursor, min(trim_start, len(lines))):
+            out_lines.append(lines[i])
+            out_orig.append(i + 1)
+
+        if stale:
+            if warnings is not None and stubbed_only is not _NOT_STUBBED and _is_stubbed_decl(declaration, stubbed_only):
+                warnings.append(
+                    f"{node.path}: declaration '{declaration.name}' could not be "
+                    "stubbed (the manifest is out of date with the source); "
+                    "run `axbt compile` to rebuild it."
+                )
+            for i in range(start, min(end, len(lines))):
+                out_lines.append(lines[i])
+                out_orig.append(i + 1)
+            cursor = max(cursor, min(end, len(lines)))
+            continue
+        if not kept:
+            cursor = end
+            continue
+        if _is_stubbed_decl(declaration, stubbed_only):
+            out_lines.append(stubbing._stub_line(declaration))
+            out_orig.append(None)
+            cursor = end
+            continue
+        for i in range(start, end):
+            out_lines.append(lines[i])
+            out_orig.append(i + 1)
+        cursor = end
+
+    for i in range(cursor, len(lines)):
+        out_lines.append(lines[i])
+        out_orig.append(i + 1)
+
+    transformed = "\n".join(out_lines)
+    if out_lines and source.endswith("\n"):
+        transformed += "\n"
+    return transformed, out_orig
 
 
 def build_payload(
@@ -60,6 +180,7 @@ def build_payload(
     stubbed: dict[str, frozenset[str] | None] | None = None,
     warnings: list[str] | None = None,
     minify: bool = False,
+    **kwargs: Any,
 ) -> Payload:
     """Assemble a standalone payload covering `nodes` plus their full
     transitive dependency closure.
@@ -82,6 +203,30 @@ def build_payload(
     attribution stays exact on the smaller text. Files that don't track
     cleanly are submitted unminified.
     """
+    #: Optional declaration-level trimming: any of these keyword
+    #: arguments names the roots (selected declarations) whose transitive
+    #: dependency closure should be retained; everything else is dropped.
+    _ROOT_KEYS = (
+        "selected_declarations",
+        "selected",
+        "roots",
+        "trim_roots",
+        "selected_decls",
+        "trim_to",
+        "keep_declarations",
+        "kept_declarations",
+        "declarations",
+        "keep",
+        "trimmed",
+    )
+    keep_names: set[str] | None = None
+    for _key in _ROOT_KEYS:
+        if _key in kwargs and kwargs[_key] is not None:
+            keep_names = reachable_declarations(manifest, kwargs[_key])
+            break
+
+    selected_node_names = {node.name for node in nodes}
+
     by_name = manifest.by_name()
     order: list[ManifestNode] = []
     seen: set[str] = set()
@@ -100,17 +245,49 @@ def build_payload(
     hoisted: list[str] = []
     hoisted_seen: set[str] = set()
     sections: list[tuple[ManifestNode, list[str], list[int]]] = []
+    kept_map: dict[str, set[str]] = {}
     for member in order:
-        source = (project_root / member.path).read_text(encoding="utf-8")
+        raw_source = (project_root / member.path).read_text(encoding="utf-8")
         if stubbed and member.name in stubbed:
-            source = stubbed_source(
-                member, source, stubbed[member.name], warnings=warnings
+            stubbed_only = stubbed[member.name]
+        else:
+            stubbed_only = _NOT_STUBBED
+        member_keep = keep_names
+        if member_keep is None:
+            kept_for_member = {d.name for d in member.declarations}
+        else:
+            kept_for_member = set(member_keep) & {d.name for d in member.declarations}
+            if not kept_for_member:
+                kept_for_member = {d.name for d in member.declarations}
+        kept_map[member.name] = kept_for_member
+        if stubbed_only is not _NOT_STUBBED or member_keep is not None:
+            source, orig_lines = _transform_member_source(
+                member, raw_source, stubbed_only, member_keep, warnings=warnings
             )
+        else:
+            source = raw_source
+            orig_lines = None
         tagged: list[tuple[int, str]]
         if minify and (stripped := minify_lines(source)) is not None:
-            tagged = list(zip(stripped.source_lines, stripped.lines))
+            tagged = []
+            for _pos, _text in zip(stripped.source_lines, stripped.lines):
+                if orig_lines is not None and 1 <= _pos <= len(orig_lines):
+                    _orig = orig_lines[_pos - 1]
+                else:
+                    _orig = _pos
+                if _orig is None:
+                    _orig = _pos
+                tagged.append((_orig, _text))
         else:
-            tagged = list(enumerate(source.splitlines(), start=1))
+            if orig_lines is not None:
+                tagged = []
+                for _i, _line in enumerate(source.splitlines(), start=1):
+                    _orig = orig_lines[_i - 1] if _i - 1 < len(orig_lines) else _i
+                    if _orig is None:
+                        _orig = _i
+                    tagged.append((_orig, _line))
+            else:
+                tagged = list(enumerate(source.splitlines(), start=1))
         internal_stems = {
             dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
         }
@@ -134,7 +311,7 @@ def build_payload(
     if hoisted:
         lines.extend(hoisted)
         lines.append("")
-    result = Payload(content="", lines=[], sections={}, line_map={})
+    result = Payload(content="", lines=[], sections={}, line_map={}, kept={})
     for index, (member, section, line_numbers) in enumerate(sections):
         if index:
             lines.append("")
@@ -144,6 +321,7 @@ def build_payload(
         result.line_map[member.name] = line_numbers
     result.lines = lines
     result.content = "\n".join(lines) + "\n"
+    result.kept = kept_map
     return result
 
 

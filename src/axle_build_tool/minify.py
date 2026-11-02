@@ -16,9 +16,12 @@ What is stripped:
 - runs of blank lines (blank lines are pure layout) and trailing
   whitespace on every surviving line.
 
-What is kept: everything else — indentation stays put, and declaration
-docstrings (`/-- ... -/`) survive verbatim, since they attach to
-declarations and may feed the API's declaration tooling.
+- redundant horizontal whitespace: runs of spaces/tabs collapse to a
+  single space between tokens; leading structural indentation is
+  preserved.
+
+What is kept: everything else — indentation stays put. Declaration
+docstrings (`/-- ... -/`) are stripped like any other comment.
 
 The scan is a small state machine: string literals are tracked (a `--`
 or `/-` inside a string is text, not a comment), and char literals are
@@ -46,7 +49,7 @@ from dataclasses import dataclass
 #: options material (via `signature_marker`), so a behavior change here
 #: invalidates stamps and the verify cache exactly once, instead of
 #: silently covering submissions shaped differently.
-MINIFIER_VERSION = 1
+MINIFIER_VERSION = 2
 
 
 def signature_marker(enabled: bool) -> str:
@@ -88,7 +91,6 @@ def minify_lines(source: str) -> Minified | None:
 
     lines: list[str] = []
     numbers: list[int] = []
-    kept_flags: list[bool] = []  # per line: emitted inside a kept docstring
     text: list[str] = []  # characters of the line being built
     current = 1  # source line the line being built started on
     last: str | None = None  # last content character appended
@@ -97,10 +99,9 @@ def minify_lines(source: str) -> Minified | None:
     depth = 0  # nesting of the block comment being stripped
     keep_depth = 0  # nesting of the docstring being preserved
 
-    def emit(kept: bool = False) -> None:
+    def emit() -> None:
         lines.append("".join(text))
         numbers.append(current)
-        kept_flags.append(kept)
 
     i = 0
     n = len(source)
@@ -116,32 +117,6 @@ def minify_lines(source: str) -> Minified | None:
                 in_string = False
             elif c == "\n":
                 return None  # Lean strings are single-line
-            text.append(c)
-            last = c
-            i += 1
-            continue
-
-        if keep_depth:
-            # Inside a preserved `/-- ... -/` docstring: copy verbatim,
-            # tracking `/-` nesting only for the matching close.
-            if source.startswith("/-", i):
-                keep_depth += 1
-                text.append("/-")
-                last = "-"
-                i += 2
-                continue
-            if source.startswith("-/", i):
-                keep_depth -= 1
-                text.append("-/")
-                last = "/"
-                i += 2
-                continue
-            if c == "\n":
-                emit(kept=True)
-                text = []
-                current += 1
-                i += 1
-                continue
             text.append(c)
             last = c
             i += 1
@@ -166,14 +141,6 @@ def minify_lines(source: str) -> Minified | None:
             continue
 
         if source.startswith("/-", i):
-            if i + 2 < n and source[i + 2] == "-":
-                # `/-` immediately followed by `-` (`/-- … -/`): a
-                # declaration docstring — preserve it verbatim.
-                keep_depth = 1
-                text.append("/-")
-                last = "-"
-                i += 2
-                continue
             depth = 1
             i += 2
             continue
@@ -230,19 +197,24 @@ def minify_lines(source: str) -> Minified | None:
         last = c
         i += 1
 
-    if in_string or depth or keep_depth:
+    if in_string or depth:
         return None
+    import re as _re
+
     out_lines: list[str] = []
     out_numbers: list[int] = []
-    for line, number, was_kept in zip(lines, numbers, kept_flags):
-        if was_kept:
-            # Docstring prose is verbatim, blank lines included.
-            out_lines.append(line)
-            out_numbers.append(number)
-            continue
+    for line, number in zip(lines, numbers):
         stripped_line = line.rstrip()
         if not stripped_line:
             continue  # blank lines are pure layout
-        out_lines.append(stripped_line)
+        # Collapse redundant horizontal whitespace between tokens while
+        # preserving leading structural indentation.
+        leading = stripped_line[: len(stripped_line) - len(stripped_line.lstrip(" \t"))]
+        rest = stripped_line[len(leading):]
+        rest = _re.sub(r"[ \t]{2,}", " ", rest)
+        out_line = leading + rest
+        if not out_line.strip():
+            continue
+        out_lines.append(out_line)
         out_numbers.append(number)
     return Minified(tuple(out_lines), tuple(out_numbers))
