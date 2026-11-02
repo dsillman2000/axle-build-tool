@@ -39,9 +39,8 @@ project:
 modules:
   Core:
     dir: "Core"                     # module = directory of .lean files
-    targets:                        # the declarations that matter
-      - Basics.semantics
-      - Algebra.ring_identity
+    # `targets:` is deprecated (still honoured as a filter, with a
+    # run-start warning). Bare runs already cover every file.
 axle:
   environment: "lean-4.35.0"        # optional; defaults to latest offered
   timeout_seconds: 120
@@ -53,10 +52,12 @@ Guidance for structuring Lean code:
   declarations; `import` siblings by their file stem (`import Basics`).
   Imports must form a DAG — axbt parses them and topologically orders
   everything.
-- **Targets are the point.** `targets` lists the theorems/lemmas whose
-  correctness the project exists to establish. Helper lemmas don't need
-  target entries; they're validated as dependencies. Verify runs target
-  every PR-style gate; check uses them as the default selection.
+- **Files are the unit of execution.** A bare `axbt check` / `verify` /
+  `build` judges every `.lean` file in every configured module, ordered
+  along the import DAG (dependencies first). `targets:` is deprecated and
+  still works as a filter; `--select` is the general narrowing mechanism.
+  Helper declarations are validated as dependencies of the files that
+  reference them.
 - State axioms/settings at the top of files as usual — payload assembly
   flattens files with dependencies inlined, so a target always checks in
   full context.
@@ -73,13 +74,16 @@ single-line `manifest.json` cache plus inspectable payloads; gitignore it).
    streams first, then the verify pass skips the selections whose check
    failed, and the run exits nonzero if either tier failed. Build-mode rows
    carry a `[check]`/`[verify]` suffix so the passes tell apart.
-4. **`axbt check`** alone for fast typechecking of every target. Errors
+4. **`axbt check`** alone for fast typechecking of every file. A file
+   whose declarations all already carry a matching `checked_sig` is
+   skipped (`OK (cached)`); `--force` re-checks everything. Errors
    print with positions attributed back to real source files. Iterate
-   here; this tier is cheap and always re-submits.
+   here; this tier is cheap and delta-cached.
 5. **`axbt verify`** alone for kernel-level proof validation of finished
    proofs: rejects `sorry`, missing proofs, and axiom-dependence. Results
    are cached per declaration (keyed on file content + environment +
    options); re-runs skip anything still valid. Pass `--force` to re-verify.
+   `axbt check` uses the same delta cache on `checked_sig`.
 6. **`axbt list`** — the parsed declaration tree with `sorry` markers and
    file-accurate positions. Offline; use for orientation. `axbt graph`
    renders the same manifest as an interactive HTML dependency graph,
@@ -90,7 +94,7 @@ Key semantics when advising the user:
 - **check ≠ proof validation.** A `sorry` typechecks (warning only), so a
   green `check` means "compiles", not "proven". Only `verify` certifies.
   A genuinely sorried target shows its `sorry` warning in check output.
-- **`--select` narrows the run** without touching `targets`:
+- **`--select` narrows the run** without changing config:
   `--select Core` (module) / `--select Core.Algebra` (file) /
   `--select Core.Algebra.ring_identity` (declaration; unique suffixes
   allowed). Declaration-level selects must name a theorem/lemma — check
@@ -110,6 +114,9 @@ Key semantics when advising the user:
 - **`--fail-fast`** stops at the first failing selection (cancel in-flight
   submissions); under `build`, a fail-fast in the check pass abandons the
   build before verifying.
+- **`--force`** (check/verify/build) re-judges every selection even when
+  all declarations already carry a valid stamp, bypassing the delta cache.
+  `build` passes it to both tiers.
 - **Minification is on by default**: comments and blank lines are stripped
   from submitted payloads (docstrings and indentation survive; attribution
   stays exact). `--no-minify` opts a run out;

@@ -267,7 +267,7 @@ class TestLiveCheck:
         result = runner.invoke(main, ["check"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 2
+        assert result.output.count("  OK") == 3
         assert "Checked 2 selection(s): all OK" in result.output
 
     def test_check_declaration_selection(self, make_live_project) -> None:
@@ -337,7 +337,7 @@ class TestLiveCheck:
 
         assert result.exit_code == 0, result.output
         assert "2 new, 0 changed, 0 clean" in result.output
-        assert result.output.count("  OK") == 2
+        assert result.output.count("  OK") == 3
         assert "Checked 2 selection(s): all OK" in result.output
 
 
@@ -354,7 +354,7 @@ class TestLiveBuild:
         result = runner.invoke(main, ["build"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 4  # 2 check + 2 verify
+        assert result.output.count("  OK") == 5  # 3 check + 2 verify
         assert "Checked 2 selection(s): all OK" in result.output
         assert "Verified 2 selection(s): all OK" in result.output
         assert "Built 2 selection(s): all OK in" in result.output
@@ -389,7 +389,7 @@ class TestLiveVerify:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1, result.output
-        assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap FAIL"
+        assert status_line(result.output, "M.Gap") == "M.Gap FAIL"
         assert "declaration 'gap' has a `sorry`" in result.output
 
     def test_verify_rejects_axiom_proofs(self, make_live_project) -> None:
@@ -403,9 +403,9 @@ class TestLiveVerify:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1, result.output
-        assert status_line(result.output, "M.Base.base_holds") == "M.Base.base_holds OK"
-        assert status_line(result.output, "M.Axiom.uses_axiom") == (
-            "M.Axiom.uses_axiom FAIL"
+        assert status_line(result.output, "M.Base") == "M.Base OK"
+        assert status_line(result.output, "M.Axiom") == (
+            "M.Axiom FAIL"
         )
         assert "failed declarations: uses_axiom" in result.output
 
@@ -619,7 +619,7 @@ class TestLiveEnvironmentValidation:
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
         result = runner.invoke(
-            main, ["verify", "--permitted-sorries", "M.Gap.gap"]
+            main, ["verify", "--select", "M.Gap.gap", "--permitted-sorries", "M.Gap.gap"]
         )
 
         assert result.exit_code == 0, result.output
@@ -671,7 +671,7 @@ class TestLiveTierSplit:
 
         verify_result = runner.invoke(main, ["verify"])
         assert verify_result.exit_code == 1
-        assert status_line(verify_result.output, "M.Gap.gap") == "M.Gap.gap FAIL"
+        assert status_line(verify_result.output, "M.Gap") == "M.Gap FAIL"
         assert "declaration 'gap' has a `sorry`" in verify_result.output
 
         from axle_build_tool.manifest import load_manifest

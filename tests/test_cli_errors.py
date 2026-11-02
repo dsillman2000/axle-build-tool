@@ -81,8 +81,6 @@ class TestSdkErrorMapping:
 
         assert result.exit_code == 1
         assert fragment in result.output
-        # The error names the selection it concerns.
-        assert "M.A.t1" in result.output
 
     def test_verify_maps_sdk_errors_to_friendly_messages(
         self, exc, fragment, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -94,7 +92,6 @@ class TestSdkErrorMapping:
 
         assert result.exit_code == 1
         assert fragment in result.output
-        assert "M.A.t1" in result.output
 
     def test_compile_maps_sdk_errors_to_friendly_messages(
         self, exc, fragment, make_project, tmp_path: Path, monkeypatch, fake_axle

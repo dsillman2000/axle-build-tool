@@ -1,6 +1,6 @@
 # axbt — the Axle Build Tool for Lean 4
 
-`axbt` applies the proven data-pipeline concepts of [dbt](https://www.getdbt.com/) to formal verification in Lean 4: modules are named directories of `.lean` files (the dbt "model" analog), standard `import` statements form a dependency DAG tracked in `manifest.json`, and declarations are addressed as isolated verification targets. Everything is executed through the [Axle (Axiom Lean Engine) API](https://axiommath.ai) via the official [`axiom-axle`](https://pypi.org/project/axiom-axle/) Python SDK — **no local Lean toolchain required**.
+`axbt` applies the proven data-pipeline concepts of [dbt](https://www.getdbt.com/) to formal verification in Lean 4: modules are named directories of `.lean` files (the dbt "model" analog), standard `import` statements form a dependency DAG tracked in `manifest.json`, and files are the unit of execution: a bare run judges every `.lean` file in every module, ordered along the import DAG, with delta (content-addressed) caching. Everything is executed through the [Axle (Axiom Lean Engine) API](https://axiommath.ai) via the official [`axiom-axle`](https://pypi.org/project/axiom-axle/) Python SDK — **no local Lean toolchain required**.
 
 ## Why
 
@@ -43,8 +43,8 @@ Then, from inside a project directory, run the pipeline:
 ```bash
 axbt build   # check + verify in one run (or run the tiers individually)
 axbt compile # scan, extract declarations, write .axbt/
-axbt check   # fast typechecking of your targets
-axbt verify  # kernel-level proof verification
+axbt check   # fast typechecking of every file (delta-cached)
+axbt verify  # kernel-level proof verification (delta-cached)
 axbt list    # the parsed declaration tree (offline)
 ```
 
@@ -58,9 +58,8 @@ project:
   version: "0.1.0"
 
 modules:
-  my-project:
-    targets:          # the default build set for a bare `axbt check`
-      - Main.main_theorem
+  my-project: {}      # every .lean file in the module is a unit;
+                      # `targets:` is deprecated (still honoured as a filter)
 
 axle:
   environment: lean-4.35.0   # omitted = auto-select the latest the API serves
@@ -75,8 +74,8 @@ axle:
 | --- | --- |
 | `axbt init [PATH]` | Scaffold a new project (config + starter module). |
 | `axbt compile` | Scan modules, extract declarations via the API, write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/`. |
-| `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every configured target — or a `--select`ion — as a standalone payload with dependencies inlined. Clean outcomes are recorded per declaration in the manifest. |
-| `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
+| `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every file in every configured module (ordered along the import DAG) — or a `--select`ion — as a standalone payload with dependencies inlined. A file whose declarations all already carry a matching `checked_sig` is skipped (`OK (cached)`); `--force` re-checks everything. Clean outcomes are recorded per declaration in the manifest. |
+| `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. A fully cached selection skips submission (`OK (cached)`). For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
 | `axbt build` | Both tiers in one run, dbt-style: the check tier streams first, then the verify tier — skipping the selections whose check failed — and the run exits nonzero if either tier failed. Verdict rows carry a `[check]`/`[verify]` tier suffix so the two passes tell apart. |
 | `axbt list` | Print the parsed declaration tree — kinds, file-accurate positions, `sorry` markers — dependencies first. Offline and read-only. |
 | `axbt graph` | Render the manifest as an offline, interactive Cytoscape.js HTML graph (default `.axbt/graph.html`; `--select` filters the subgraph). Colors key on outcome stamps only. No API calls. |
@@ -88,6 +87,7 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
 * `--no-compile` (check/verify/build) — take the existing manifest at face value.
 * `--fail-fast` / `-x` (check/verify/build) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`); under `build`, a fail-fast in the check pass ends the build before the verify pass.
+* `--force` (check/verify/build) — re-judge every selection even when all declarations already carry a valid stamp (bypasses the delta cache). `build` passes it to both tiers.
 * `--sorry <selector>` (repeatable) — grant a dependency subtree: theorem proof bodies become `sorry` stubs in the submitted payload (signatures intact), and the granted declarations are excused — skipped under check, auto-permitted under verify. Def/abbrev bodies stay real: they are definitional content that downstream proofs unfold (anonymous constructors, projections, `rfl`), so stubbing them would break the very elaboration the grants are meant to leave working. Verify theorems against trusted dependency signatures, or check without paying for slow or broken upstream proofs.
 * `--minify/--no-minify` (check/verify/build) — payload minification is on by default: comments and blank lines are stripped from the submitted content (declaration docstrings and indentation stay put), shrinking request bodies and the `.axbt/compiled/` inspection artifacts. Attribution is unaffected — line maps are built from the surviving lines' original numbers, and files that don't track cleanly are submitted unminified. `--no-minify` opts a run out; set `minify: false` under `project:` in `axbt_project.yml` to change the default. The cached/stamped signature material includes the effective setting, so flipping the mode re-verifies once under the new payload shape.
 
@@ -145,7 +145,7 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 The manifest records three kinds of per-declaration facts (all additive, optional fields — old manifests load unchanged, and new runs backfill them):
 
 * **Dependencies** (`compile`) — every extracted declaration carries `dependencies` (the deduplicated, sorted union of the API's local type/value/syntactic dependency lists; declaration names as the API reports them, cross-file edges included) and `external_dependencies` (names outside the project — tooltip material, not graph nodes).
-* **Check stamps** (`check`) — a payload that passed clean stamps every declaration it judged with `checked_sig`/`checked_at`/`checked_request_id`. The signature covers the file dependency closure's content, the resolved environment, and the global options — the same key material the verify cache uses. `--sorry`-stubbed and failing payloads record nothing.
+* **Check stamps** (`check`) — a payload that passed clean stamps every declaration it judged with `checked_sig`/`checked_at`/`checked_request_id`. The signature covers the file dependency closure's content, the resolved environment, and the global options — the same key material the verify cache uses. A file whose declarations all carry a matching stamp is not re-submitted (`OK (cached)`), so `checked_*` means "last actually judged"; cached selections keep their (stale-but-valid) stamps. `--force` re-judges everything. `--sorry`-stubbed and failing payloads record nothing.
 * **Verify stamps** (`verify`) — kernel-level successes get `verified_sig`/`verified_at`/`verified_request_id`. They are consulted by the verify cache and never by check's records.
 
 The two tiers are distinct facts: a `sorry` passes check and fails verify, so `checked_sig` without `verified_sig` means "checked-clean, still awaiting kernel verification" — the state the per-declaration status graph renders as its "in progress" color.
@@ -184,6 +184,14 @@ axbt check --select my-project.Utils.x    # one declaration, dependency subgraph
 ```
 
 The first segment matches a module, the next greedily matches a file stem, and the remainder matches extracted declaration names (full or unique-suffix). Declaration-level checking/verification resolves theorems and lemmas; definitions are checked by selecting their file or module.
+
+### `targets:` (deprecated)
+
+Older projects may still list `targets:` under a module. It is still
+honoured as a filter over the default file set (with a run-start
+warning), but new projects should omit it: bare runs already cover
+every file, and `--select` is the general narrowing mechanism. The
+scaffold emits no `targets` key.
 
 ## Project layout
 

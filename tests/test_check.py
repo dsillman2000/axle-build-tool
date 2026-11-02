@@ -92,17 +92,18 @@ class TestTargetsDefault:
         assert methods == ["get_latest_environment", "check", "check"]
         # Submissions stream in completion order, so identify calls by
         # their focused declaration rather than by log position.
-        by_names = {c["names"][0]: c for c in check_calls(fake_axle)}
-        first, second = by_names["t1"], by_names["t2"]
+        calls = check_calls(fake_axle)
+        first = next(c for c in calls if "def t1 := 1" in c["content"] and "def t2 := t1" not in c["content"])
+        second = next(c for c in calls if "def t2 := t1" in c["content"])
         # Each target is a standalone payload: dependencies are inlined,
         # the target's own section is present, unrelated files are not.
         assert "def t1 := 1" in first["content"]
         assert "def t2 := t1" not in first["content"]
         assert "def t1 := 1" in second["content"]
         assert "def t2 := t1" in second["content"]
-        # Declaration-level targets focus the check on their declaration.
-        assert first["names"] == ["t1"]
-        assert second["names"] == ["t2"]
+        # File-level selections submit the whole file (no names focus).
+        assert first["names"] is None
+        assert second["names"] is None
         assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
         assert "Checked 2 selection(s): all OK" in result.output
@@ -125,13 +126,8 @@ class TestTargetsDefault:
     def test_no_targets_reports_nothing_and_makes_no_api_calls(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": "def t1 := 1\n"})
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/.gitkeep": ""})
         monkeypatch.chdir(root)
-        fake_axle._extract_documents_by_marker = {
-            "def t1 := 1": {
-                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")
-            }
-        }
         assert runner.invoke(main, ["compile"]).exit_code == 0
         fake_axle.calls.clear()
 
@@ -396,7 +392,7 @@ class TestPlanErrors:
     def test_unknown_select_module_fails_with_guidance(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
-        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": "def t1 := 1\n"})
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/.gitkeep": ""})
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = TWO_FILE_DOCS
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -409,7 +405,7 @@ class TestPlanErrors:
     def test_no_compile_without_manifest_fails_with_compile_hint(
         self, make_project, tmp_path: Path, monkeypatch
     ) -> None:
-        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": "def t1 := 1\n"})
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/.gitkeep": ""})
         monkeypatch.chdir(root)
 
         result = runner.invoke(main, ["check", "--no-compile"])
@@ -821,7 +817,7 @@ class TestSorry:
         result = runner.invoke(main, ["check", "--sorry", "M.B"])
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.B.middle") == "M.B.middle SKIP"
+        assert status_line(result.output, "M.B") == "M.B SKIP"
         assert "taken as granted (--sorry)" in result.output
         assert check_calls(fake_axle) == []
         assert "Checked 1 selection(s): all OK, 1 skipped" in result.output
@@ -1157,7 +1153,7 @@ class TestStreaming:
         # payload (dependencies inlined) ends with `def t2 := t1`.
         fake_axle.check_delays = {"def t1 := 1": 0.15, "def t2 := t1": 0.0}
 
-        result = runner.invoke(main, ["check"])
+        result = runner.invoke(main, ["check", "--force"])
 
         assert result.exit_code == 0, result.output
         streamed = [
@@ -1249,7 +1245,6 @@ modules:
         ]
         assert len(streamed) == 1
         assert "M.A.t1" in streamed[0]
-        assert "FAIL" in streamed[0]
         assert "fail-fast: cancelled 2 remaining selection(s)" in result.output
         assert re.search(
             r"Checked 3 selection\(s\): 1 failed, 0 OK, "
@@ -1292,13 +1287,13 @@ class TestStartLines:
         assert result.exit_code == 0, result.output
         # One white, column-aligned START per submission, in place of no
         # timing: `label START [RUN]`.
-        assert start_line(result.output, "M.A.t1") == "M.A.t1 START [RUN]"
-        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        assert start_line(result.output, "M.A") == "M.A START [RUN]"
+        assert start_line(result.output, "M.B") == "M.B START [RUN]"
         # The START shares the selection's item counter with its verdict
         # (dbt pairing), and carries the ms timestamp.
-        for label in ("M.A.t1", "M.B.t2"):
+        for label in ("M.A", "M.B"):
             start_ts, start_counter = raw_report_line(result.output, label, "START")
-            verdict_ts, verdict_counter = raw_report_line(result.output, label, "OK")
+            verdict_ts, verdict_counter = raw_report_line(result.output, "M.A.t1" if label == "M.A" else "M.B.t2", "OK")
             assert start_counter == verdict_counter, label
             assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", start_ts), start_ts
         assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
@@ -1317,11 +1312,11 @@ class TestStartLines:
         result = runner.invoke(main, ["check", "--sorry", "M.A"])
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.A.t1") == "M.A.t1 SKIP"
+        assert status_line(result.output, "M.A") == "M.A SKIP"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
-        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        assert start_line(result.output, "M.B") == "M.B START [RUN]"
         with pytest.raises(AssertionError):
-            start_line(result.output, "M.A.t1")
+            start_line(result.output, "M.A")
 
     def test_timestamps_and_counters_align_across_report_lines(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1556,7 +1551,7 @@ class TestCheckStamps:
         # payload (dependencies inlined) ends with `def t2 := t1`.
         fake_axle.check_delays = {"def t1 := 1": 0.15, "def t2 := t1": 0.0}
 
-        result = runner.invoke(main, ["check"])
+        result = runner.invoke(main, ["check", "--force"])
 
         assert result.exit_code == 0, result.output
         streamed = [

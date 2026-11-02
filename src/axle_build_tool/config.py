@@ -200,7 +200,7 @@ def scaffold_config(project_name: str) -> str:
         axle_section = {"environment": defaults.environment, **axle_section}
     config: dict[str, Any] = {
         "project": {"name": project_name, "version": "0.1.0"},
-        "modules": {project_name: {"targets": []}},
+        "modules": {project_name: {}},
         "axle": axle_section,
     }
     return yaml.safe_dump(config, sort_keys=False)
