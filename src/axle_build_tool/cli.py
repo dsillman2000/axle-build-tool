@@ -1068,6 +1068,20 @@ def check(
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
         stub_warnings: list[str] = []
         applied: set[str] = set()
+        #: Declaration-level trimming for `--select` runs: keep the
+        #: selected declaration(s) plus their transitive dependency
+        #: closure; unrelated declarations in the same file are dropped.
+        trim_roots: list[str] | None = None
+        if select is not None and not sorry:
+            _sel = resolve_selection(select, config, manifest)
+            if _sel.declaration is not None:
+                trim_roots = [_sel.declaration]
+            else:
+                trim_roots = [
+                    d.name
+                    for node in _sel.payload_nodes(manifest)
+                    for d in node.declarations
+                ]
         checks: list[tuple[str, Selection, Payload | None, dict, str | None]] = []
         for label, selection, explicit in plan:
             refined = _refine_stub_map(
@@ -1086,6 +1100,7 @@ def check(
                 stubbed=refined or None,
                 warnings=stub_warnings,
                 minify=minified,
+                selected_declarations=trim_roots,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
@@ -1825,6 +1840,20 @@ def verify(
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
+        import os, sys
+        if os.environ.get("AXBT_DEBUG"):
+            print("VERIFY stub_map=", stub_map, "sorry=", sorry, "select=", select, file=sys.stderr)
+        trim_roots: list[str] | None = None
+        if select is not None and not sorry:
+            _sel = resolve_selection(select, config, manifest)
+            if _sel.declaration is not None:
+                trim_roots = [_sel.declaration]
+            else:
+                trim_roots = [
+                    d.name
+                    for node in _sel.payload_nodes(manifest)
+                    for d in node.declarations
+                ]
         stub_warnings: list[str] = []
         applied: set[str] = set()
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
@@ -1898,6 +1927,7 @@ def verify(
                 stubbed=refined or None,
                 warnings=stub_warnings,
                 minify=minified,
+                selected_declarations=trim_roots,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
@@ -2199,6 +2229,7 @@ def verify(
             for _, selection, payload, _, _, _ in items:
                 if payload is None:
                     continue
+
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
                 (out / selection.compiled_filename_variant("stubbed")).write_text(

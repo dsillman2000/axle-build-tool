@@ -862,6 +862,47 @@ class TestLiveGraphPage:
         assert "degraded preset" in degraded.stdout
 
 
+class TestLiveTrimming:
+    """`--select <file>.<decl>` trims declarations unreachable from the
+    selected declaration out of the submitted payload (issue #30)."""
+
+    SOURCE = (
+        "namespace Algebra\n"
+        "\n"
+        "theorem gap : 2 + 2 = 5 := by sorry\n"
+        "\n"
+        "theorem helper : 1 + 1 = 2 := by rfl\n"
+        "\n"
+        "end Algebra\n"
+    )
+
+    def test_verify_trims_unreachable_sorried_declaration(
+        self, make_live_project
+    ) -> None:
+        """A sorried, unreachable declaration in the same file does not
+        poison a declaration-level verification of the reachable one."""
+        make_live_project({"M/A.lean": self.SOURCE}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        # With trimming, `gap` is dropped from the payload and `helper`
+        # verifies; without trimming, `gap`'s `sorry` fails the run.
+        result = runner.invoke(main, ["verify", "--select", "M.A.helper"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+
+    def test_check_trims_unreachable_declaration(self, make_live_project) -> None:
+        """Check on a single declaration submits a payload without the
+        unreachable sibling."""
+        make_live_project({"M/A.lean": self.SOURCE}, targets=["A.helper"])
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--select", "M.A.helper"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+
+
 class TestLiveDependencyNames:
     """The dependency names recorded per declaration are the graph's
     edges (#22): they must match how axbt extracts the declarations
