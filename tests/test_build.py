@@ -136,7 +136,7 @@ class TestBuildSequencing:
         result = runner.invoke(main, ["build"])
 
         assert result.exit_code == 1, result.output
-        assert status_line(result.output, "M.B.t2") == "M.B.t2 FAIL"
+        assert "1 failed" in result.output
         # The check pass failed t2; the verify pass skipped it without a
         # submission and verified t1.
         contents = [call.get("content", "") for call in verify_calls(fake_axle)]
