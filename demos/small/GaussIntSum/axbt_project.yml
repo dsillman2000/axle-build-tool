@@ -3,9 +3,7 @@ project:
   version: "0.1.0"
 
 modules:
-  GaussIntSum:
-    targets:
-      - GaussSum.gauss_sum_identity
+  GaussIntSum: {}
 
 axle:
   environment: "lean-4.35.0"

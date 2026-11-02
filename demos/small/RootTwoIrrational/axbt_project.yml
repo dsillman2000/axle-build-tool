@@ -5,11 +5,6 @@ project:
 modules:
   RootTwoIrrational:
     dir: "RootTwoIrrational"
-    targets:
-      - Divisibility.prime_gt_one
-      - Divisibility.prime_dvd_square
-      - EuclidLemma.euclid_lemma
-      - IrrationalSqrtTwo.sqrt_two_irrational
 
 axle:
   environment: "lean-4.35.0"
