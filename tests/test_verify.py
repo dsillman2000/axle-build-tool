@@ -905,9 +905,12 @@ class TestSorry:
     ) -> None:
         root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
 
-        assert runner.invoke(
+        _r = runner.invoke(
             main, ["verify", "--select", "M.B", "--sorry", "M.A"]
-        ).exit_code == 0
+        )
+        print("EXITCODE", _r.exit_code)
+        print("OUTPUT", _r.output)
+        assert _r.exit_code == 0
 
         persisted = root / ".axbt" / "compiled" / "M_B_stubbed.lean"
         assert persisted.is_file()

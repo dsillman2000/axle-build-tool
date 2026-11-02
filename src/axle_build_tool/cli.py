@@ -2177,23 +2177,24 @@ def verify(
                             response.negation is not None and response.negation.okay
                         )
                         if response.okay and not vacuous:
-                            now = datetime.now(timezone.utc)
-                            for name in scope.to_verify:
-                                node_name = None
-                                for section_name in payload.sections:
-                                    if any(
-                                        d.name == name
-                                        for d in by_name[section_name].declarations
-                                    ):
-                                        node_name = section_name
-                                        break
-                                if node_name is None:
-                                    node_name = node_of_decl.get(name)
-                                stamps[(node_name, name)] = (
-                                    sig_of(node_name),
-                                    now,
-                                    rid,
-                                )
+                            if not refined:
+                                now = datetime.now(timezone.utc)
+                                for name in scope.to_verify:
+                                    node_name = None
+                                    for section_name in payload.sections:
+                                        if any(
+                                            d.name == name
+                                            for d in by_name[section_name].declarations
+                                        ):
+                                            node_name = section_name
+                                            break
+                                    if node_name is None:
+                                        node_name = node_of_decl.get(name)
+                                    stamps[(node_name, name)] = (
+                                        sig_of(node_name),
+                                        now,
+                                        rid,
+                                    )
                             cached_note = (
                                 f", {len(scope.cached)} cached" if scope.cached else ""
                             )
