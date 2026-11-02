@@ -1,0 +1,18 @@
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 1075,1852
+tests/test_check.py
+  h_4cc74772b10fd4 674,679-680,690,714,751,898
+tests/test_verify.py
+  h_4cc74772b10fd4 968
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9da1629442966025c680d5bdf5343dbd370dc1fe",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
