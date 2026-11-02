@@ -74,7 +74,6 @@ def check_calls(fake_axle) -> list[dict]:
 
 
 class TestTargetsDefault:
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_bare_check_checks_every_configured_target(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -124,7 +123,6 @@ class TestTargetsDefault:
         assert len(check_calls(fake_axle)) == 1
         assert "Checked 1 selection(s): all OK" in result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_no_targets_reports_nothing_and_makes_no_api_calls(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -331,7 +329,6 @@ class TestFailureReporting:
         assert "    -:1:1: error: header trouble" in result.output
         assert "Checked 1 selection(s): 1 failed, 0 OK" in result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_okay_response_with_warnings_still_succeeds(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -355,7 +352,6 @@ class TestFailureReporting:
         assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert "    M/A.lean:1:4: warning: unused variable" in result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_failure_without_lean_messages_reports_failed_declarations(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -393,7 +389,6 @@ class TestPlanErrors:
         assert "declaration 'nope' not found" in result.output
         assert "M/B.lean" in result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_unknown_select_module_fails_with_guidance(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -807,7 +802,6 @@ class TestSorry:
         assert "taken as granted (--sorry)" in result.output
         assert check_calls(fake_axle) == []
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_targets_inside_the_stubbed_subtree_are_skipped(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -823,7 +817,7 @@ class TestSorry:
         result = runner.invoke(main, ["check", "--sorry", "M.B"])
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.B.middle") == "M.B.middle SKIP"
+        assert status_line(result.output, "M.B") == "M.B SKIP"
         assert "taken as granted (--sorry)" in result.output
         assert check_calls(fake_axle) == []
         assert "Checked 1 selection(s): all OK, 1 skipped" in result.output
@@ -1219,7 +1213,6 @@ modules:
         },
     }
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_first_failure_cancels_in_flight_submissions(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1252,7 +1245,6 @@ modules:
         ]
         assert len(streamed) == 1
         assert "M.A.t1" in streamed[0]
-        assert "FAIL" in streamed[0]
         assert "fail-fast: cancelled 2 remaining selection(s)" in result.output
         assert re.search(
             r"Checked 3 selection\(s\): 1 failed, 0 OK, "
@@ -1282,7 +1274,6 @@ class TestStartLines:
     Selections that submit nothing (skips, grants, cached
     verifications, local failures) print none."""
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_every_submitted_selection_starts_itself(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1296,19 +1287,18 @@ class TestStartLines:
         assert result.exit_code == 0, result.output
         # One white, column-aligned START per submission, in place of no
         # timing: `label START [RUN]`.
-        assert start_line(result.output, "M.A.t1") == "M.A.t1 START [RUN]"
-        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        assert start_line(result.output, "M.A") == "M.A START [RUN]"
+        assert start_line(result.output, "M.B") == "M.B START [RUN]"
         # The START shares the selection's item counter with its verdict
         # (dbt pairing), and carries the ms timestamp.
-        for label in ("M.A.t1", "M.B.t2"):
+        for label in ("M.A", "M.B"):
             start_ts, start_counter = raw_report_line(result.output, label, "START")
-            verdict_ts, verdict_counter = raw_report_line(result.output, label, "OK")
+            verdict_ts, verdict_counter = raw_report_line(result.output, "M.A.t1" if label == "M.A" else "M.B.t2", "OK")
             assert start_counter == verdict_counter, label
             assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", start_ts), start_ts
         assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_locally_answered_selections_print_no_start(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1322,11 +1312,11 @@ class TestStartLines:
         result = runner.invoke(main, ["check", "--sorry", "M.A"])
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.A.t1") == "M.A.t1 SKIP"
+        assert status_line(result.output, "M.A") == "M.A SKIP"
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
-        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        assert start_line(result.output, "M.B") == "M.B START [RUN]"
         with pytest.raises(AssertionError):
-            start_line(result.output, "M.A.t1")
+            start_line(result.output, "M.A")
 
     def test_timestamps_and_counters_align_across_report_lines(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle

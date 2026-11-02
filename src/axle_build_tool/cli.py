@@ -35,6 +35,7 @@ from axle_build_tool.graph import build_graph_data, rendered_nodes, write_graph
 from axle_build_tool.manifest import (
     MANIFEST_VERSION,
     ExtractedDecl,
+    Manifest,
     ManifestError,
     ManifestNode,
     build_manifest,
@@ -1848,7 +1849,7 @@ def verify(
                         label,
                         selection,
                         None,
-                        refined,
+                        {},
                         "the check pass failed this selection above; verify skipped",
                         None,
                     )

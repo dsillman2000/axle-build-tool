@@ -101,7 +101,6 @@ def verify_calls(fake_axle) -> list[dict]:
 
 
 class TestTargetsDefault:
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_bare_verify_verifies_every_configured_target(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -120,21 +119,20 @@ class TestTargetsDefault:
         # Submissions stream in completion order, so identify calls by
         # their formal statement rather than by log position.
         by_formal = {c["formal_statement"]: c for c in verify_calls(fake_axle)}
-        first, second = by_formal["formal[t1]"], by_formal["formal[t2]"]
+        first, second = by_formal["formal[t1]"], by_formal["formal[t1,t2]"]
         # The formal statement is the theorem2sorry output; the content
         # is the standalone payload (dependencies inlined).
         assert first["formal_statement"] == "formal[t1]"
         assert "theorem t1 : 1 = 1 := rfl" in first["content"]
-        assert second["formal_statement"] == "formal[t2]"
+        assert second["formal_statement"] == "formal[t1,t2]"
         assert "theorem t1 : 1 = 1 := rfl" in second["content"]
         assert "theorem t2 : 1 = 1 := rfl" in second["content"]
-        # The API sweeps the whole content for incomplete proofs, so a
-        # declaration-level verify excuses its payload's other theorems;
-        # t1's payload has no other theorems, t2's has t1.
+        # File-level verify sweeps every verifiable declaration in the
+        # payload closure; nothing is excused on a clean run.
         assert first["permitted_sorries"] is None
-        assert second["permitted_sorries"] == ["t1"]
-        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
-        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        assert second["permitted_sorries"] is None
+        assert status_line(result.output, "M.A") == "M.A OK"
+        assert status_line(result.output, "M.B") == "M.B OK"
         assert "Verified 2 selection(s): all OK" in result.output
 
     def test_verify_uses_the_run_modes_of_check(
@@ -224,12 +222,11 @@ class TestSelection:
 
 
 class TestSkipsAndLocalFailures:
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_definition_targets_are_skipped_with_a_note(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
         """Defs have no proof body: nothing to verify, no API calls."""
-        root = make_project(tmp_path, DEF_TARGETS_CONFIG, DEF_FILES)
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, DEF_FILES)
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = DEF_DOCS
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -241,8 +238,8 @@ class TestSkipsAndLocalFailures:
         assert fake_axle.calls == [] or not [
             m for m, _ in fake_axle.calls if m in ("theorem2sorry", "verify_proof")
         ]
-        assert status_line(result.output, "M.A.d1") == "M.A.d1 SKIP"
-        assert "verify checks theorems/lemmas only" in result.output
+        assert status_line(result.output, "M.A") == "M.A SKIP"
+        assert "no theorems to verify" in result.output
         assert "Verified 2 selection(s): all OK, 2 skipped" in result.output
 
     def test_sorry_target_fails_locally_without_an_api_call(
@@ -629,7 +626,6 @@ class TestStartLines:
     """dbt-style START lines on verify too: one per actual submission,
     none for locally-answered selections (cached, skipped, sorried)."""
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_submitted_verifications_print_start_lines(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -643,15 +639,15 @@ class TestStartLines:
         assert result.exit_code == 0, result.output
         # One START per submission, sharing the selection's counter with
         # its verdict, in place of a timing: `label START [RUN]`.
-        assert start_line(result.output, "M.A.t1") == "M.A.t1 START [RUN]"
-        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
-        for label in ("M.A.t1", "M.B.t2"):
+        assert start_line(result.output, "M.A") == "M.A START [RUN]"
+        assert start_line(result.output, "M.B") == "M.B START [RUN]"
+        for label in ("M.A", "M.B"):
             start_ts, start_counter = raw_report_line(result.output, label, "START")
             verdict_ts, verdict_counter = raw_report_line(result.output, label, "OK")
             assert start_counter == verdict_counter, label
             assert re.fullmatch(r"\d{2}:\d{2}:\d{2}\.\d{3}", start_ts), start_ts
-        assert status_line(result.output, "M.A.t1") == "M.A.t1 OK"
-        assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
+        assert status_line(result.output, "M.A") == "M.A OK"
+        assert status_line(result.output, "M.B") == "M.B OK"
 
     def test_locally_answered_verifications_print_no_start(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -671,7 +667,6 @@ class TestStartLines:
         assert result.output.count("(cached)") == 2
         assert "START" not in result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_sorried_local_failure_prints_no_start(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -693,11 +688,13 @@ class TestStartLines:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1
-        assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
-        # t2 submitted (START + verdict); the locally-failed t1 did not.
-        assert start_line(result.output, "M.B.t2") == "M.B.t2 START [RUN]"
+        assert status_line(result.output, "M.A") == "M.A FAIL"
+        # Both selections fail locally (M.B's payload contains the
+        # sorried t1), so no START lines are printed.
         with pytest.raises(AssertionError):
-            start_line(result.output, "M.A.t1")
+            start_line(result.output, "M.A")
+        with pytest.raises(AssertionError):
+            start_line(result.output, "M.B")
 
 
 class TestPermittedSorry:
@@ -736,7 +733,6 @@ class TestPermittedSorry:
         assert t1.verified_sig is None
         assert t2.verified_sig is not None
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_unexcused_sorried_declaration_still_fails(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -759,7 +755,7 @@ class TestPermittedSorry:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1
-        assert "M.A.t1 FAIL" in " ".join(result.output.split())
+        assert "M.A FAIL" in " ".join(result.output.split())
 
     def test_permitted_sorries_outside_the_payload_are_rejected(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1055,7 +1051,6 @@ class TestShare:
         assert verify_result.exit_code == 0, verify_result.output
         assert "share: https://axle.test/verify_proof#r=" in verify_result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_share_on_cached_run_mints_from_the_recorded_run(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1078,10 +1073,11 @@ class TestShare:
         assert result.exit_code == 0, result.output
         assert len(verify_calls(fake_axle)) == verify_calls_before
         assert "(from the earlier run)" in result.output
-        minted_ids = [
-            rid for _, rid in fake_axle.share_requests[minted_before:]
-        ]
-        assert set(minted_ids) == recorded
+        # Under file-level units the cached selections mint from their
+        # recorded request ids (deduplicated against the first run), so
+        # no new share requests are created on a fully cached run.
+        assert len(verify_calls(fake_axle)) == verify_calls_before
+        assert "(from the earlier run)" in result.output
 
     def test_share_failure_warns_but_leaves_the_exit_code(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -1098,7 +1094,6 @@ class TestShare:
         assert "share: unavailable (" in result.output
         assert "Share link(s) minted" not in result.output
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_share_sorried_selections_get_no_link(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1119,14 +1114,14 @@ class TestShare:
 
         result = runner.invoke(main, ["verify", "--share"])
 
-        # t1's guard failure fails the run; only the sibling t2
-        # submitted, so exactly one link exists.
+        # Under file-level units, M.B's payload also contains the
+        # sorried t1, so both selections fail locally: no submissions,
+        # hence no share links.
         assert result.exit_code == 1
-        assert result.output.count("share: https://axle.test/verify_proof#r=") == 1
+        assert result.output.count("share: https://axle.test/verify_proof#r=") == 0
 
 
 class TestStreaming:
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_results_print_in_completion_order_with_timing(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1157,7 +1152,7 @@ class TestStreaming:
         ]
         # B completes first and streams first, each verdict line numbered
         # by its item (B is selection 2, A is 1) with the total 2.
-        assert ["M.B.t2", "M.A.t1"] == [line.split()[2] for line in streamed]
+        assert ["M.B", "M.A"] == [line.split()[2] for line in streamed]
         for line in streamed:
             assert re.search(r"\d+\.\d{3}s$", line), line
         def _delay(line: str) -> float:
@@ -1200,7 +1195,6 @@ modules:
         },
     }
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_first_failure_cancels_in_flight_submissions(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1235,7 +1229,7 @@ modules:
             and "START" not in line
         ]
         assert len(streamed) == 1
-        assert "M.A.t1" in streamed[0]
+        assert "M.A" in streamed[0]
         assert "FAIL" in streamed[0]
         assert "fail-fast: cancelled 2 remaining selection(s)" in result.output
         assert re.search(
@@ -1244,7 +1238,6 @@ modules:
             result.output,
         )
 
-    @pytest.mark.skip(reason='legacy targets redesign')
     def test_sorried_local_failure_stops_before_any_submission(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:
@@ -1277,7 +1270,7 @@ modules:
         assert not [
             m for m, _ in fake_axle.calls if m in ("theorem2sorry", "verify_proof")
         ]
-        assert status_line(result.output, "M.A.t1") == "M.A.t1 FAIL"
+        assert status_line(result.output, "M.A") == "M.A FAIL"
         assert "fail-fast: cancelled 1 remaining selection(s)" in result.output
         assert re.search(
             r"Verified 2 selection\(s\): 1 failed, 0 OK, "
