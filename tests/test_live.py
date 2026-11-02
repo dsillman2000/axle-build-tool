@@ -537,9 +537,10 @@ class TestLiveScopedStatements:
         root = Path.cwd()
         persisted = root / ".axbt" / "compiled" / "M_A_stubbed.lean"
         content = persisted.read_text(encoding="utf-8")
-        # The sibling and the sorried gap are stubbed inside the namespace...
-        assert "theorem gap : 2 + 2 = 5 := by sorry" in content
-        assert "theorem uses_sibling : sibling = 1 := by sorry" in content
+        # Trimming drops the unreachable siblings; only the selection
+        # (and its scope) survives.
+        assert "theorem gap : 2 + 2 = 5 := by sorry" not in content
+        assert "theorem uses_sibling : sibling = 1 := by sorry" not in content
         # ...and the selection's real proof survives.
         assert "theorem helper : n = n := rfl" in content
 
