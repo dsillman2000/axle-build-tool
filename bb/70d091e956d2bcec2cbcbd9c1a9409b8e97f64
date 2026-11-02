@@ -1,0 +1,14 @@
+AGENTS.md
+  h_4cc74772b10fd4 5,58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bb70d091e956d2bcec2cbcbd9c1a9409b8e97f64",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
