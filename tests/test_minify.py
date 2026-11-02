@@ -26,7 +26,7 @@ class TestCommentStripping:
 
     def test_block_comments_are_stripped_with_nesting(self) -> None:
         assert text("/- out /- in -/ still out -/\nfoo\n") == "foo\n"
-        assert text("a /- c -/ b\n") == "a  b\n"
+        assert text("a /- c -/ b\n") == "a b\n"
 
     def test_section_headers_are_stripped(self) -> None:
         assert text(
@@ -81,36 +81,28 @@ class TestStringAndCharLiterals:
 
 
 class TestDocstrings:
-    def test_declaration_docstrings_kept_verbatim(self) -> None:
+    def test_declaration_docstrings_are_stripped(self) -> None:
         source = (
             "/-- Adds one, documented -- with -- dashes. -/\n"
             "def inc (n : Nat) := n + 1\n"
         )
-        assert text(source) == source
+        assert text(source) == "def inc (n : Nat) := n + 1\n"
 
     def test_multiline_docstrings_keep_their_prose(self) -> None:
         source = (
             "/-- Scheme:\n\n* point one -- with a dash;\n* point two -/\n"
             "theorem t : True := trivial\n"
         )
-        # Verbatim means verbatim: the docstring's internal blank line
-        # and all its whitespace survive.
         minified = minify_lines(source)
         assert minified is not None
-        assert minified.lines == (
-            "/-- Scheme:",
-            "",
-            "* point one -- with a dash;",
-            "* point two -/",
-            "theorem t : True := trivial",
-        )
-        assert minified.source_lines == (1, 2, 3, 4, 5)
+        assert minified.lines == ("theorem t : True := trivial",)
+        assert minified.source_lines == (5,)
 
     def test_docstring_then_code_line_numbering(self) -> None:
         minified = minify_lines("/-- doc -/\n\ndef inc := 1\n")
         assert minified is not None
-        assert minified.lines == ("/-- doc -/", "def inc := 1")
-        assert minified.source_lines == (1, 3)
+        assert minified.lines == ("def inc := 1",)
+        assert minified.source_lines == (3,)
 
 
 class TestFallback:

@@ -110,7 +110,7 @@ class TestMinifiedPayload:
         assert all(line.strip() for line in section_lines)
         assert not any(line.lstrip().startswith("--") for line in section_lines)
         assert "/-! Base definitions. -/" not in payload.content
-        assert "/-- The shared base. -/" in payload.content
+        assert "/-- The shared base. -/" not in payload.content
 
     def test_line_maps_track_surviving_source_lines(self, ragged) -> None:
         _config, manifest, root = ragged
@@ -120,11 +120,11 @@ class TestMinifiedPayload:
 
         # N.base: the hoisted import, blank lines, and the `/-!` header go;
         # docstring, defs (one with `-- note` stripped), keep their numbers.
-        assert payload.line_map["N.base"] == [5, 6, 8]
+        assert payload.line_map["N.base"] == [6, 8]
         # M.uses: the full-line comment (source line 2) is dropped.
         assert payload.line_map["M.uses"] == [3]
         start, _end = payload.sections["N.base"]
-        assert source_position(payload, start + 1) == ("N.base", 6)
+        assert source_position(payload, start + 1) == ("N.base", 8)
         uses_start, uses_end = payload.sections["M.uses"]
         assert source_position(payload, uses_start) == ("M.uses", 3)
 
