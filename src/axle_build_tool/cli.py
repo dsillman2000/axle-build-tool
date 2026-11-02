@@ -1999,9 +1999,14 @@ def verify(
                 if granted is not None or scope is None or scope.to_verify:
                     continue
                 if scope.cached:
+                    _selected_nodes = {n.name for n in _selection.payload_nodes(manifest)}
+                    _share_names = [
+                        d for d in scope.cached
+                        if node_of_decl.get(d) in _selected_nodes
+                    ] or list(scope.cached)
                     await _mint_share_link(
                         service,
-                        _latest_verified_request_id(manifest, scope.cached),
+                        _latest_verified_request_id(manifest, _share_names),
                         share_links,
                         enabled=share,
                         kind="verify_proof",
@@ -2069,7 +2074,12 @@ def verify(
                         f"{click.style('OK', fg='green')} ({note}){_report_tier_tag()}"
                     )
                     if scope.cached:
-                        rid = _latest_verified_request_id(manifest, scope.cached)
+                        _selected_nodes = {n.name for n in _selection.payload_nodes(manifest)}
+                        _share_names = [
+                            d for d in scope.cached
+                            if node_of_decl.get(d) in _selected_nodes
+                        ] or list(scope.cached)
+                        rid = _latest_verified_request_id(manifest, _share_names)
                         _print_share_line(share_links, rid, earlier_run=True)
                     continue
 
