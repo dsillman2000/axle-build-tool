@@ -236,7 +236,15 @@ def _acquire_project_state(
     compile runs first so the manifest is never stale; `--no-compile`
     takes the existing manifest at face value, and `--full-refresh`
     makes the precursor re-extract everything. The latter two conflict.
+
+    Under `axbt build`, the precursor already ran during the check pass:
+    every later pass short-circuits to the load-config + load-manifest
+    branch (the exact `--no-compile` path) so the `Compiled ... / Wrote
+    ...` block is not printed twice.
     """
+    if _build_state is not None and getattr(_build_state, "precursor_ran", False):
+        no_compile = True
+        incremental = True
     if no_compile and not incremental:
         raise click.UsageError(
             "--full-refresh conflicts with --no-compile: skipping "
@@ -263,22 +271,33 @@ def _build_plan(
     """Resolve the submission plan shared by `check` and `verify`.
 
     With `--select`, a single selection labelled by the selector (and
-    flagged explicit — the user named what to judge). Otherwise every
-    configured `targets` entry of every module, labelled
-    `<module>.<target>`, in declaration order with duplicates removed
-    (not explicit: config-driven, so `--sorry` grants can skip them).
+    flagged explicit — the user named what to judge). Otherwise one
+    file-level selection per manifest node, ordered along the import
+    DAG (dependencies first) — the file is the unit of execution.
+    `targets` (deprecated) narrows the default file set during the
+    deprecation window.
     """
     if select is not None:
         return [(select, resolve_selection(select, config, manifest), True)]
+
+    # Deprecated narrowing: honour configured `targets` as a filter over
+    # the file set during the deprecation window.
+    allowed_nodes: set[str] | None = None
+    if any(module.targets for module in config.modules.values()):
+        allowed_nodes = set()
+        for module in config.modules.values():
+            for target in module.targets:
+                selection = resolve_selection(f"{module.name}.{target}", config, manifest)
+                for node in selection.payload_nodes(manifest):
+                    allowed_nodes.add(node.name)
+
     plan: list[tuple[str, Selection, bool]] = []
-    for module in config.modules.values():
-        seen: set[tuple[str, str | None]] = set()
-        for target in module.targets:
-            selection = resolve_selection(f"{module.name}.{target}", config, manifest)
-            key = (selection.node_name or "", selection.declaration)
-            if key not in seen:
-                seen.add(key)
-                plan.append((f"{module.name}.{target}", selection, False))
+    ordered = topological_order(list(manifest.nodes))
+    for node in ordered:
+        if allowed_nodes is not None and node.name not in allowed_nodes:
+            continue
+        selection = Selection(module=node.module, node_name=node.name)
+        plan.append((node.name, selection, False))
     return plan
 
 
@@ -686,8 +705,32 @@ class _BuildState:
     #: A fail-fast in the check pass stops the build before verifying.
     stopped: bool = False
     cancelled: int = 0
+    #: Whether the precursor compile already ran (build: skip the second).
+    precursor_ran: bool = False
 
 
+_TARGETS_WARNED_ROOTS: set[str] = set()
+
+
+def _warn_deprecated_targets(config: ProjectConfig, project_root: Path) -> None:
+    """Warn once per project when `targets:` is still configured.
+
+    `targets` is deprecated in favour of file-level runs plus `--select`;
+    it still narrows the default file set during the deprecation window.
+    """
+    if not any(module.targets for module in config.modules.values()):
+        return
+    key = str(project_root.resolve())
+    if key in _TARGETS_WARNED_ROOTS:
+        return
+    _TARGETS_WARNED_ROOTS.add(key)
+    click.secho(
+        "warning: `targets:` in axbt_project.yml is deprecated and will be "
+        "removed in a future version; runs now cover every file, and `--select` "
+        "is the narrowing mechanism. Configured targets are still honoured as "
+        "a filter this run.",
+        fg="yellow",
+    )
 _build_state: _BuildState | None = None
 
 
@@ -807,6 +850,21 @@ def _latest_verified_request_id(manifest: Manifest, names: list[str]) -> str | N
     return best[1] if best else None
 
 
+def _latest_checked_request_id(manifest: Manifest, names: list[str]) -> str | None:
+    """The most recent check's request id among `names` (for cached rows)."""
+    best: tuple[datetime, str] | None = None
+    for node in manifest.nodes:
+        for decl in node.declarations:
+            if (
+                decl.name in names
+                and decl.checked_request_id is not None
+                and decl.checked_at is not None
+            ):
+                if best is None or decl.checked_at > best[0]:
+                    best = (decl.checked_at, decl.checked_request_id)
+    return best[1] if best else None
+
+
 def _rewrite_message_position(
     message: str, payload: Payload, paths: dict[str, str]
 ) -> str:
@@ -903,6 +961,12 @@ def _rewrite_message_position(
     ),
 )
 @click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Re-check even when every declaration already holds a valid stamp.",
+)
+@click.option(
     "--fail-fast",
     "-x",
     "fail_fast",
@@ -921,6 +985,7 @@ def check(
     select: str | None,
     share: bool,
     fail_fast: bool,
+    force: bool,
     minify_flag: bool | None,
 ) -> None:
     """Typecheck targets or a selection via the Axle API.
@@ -1001,6 +1066,8 @@ def check(
             click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
+
+    _warn_deprecated_targets(config, project_root)
 
     if not checks:
         click.echo("No targets configured in axbt_project.yml; nothing to check.")
@@ -1090,7 +1157,69 @@ def check(
                 )
                 click.secho(f"    {granted}", dim=True)
 
-            submittable = [item for item in checks if item[2] is not None]
+            #: Cached selections: every judged declaration already
+            #: holds a stamp matching the current closure signature, so
+            #: nothing is submitted; report OK (cached) and mint a
+            #: share link from the recorded request id.
+            cached_items: list[tuple[str, Selection, Payload, dict, None]] = []
+            for item in checks:
+                label, selection, payload, refined, granted = item
+                if granted is not None or payload is None:
+                    continue
+                if force:
+                    continue
+                if selection.declaration is not None:
+                    judged = [(selection.node_name, selection.declaration)]
+                else:
+                    judged = [
+                        (node.name, d.name)
+                        for node in selection.payload_nodes(manifest)
+                        for d in node.declarations
+                    ]
+                if not judged:
+                    continue
+                all_cached = True
+                for node_name, decl_name in judged:
+                    node = by_name[node_name]
+                    decl = next(d for d in node.declarations if d.name == decl_name)
+                    if decl.checked_sig != sig_of(node_name):
+                        all_cached = False
+                        break
+                if all_cached:
+                    cached_items.append(item)  # type: ignore[arg-type]
+
+            for item in cached_items:
+                label, selection, payload, refined, _granted = item
+                report.cached += 1
+                report.mark()
+                counter = _item_counter(
+                    headline[label] + _task_offset(report.item_total),
+                    _task_total(report.item_total),
+                )
+                for printed, node, decl in _printed_lines(label, selection, manifest):
+                    click.echo(
+                        f"{_clock()} {counter} {printed:<{width}}  "
+                        f"{click.style('OK', fg='green')} (cached){_report_tier_tag()}"
+                    )
+                rid = _latest_checked_request_id(
+                    manifest,
+                    [d[1] for d in (
+                        [(selection.node_name, selection.declaration)]
+                        if selection.declaration is not None
+                        else [
+                            (n.name, d.name)
+                            for n in selection.payload_nodes(manifest)
+                            for d in n.declarations
+                        ]
+                    )],
+                )
+                await _mint_share_link(service, rid, share_links, enabled=share)
+                _print_share_line(share_links, rid, earlier_run=True)
+
+            submittable = [
+                item for item in checks
+                if item[2] is not None and item not in cached_items
+            ]
             #: Results print the moment each submission completes, in
             #: completion order, each line with its elapsed time. Tasks
             #: are created explicitly so --fail-fast can cancel the
@@ -1673,6 +1802,8 @@ def verify(
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
+    _warn_deprecated_targets(config, project_root)
+
     if not plan:
         click.echo("No targets configured in axbt_project.yml; nothing to verify.")
         return
@@ -2200,6 +2331,7 @@ def build(
                 select=select,
                 share=share,
                 fail_fast=fail_fast,
+                force=force,
                 minify_flag=minify_flag,
             )
         except (click.exceptions.Exit, SystemExit) as exc:
@@ -2218,6 +2350,8 @@ def build(
                     #: accounting; end the build here, nonzero.
                     _build_state = None
                     raise click.exceptions.Exit(1)
+        if _build_state is not None:
+            _build_state.precursor_ran = True
         _build_state.tier = "verify"
         try:
             ctx.invoke(
