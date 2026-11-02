@@ -619,11 +619,11 @@ class TestLiveEnvironmentValidation:
         assert runner.invoke(main, ["compile"]).exit_code == 0
 
         result = runner.invoke(
-            main, ["verify", "--permitted-sorries", "M.Gap.gap"]
+            main, ["verify", "--select", "M.Gap.gap", "--permitted-sorries", "M.Gap.gap"]
         )
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.Gap") == "M.Gap SKIP"
+        assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap SKIP"
         assert "excused (--permitted-sorries)" in result.output
         assert "Verified 1 selection(s): all OK, 1 skipped" in result.output
 
@@ -671,7 +671,7 @@ class TestLiveTierSplit:
 
         verify_result = runner.invoke(main, ["verify"])
         assert verify_result.exit_code == 1
-        assert status_line(verify_result.output, "M.Gap.gap") == "M.Gap.gap FAIL"
+        assert status_line(verify_result.output, "M.Gap") == "M.Gap FAIL"
         assert "declaration 'gap' has a `sorry`" in verify_result.output
 
         from axle_build_tool.manifest import load_manifest
