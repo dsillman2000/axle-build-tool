@@ -1097,7 +1097,7 @@ def check(
     #: Check stamps ride the submission completion loop: declaration
     #: name -> (closure signature, timestamp, request id). Mirrors
     #: verify's `stamps` flow, without verify's cache short-circuits.
-    checked_stamps: dict[str, tuple[str, datetime, str | None]] = {}
+    checked_stamps: dict[tuple[str, str], tuple[str, datetime, str | None]] = {}
 
     async def submit_all() -> None:
         async with service:
@@ -1302,7 +1302,11 @@ def check(
                         )
                         now = datetime.now(timezone.utc)
                         for node_name, decl_name in judged:
-                            checked_stamps[decl_name] = (sig_of(node_name), now, rid)
+                            checked_stamps[(node_name, decl_name)] = (
+                                sig_of(node_name),
+                                now,
+                                rid,
+                            )
                     await _mint_share_link(service, rid, share_links, enabled=share)
                     _print_share_line(share_links, rid)
                     #: --fail-fast: the first failed selection cancels
@@ -1347,29 +1351,24 @@ def check(
             raise click.ClickException(str(exc)) from exc
 
     if checked_stamps:
-        stamped = set(checked_stamps)
-        node_of_decl = {
-            d.name: node.name for node in manifest.nodes for d in node.declarations
-        }
         nodes = []
         for node in manifest.nodes:
-            node_stamps = {n for n in stamped if node_of_decl.get(n) == node.name}
-            if not node_stamps:
-                nodes.append(node)
-                continue
-            sig, now, rid = next(checked_stamps[n] for n in node_stamps)
-            declarations = [
-                d.model_copy(
-                    update={
-                        "checked_sig": sig,
-                        "checked_at": now,
-                        "checked_request_id": rid,
-                    }
+            declarations = []
+            for d in node.declarations:
+                stamp = checked_stamps.get((node.name, d.name))
+                if stamp is None:
+                    declarations.append(d)
+                    continue
+                sig, now, rid = stamp
+                declarations.append(
+                    d.model_copy(
+                        update={
+                            "checked_sig": sig,
+                            "checked_at": now,
+                            "checked_request_id": rid,
+                        }
+                    )
                 )
-                if d.name in node_stamps
-                else d
-                for d in node.declarations
-            ]
             nodes.append(node.model_copy(update={"declarations": declarations}))
         manifest = manifest.model_copy(update={"nodes": nodes})
         try:
@@ -1924,7 +1923,7 @@ def verify(
     width = max(len(label) for label, _, _, _, _, _ in items)
     headline = {item[0]: index for index, item in enumerate(items, start=1)}
     share_links: dict[str, str | AxleServiceError] = {}
-    stamps: dict[str, tuple[str, datetime, str | None]] = {}
+    stamps: dict[tuple[str, str], tuple[str, datetime, str | None]] = {}
 
     async def submit_all() -> None:
         async with service:
@@ -2076,7 +2075,21 @@ def verify(
                         if response.okay and not vacuous:
                             now = datetime.now(timezone.utc)
                             for name in scope.to_verify:
-                                stamps[name] = (sig_of(node_of_decl[name]), now, rid)
+                                node_name = None
+                                for section_name in payload.sections:
+                                    if any(
+                                        d.name == name
+                                        for d in by_name[section_name].declarations
+                                    ):
+                                        node_name = section_name
+                                        break
+                                if node_name is None:
+                                    node_name = node_of_decl.get(name)
+                                stamps[(node_name, name)] = (
+                                    sig_of(node_name),
+                                    now,
+                                    rid,
+                                )
                             cached_note = (
                                 f", {len(scope.cached)} cached" if scope.cached else ""
                             )
@@ -2167,26 +2180,24 @@ def verify(
             raise click.ClickException(str(exc)) from exc
 
     if stamps:
-        stamped = set(stamps)
         nodes = []
         for node in manifest.nodes:
-            node_stamps = {n for n in stamped if node_of_decl.get(n) == node.name}
-            if not node_stamps:
-                nodes.append(node)
-                continue
-            sig, now, rid = next(stamps[n] for n in node_stamps)
-            declarations = [
-                d.model_copy(
-                    update={
-                        "verified_sig": sig,
-                        "verified_at": now,
-                        "verified_request_id": rid,
-                    }
+            declarations = []
+            for d in node.declarations:
+                stamp = stamps.get((node.name, d.name))
+                if stamp is None:
+                    declarations.append(d)
+                    continue
+                sig, now, rid = stamp
+                declarations.append(
+                    d.model_copy(
+                        update={
+                            "verified_sig": sig,
+                            "verified_at": now,
+                            "verified_request_id": rid,
+                        }
+                    )
                 )
-                if d.name in node_stamps
-                else d
-                for d in node.declarations
-            ]
             nodes.append(node.model_copy(update={"declarations": declarations}))
         manifest = manifest.model_copy(update={"nodes": nodes})
         try:
