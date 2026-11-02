@@ -354,7 +354,7 @@ class TestLiveBuild:
         result = runner.invoke(main, ["build"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 6  # 3 check + 3 verify
+        assert result.output.count("  OK") == 5  # 3 check + 2 verify
         assert "Checked 2 selection(s): all OK" in result.output
         assert "Verified 2 selection(s): all OK" in result.output
         assert "Built 2 selection(s): all OK in" in result.output
@@ -389,7 +389,7 @@ class TestLiveVerify:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1, result.output
-        assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap FAIL"
+        assert status_line(result.output, "M.Gap") == "M.Gap FAIL"
         assert "declaration 'gap' has a `sorry`" in result.output
 
     def test_verify_rejects_axiom_proofs(self, make_live_project) -> None:
@@ -403,9 +403,9 @@ class TestLiveVerify:
         result = runner.invoke(main, ["verify"])
 
         assert result.exit_code == 1, result.output
-        assert status_line(result.output, "M.Base.base_holds") == "M.Base.base_holds OK"
-        assert status_line(result.output, "M.Axiom.uses_axiom") == (
-            "M.Axiom.uses_axiom FAIL"
+        assert status_line(result.output, "M.Base") == "M.Base OK"
+        assert status_line(result.output, "M.Axiom") == (
+            "M.Axiom FAIL"
         )
         assert "failed declarations: uses_axiom" in result.output
 
@@ -623,7 +623,7 @@ class TestLiveEnvironmentValidation:
         )
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.Gap.gap") == "M.Gap.gap SKIP"
+        assert status_line(result.output, "M.Gap") == "M.Gap SKIP"
         assert "excused (--permitted-sorries)" in result.output
         assert "Verified 1 selection(s): all OK, 1 skipped" in result.output
 
