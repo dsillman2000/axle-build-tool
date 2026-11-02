@@ -116,11 +116,28 @@ def _transform_member_source(
             or end > len(lines)
             or not stubbing._span_head_matches(lines[start], declaration.kind)
         )
-        # Lines before the span always survive (they are outside the
-        # declaration body) — scope headers, blanks, comments.
-        for i in range(cursor, min(start, len(lines))):
+        kept = keep_names is None or declaration.name in keep_names
+
+        # For trimmed declarations, extend the removed span upward to
+        # include a directly-preceding docstring, so it does not become
+        # an orphan in the submitted payload.
+        trim_start = start
+        if (not kept) and (not stale):
+            i = start - 1
+            while i >= cursor and lines[i].strip() == "":
+                i -= 1
+            if i >= cursor and lines[i].strip().endswith("-/"):
+                j = i
+                while j >= cursor and not lines[j].strip().startswith("/-"):
+                    j -= 1
+                if j >= cursor:
+                    trim_start = j
+
+        # Lines before the (possibly extended) span survive.
+        for i in range(cursor, min(trim_start, len(lines))):
             out_lines.append(lines[i])
             out_orig.append(i + 1)
+
         if stale:
             if warnings is not None and stubbed_only is not _NOT_STUBBED and _is_stubbed_decl(declaration, stubbed_only):
                 warnings.append(
@@ -133,9 +150,7 @@ def _transform_member_source(
                 out_orig.append(i + 1)
             cursor = max(cursor, min(end, len(lines)))
             continue
-        kept = keep_names is None or declaration.name in keep_names
         if not kept:
-            # Trimmed: drop the declaration's span entirely.
             cursor = end
             continue
         if _is_stubbed_decl(declaration, stubbed_only):
@@ -237,7 +252,7 @@ def build_payload(
             stubbed_only = stubbed[member.name]
         else:
             stubbed_only = _NOT_STUBBED
-        member_keep = keep_names if member.name in selected_node_names else None
+        member_keep = keep_names
         if member_keep is None:
             kept_for_member = {d.name for d in member.declarations}
         else:
