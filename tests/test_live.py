@@ -267,7 +267,7 @@ class TestLiveCheck:
         result = runner.invoke(main, ["check"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 2
+        assert result.output.count("  OK") == 3
         assert "Checked 2 selection(s): all OK" in result.output
 
     def test_check_declaration_selection(self, make_live_project) -> None:
@@ -337,7 +337,7 @@ class TestLiveCheck:
 
         assert result.exit_code == 0, result.output
         assert "2 new, 0 changed, 0 clean" in result.output
-        assert result.output.count("  OK") == 2
+        assert result.output.count("  OK") == 3
         assert "Checked 2 selection(s): all OK" in result.output
 
 
@@ -354,7 +354,7 @@ class TestLiveBuild:
         result = runner.invoke(main, ["build"])
 
         assert result.exit_code == 0, result.output
-        assert result.output.count("  OK") == 4  # 2 check + 2 verify
+        assert result.output.count("  OK") == 6  # 3 check + 3 verify
         assert "Checked 2 selection(s): all OK" in result.output
         assert "Verified 2 selection(s): all OK" in result.output
         assert "Built 2 selection(s): all OK in" in result.output
