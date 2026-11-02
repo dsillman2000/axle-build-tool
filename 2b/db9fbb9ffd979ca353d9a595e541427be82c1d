@@ -1,0 +1,16 @@
+README.md
+  h_4cc74772b10fd4 92
+src/axle_build_tool/payloads.py
+  h_4cc74772b10fd4 119-137,140,255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2bdb9fbb9ffd979ca353d9a595e541427be82c1d",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
