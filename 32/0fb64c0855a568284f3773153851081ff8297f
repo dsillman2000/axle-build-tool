@@ -1,0 +1,24 @@
+AGENTS.md
+  h_4cc74772b10fd4 35
+README.md
+  h_4cc74772b10fd4 3,46-47,61-62,77-78,90,148,188-195
+skills/axbt/SKILL.md
+  h_4cc74772b10fd4 42-43,55-60,77-79,81,86,97,117-119
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 38,1852
+tests/test_check.py
+  h_4cc74772b10fd4 820,1290-1291,1294,1296,1315,1317,1319
+tests/test_verify.py
+  h_4cc74772b10fd4 122,127,130-131,133-135,229,241-242,642-644,649-650,691-693,695-697,758,1076-1080,1117-1119,1121,1155,1232,1273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "320fb64c0855a568284f3773153851081ff8297f",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
