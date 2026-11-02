@@ -294,7 +294,21 @@ def _build_plan(
     deprecation window.
     """
     if select is not None:
-        return [(select, resolve_selection(select, config, manifest), True)]
+        tokens = [t for t in select.split() if t]
+        if not tokens:
+            tokens = [select]
+        # Deduplicate repeated selectors in a union.
+        seen: set[str] = set()
+        unique: list[str] = []
+        for token in tokens:
+            if token in seen:
+                continue
+            seen.add(token)
+            unique.append(token)
+        plan: list[tuple[str, Selection, bool]] = []
+        for token in unique:
+            plan.append((token, resolve_selection(token, config, manifest), True))
+        return plan
 
     # Deprecated narrowing: honour configured `targets` as a filter over
     # the file set during the deprecation window.
@@ -330,19 +344,20 @@ def _build_stub_map(
     """
     stub_map: dict[str, frozenset[str] | None] = {}
     for selector in selectors:
-        selection = resolve_selection(selector, config, manifest)
-        for node in selection.payload_nodes(manifest):
-            names = (
-                None
-                if selection.declaration is None
-                else frozenset({selection.declaration})
-            )
-            if node.name not in stub_map:
-                stub_map[node.name] = names
-            elif stub_map[node.name] is None or names is None:
-                stub_map[node.name] = None
-            else:
-                stub_map[node.name] = stub_map[node.name] | names
+        for token in selector.split():
+            selection = resolve_selection(token, config, manifest)
+            for node in selection.payload_nodes(manifest):
+                names = (
+                    None
+                    if selection.declaration is None
+                    else frozenset({selection.declaration})
+                )
+                if node.name not in stub_map:
+                    stub_map[node.name] = names
+                elif stub_map[node.name] is None or names is None:
+                    stub_map[node.name] = None
+                else:
+                    stub_map[node.name] = stub_map[node.name] | names
     return stub_map
 
 
@@ -454,14 +469,15 @@ def _resolve_permitted_sorries(
     """
     permitted: set[str] = set()
     for selector in selectors:
-        selection = resolve_selection(selector, config, manifest)
-        for node in selection.payload_nodes(manifest):
-            if selection.declaration is not None:
-                permitted |= {selection.declaration}
-            else:
-                permitted |= {
-                    d.name for d in node.declarations if d.kind in _VERIFY_KINDS
-                }
+        for token in selector.split():
+            selection = resolve_selection(token, config, manifest)
+            for node in selection.payload_nodes(manifest):
+                if selection.declaration is not None:
+                    permitted |= {selection.declaration}
+                else:
+                    permitted |= {
+                        d.name for d in node.declarations if d.kind in _VERIFY_KINDS
+                    }
     return frozenset(permitted)
 
 
@@ -948,6 +964,7 @@ def _rewrite_message_position(
 )
 @click.option(
     "--sorry",
+    "-z",
     "sorry",
     multiple=True,
     help=(
@@ -970,6 +987,7 @@ def _rewrite_message_position(
 )
 @click.option(
     "--select",
+    "-s",
     "select",
     default=None,
     help=(
@@ -1073,15 +1091,18 @@ def check(
         #: closure; unrelated declarations in the same file are dropped.
         trim_roots: list[str] | None = None
         if select is not None:
-            _sel = resolve_selection(select, config, manifest)
-            if _sel.declaration is not None:
-                trim_roots = [_sel.declaration]
-            else:
-                trim_roots = [
-                    d.name
-                    for node in _sel.payload_nodes(manifest)
-                    for d in node.declarations
-                ]
+            _trim: list[str] = []
+            for _token in select.split() or [select]:
+                _sel = resolve_selection(_token, config, manifest)
+                if _sel.declaration is not None:
+                    _trim.append(_sel.declaration)
+                else:
+                    _trim.extend(
+                        d.name
+                        for node in _sel.payload_nodes(manifest)
+                        for d in node.declarations
+                    )
+            trim_roots = _trim or None
         checks: list[tuple[str, Selection, Payload | None, dict, str | None]] = []
         for label, selection, explicit in plan:
             refined = _refine_stub_map(
@@ -1734,6 +1755,7 @@ def _verify_scope(
 )
 @click.option(
     "--sorry",
+    "-z",
     "sorry",
     multiple=True,
     help=(
@@ -1773,6 +1795,7 @@ def _verify_scope(
 )
 @click.option(
     "--select",
+    "-s",
     "select",
     default=None,
     help=(
@@ -1853,15 +1876,18 @@ def verify(
         )
         trim_roots: list[str] | None = None
         if select is not None:
-            _sel = resolve_selection(select, config, manifest)
-            if _sel.declaration is not None:
-                trim_roots = [_sel.declaration]
-            else:
-                trim_roots = [
-                    d.name
-                    for node in _sel.payload_nodes(manifest)
-                    for d in node.declarations
-                ]
+            _trim: list[str] = []
+            for _token in select.split() or [select]:
+                _sel = resolve_selection(_token, config, manifest)
+                if _sel.declaration is not None:
+                    _trim.append(_sel.declaration)
+                else:
+                    _trim.extend(
+                        d.name
+                        for node in _sel.payload_nodes(manifest)
+                        for d in node.declarations
+                    )
+            trim_roots = _trim or None
         stub_warnings: list[str] = []
         applied: set[str] = set()
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
@@ -2334,6 +2360,7 @@ def verify(
 )
 @click.option(
     "--sorry",
+    "-z",
     "sorry",
     multiple=True,
     help=(
@@ -2362,6 +2389,7 @@ def verify(
 )
 @click.option(
     "--select",
+    "-s",
     "select",
     default=None,
     help="Run both passes over a single selection instead of all targets.",
@@ -2500,6 +2528,7 @@ def build(
 @main.command("list")
 @click.option(
     "--select",
+    "-s",
     "select",
     default=None,
     help="Filter by <module>[.<file stem>[.<declaration>]].",
@@ -2570,6 +2599,7 @@ def list_declarations(select: str | None) -> None:
 @main.command()
 @click.option(
     "--select",
+    "-s",
     "select",
     default=None,
     help=(

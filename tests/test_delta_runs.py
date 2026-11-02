@@ -112,3 +112,69 @@ def test_project_env_var(make_project, tmp_path, monkeypatch, fake_axle):
     }
     result = runner.invoke(main, ["compile"])
     assert result.exit_code == 0, result.output
+
+
+def test_short_select_alias(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n", "M/B.lean": "def t2 := 2\n"})
+    monkeypatch.chdir(root)
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+        "def t2 := 2": {"t2": make_document("t2", kind="def", line_pos=1, end_line_pos=1, signature="def t2")},
+    }
+    assert runner.invoke(main, ["compile"]).exit_code == 0
+    fake_axle.calls.clear()
+    result = runner.invoke(main, ["check", "-s", "M.A"])
+    assert result.exit_code == 0, result.output
+    assert sum(1 for m,_ in fake_axle.calls if m=="check")==1
+
+
+def test_select_space_union(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n", "M/B.lean": "def t2 := 2\n"})
+    monkeypatch.chdir(root)
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+        "def t2 := 2": {"t2": make_document("t2", kind="def", line_pos=1, end_line_pos=1, signature="def t2")},
+    }
+    assert runner.invoke(main, ["compile"]).exit_code == 0
+    fake_axle.calls.clear()
+    result = runner.invoke(main, ["check", "-s", "M.A M.B"])
+    assert result.exit_code == 0, result.output
+    assert sum(1 for m,_ in fake_axle.calls if m=="check")==2
+
+
+def test_sorry_short_alias_and_union(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n", "M/B.lean": "import A\ndef t2 := t1\n"})
+    monkeypatch.chdir(root)
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+        "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2")},
+    }
+    assert runner.invoke(main, ["compile"]).exit_code == 0
+    fake_axle.calls.clear()
+    result = runner.invoke(main, ["check", "-s", "M.B", "-z", "M.A"])
+    assert result.exit_code == 0, result.output
+
+
+def test_select_union_dedupes(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n"})
+    monkeypatch.chdir(root)
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+    }
+    assert runner.invoke(main, ["compile"]).exit_code == 0
+    fake_axle.calls.clear()
+    result = runner.invoke(main, ["check", "-s", "M.A M.A"])
+    assert result.exit_code == 0, result.output
+    assert sum(1 for m,_ in fake_axle.calls if m=="check")==1
+
+
+def test_select_union_invalid_token_fails(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n"})
+    monkeypatch.chdir(root)
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
+    }
+    assert runner.invoke(main, ["compile"]).exit_code == 0
+    result = runner.invoke(main, ["check", "-s", "M.A M.Nope"])
+    assert result.exit_code != 0
+    assert "M.Nope" in result.output
