@@ -297,8 +297,16 @@ def _build_plan(
         tokens = [t for t in select.split() if t]
         if not tokens:
             tokens = [select]
-        plan: list[tuple[str, Selection, bool]] = []
+        # Deduplicate repeated selectors in a union.
+        seen: set[str] = set()
+        unique: list[str] = []
         for token in tokens:
+            if token in seen:
+                continue
+            seen.add(token)
+            unique.append(token)
+        plan: list[tuple[str, Selection, bool]] = []
+        for token in unique:
             plan.append((token, resolve_selection(token, config, manifest), True))
         return plan
 
