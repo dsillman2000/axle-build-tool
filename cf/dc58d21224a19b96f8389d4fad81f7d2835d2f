@@ -1,0 +1,14 @@
+tests/test_delta_runs.py
+  h_4cc74772b10fd4 156-180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfdc58d21224a19b96f8389d4fad81f7d2835d2f",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
