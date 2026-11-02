@@ -89,3 +89,26 @@ def test_build_prints_compiled_once(make_project, tmp_path, monkeypatch, fake_ax
     assert result.exit_code == 0, result.output
     # The Compiled/Wrote block should appear once (precursor short-circuit).
     assert result.output.count("Compiled 2 file(s)") == 1
+
+
+def test_project_flag_runs_from_other_cwd(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n"})
+    monkeypatch.chdir(tmp_path)
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": __import__("conftest").make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")}
+    }
+    result = runner.invoke(main, ["--project", str(root), "compile"])
+    assert result.exit_code == 0, result.output
+    result = runner.invoke(main, ["--project", str(root), "check"])
+    assert result.exit_code == 0, result.output
+
+
+def test_project_env_var(make_project, tmp_path, monkeypatch, fake_axle):
+    root = make_project(tmp_path, "project:\n  name: proj\nmodules:\n  M: {}\n", {"M/A.lean": "def t1 := 1\n"})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AXBT_PROJECT_DIR", str(root))
+    fake_axle._extract_documents_by_marker = {
+        "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")}
+    }
+    result = runner.invoke(main, ["compile"])
+    assert result.exit_code == 0, result.output

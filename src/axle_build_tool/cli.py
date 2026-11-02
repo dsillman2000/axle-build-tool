@@ -71,9 +71,24 @@ theorem hello_axbt : True := True.intro
 
 
 @click.group()
+@click.option(
+    "--project",
+    "project",
+    envvar="AXBT_PROJECT_DIR",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help=(
+        "Project directory containing axbt_project.yml (default: current "
+        "directory; env: AXBT_PROJECT_DIR)."
+    ),
+)
 @click.version_option(package_name="axle-build-tool", prog_name="axbt")
-def main() -> None:
+def main(project: Path | None) -> None:
     """axbt — the Axle Build Tool for Lean 4 projects."""
+    global _PROJECT_ROOT
+    _PROJECT_ROOT = None
+    if project is not None:
+        _PROJECT_ROOT = Path(project).resolve()
     # Diagnostics mode: AXBT_DEBUG=1 turns on per-node request logging
     # (dispatch/completion timings) for compile/check/verify runs.
     if os.environ.get("AXBT_DEBUG"):
@@ -225,7 +240,7 @@ def _run_compile(
 )
 def compile(incremental: bool) -> None:
     """Scan modules, extract declarations via Axle, and write .axbt/manifest.json."""
-    _run_compile(Path.cwd(), full_refresh=not incremental)
+    _run_compile(_project_root(), full_refresh=not incremental)
 
 
 def _acquire_project_state(
@@ -734,6 +749,19 @@ def _warn_deprecated_targets(config: ProjectConfig, project_root: Path) -> None:
     )
 _build_state: _BuildState | None = None
 
+_PROJECT_ROOT: Path | None = None
+
+
+def _project_root() -> Path:
+    """Resolve the project root: `--project`/`AXBT_PROJECT_DIR`, else cwd."""
+    global _PROJECT_ROOT
+    if _PROJECT_ROOT is not None:
+        return _PROJECT_ROOT
+    env = os.environ.get("AXBT_PROJECT_DIR")
+    if env:
+        return Path(env).resolve()
+    return Path.cwd()
+
 
 def _report_tier_tag() -> str:
     """The verdict-row suffix naming the pass (`check`/`verify`).
@@ -1027,7 +1055,7 @@ def check(
     submission still in flight and stops the run early — remaining
     selections are reported as cancelled in the summary.
     """
-    project_root = Path.cwd()
+    project_root = _project_root()
     try:
         config, manifest = _acquire_project_state(
             project_root, no_compile=no_compile, incremental=incremental
@@ -1431,7 +1459,7 @@ def debug() -> None:
     and whether the `AXLE_API_KEY` environment variable is set and
     accepted by the API. Exits 1 when the key is missing or rejected.
     """
-    project_root = Path.cwd()
+    project_root = _project_root()
 
     # --- Project configuration -------------------------------------------
     click.secho("Project (axbt_project.yml):", bold=True)
@@ -1783,7 +1811,7 @@ def verify(
     submission still in flight and stops the run early — remaining
     selections are reported as cancelled in the summary.
     """
-    project_root = Path.cwd()
+    project_root = _project_root()
     try:
         config, manifest = _acquire_project_state(
             project_root, no_compile=no_compile, incremental=incremental
@@ -2420,7 +2448,7 @@ def build(
 )
 def list_declarations(select: str | None) -> None:
     """Print the parsed declaration tree in topological order (dependencies first)."""
-    project_root = Path.cwd()
+    project_root = _project_root()
     try:
         config = load_config(project_root)
         manifest = load_manifest(project_root)
@@ -2517,7 +2545,7 @@ def graph(select: str | None, output: Path | None) -> None:
 
     The output defaults to .axbt/graph.html; pass -o to write anywhere.
     """
-    project_root = Path.cwd()
+    project_root = _project_root()
     try:
         config = load_config(project_root)
         manifest = load_manifest(project_root)
