@@ -1240,11 +1240,10 @@ def check(
                     headline[label] + _task_offset(report.item_total),
                     _task_total(report.item_total),
                 )
-                for printed, node, decl in _printed_lines(label, selection, manifest):
-                    click.echo(
-                        f"{_clock()} {counter} {printed:<{width}}  "
-                        f"{click.style('OK', fg='green')} (cached){_report_tier_tag()}"
-                    )
+                click.echo(
+                    f"{_clock()} {counter} {label:<{width}}  "
+                    f"{click.style('OK', fg='green')} (cached){_report_tier_tag()}"
+                )
                 rid = _latest_checked_request_id(
                     manifest,
                     [d[1] for d in (
@@ -1289,19 +1288,23 @@ def check(
                         headline[label] + _task_offset(report.item_total),
                         _task_total(report.item_total),
                     )
-                    for printed, node, decl in _printed_lines(label, selection, manifest):
-                        if node is None:
-                            status = (
-                                click.style("OK", fg="green")
-                                if response.okay
-                                else click.style("FAIL", fg="red")
+                    status = (
+                        click.style("OK", fg="green")
+                        if response.okay
+                        else click.style("FAIL", fg="red")
+                    )
+                    click.echo(
+                        f"{_clock()} {counter} {label:<{width}}  {status}"
+                        f"  {_timing_text(elapsed)}{_report_tier_tag()}"
+                    )
+                    if not response.okay:
+                        for printed, node, decl in _printed_lines(label, selection, manifest):
+                            if node is None:
+                                continue
+                            verdict = _decl_verdict(node, decl, response, payload)
+                            click.echo(
+                                f"    {printed:<{width}}  {verdict}"
                             )
-                        else:
-                            status = _decl_verdict(node, decl, response, payload)
-                        click.echo(
-                            f"{_clock()} {counter} {printed:<{width}}  {status}"
-                            f"  {_timing_text(elapsed)}{_report_tier_tag()}"
-                        )
                     report.mark()
                     kept, _ = _split_stub_warnings(
                         [
@@ -2186,6 +2189,13 @@ def verify(
                                 click.echo(
                                     "    the negation is also provable; "
                                     "the statement is vacuous"
+                                )
+                            for printed, node, decl in _printed_lines(label, selection, manifest):
+                                if node is None:
+                                    continue
+                                verdict = _decl_verdict(node, decl, response, payload)
+                                click.echo(
+                                    f"    {printed:<{width}}  {verdict}"
                                 )
                         kept, _ = _split_stub_warnings(
                             [
