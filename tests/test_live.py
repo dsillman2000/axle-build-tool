@@ -452,7 +452,7 @@ class TestLiveStubbing:
         )
 
         assert result.exit_code == 0, result.output
-        assert status_line(result.output, "M.User.target") == "M.User.target OK"
+        assert status_line(result.output, "M.User") == "M.User OK"
 
     def test_stubbed_payload_is_persisted_for_inspection(
         self, make_live_project
