@@ -2,10 +2,7 @@
 
 ## What this is
 
-`axbt` is a dbt-inspired build/orchestration tool for Lean 4 projects,
-executed through the Axle (Axiom Lean Engine) API. The authoritative
-documentation is `README.md`; the GitHub issues carry the design
-history.
+`axbt` is a dbt-inspired build/orchestration tool for Lean 4 projects, executed through the Axle (Axiom Lean Engine) API. The authoritative documentation is `README.md`; the GitHub issues carry the design history.
 
 ## Layout
 
@@ -58,6 +55,7 @@ history.
 ## Agent conventions
 
 - **Branch prefix:** agent-driven development branches are always prefixed `opencode/` (e.g. `opencode/manifest-outcome-records`) and land via PRs into `main` (see Git policy).
+- **GitHub issues, PRs, and comments:** create and edit them with `gh` (never by hand). Write each paragraph as a single unbroken line — GitHub wraps text automatically, so manual line breaks only add noise. Keep titles short and imperative; put the substance in the body. Issues should state the observed behavior, the requested behavior, and acceptance criteria; PR descriptions should summarize the change, tests, and any follow-ups; comments should be concise and actionable.
 - **Sign-off:** agent-authored GitHub artifacts *saved outside the commit itself* — namely PR descriptions, issue bodies, and comments on PRs/issues — end with a horizontal rule and an italicized sign-off, exactly:
 
   ```
