@@ -1,0 +1,20 @@
+tests/test_build.py
+  h_4cc74772b10fd4 139
+tests/test_check.py
+  h_4cc74772b10fd4 77,96-98,105-107,127,131,334,358,396,400,413,810,1162,1222,1285,1311,1564
+tests/test_issue28_delta.py
+  h_4cc74772b10fd4 1-91
+tests/test_verify.py
+  h_4cc74772b10fd4 104,227,632,674,739,1058,1101,1129,1203,1247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "afb1fbaaf5b3c9e1ccad6b253daf2f0bef3154c8",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
