@@ -16,7 +16,7 @@ incremental plan).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -47,6 +47,10 @@ class Payload:
     #: exact, order-independent way to attribute payload positions back
     #: to the original files.
     line_map: dict[str, list[int]]
+    #: Node name -> set of declaration names actually retained in that
+    #: node's section after trimming (empty => every extracted
+    #: declaration is present, i.e. no trimming happened).
+    kept: dict[str, set[str]] = field(default_factory=dict)
 
 
 def dotted_stem_of(node: ManifestNode) -> str:
@@ -86,6 +90,12 @@ def _transform_member_source(
     lines = source.splitlines()
     if not lines:
         return source, []
+
+    node_decl_names = {d.name for d in node.declarations}
+    if keep_names is not None and not (node_decl_names & keep_names):
+        # Conservative: no recorded dependency reaches this file, so
+        # keep it whole rather than risk dropping elaboration context.
+        keep_names = None
 
     # Fast path: nothing to do.
     if stubbed_only is _NOT_STUBBED and (keep_names is None or all(
@@ -220,6 +230,7 @@ def build_payload(
     hoisted: list[str] = []
     hoisted_seen: set[str] = set()
     sections: list[tuple[ManifestNode, list[str], list[int]]] = []
+    kept_map: dict[str, set[str]] = {}
     for member in order:
         raw_source = (project_root / member.path).read_text(encoding="utf-8")
         if stubbed and member.name in stubbed:
@@ -227,6 +238,13 @@ def build_payload(
         else:
             stubbed_only = _NOT_STUBBED
         member_keep = keep_names if member.name in selected_node_names else None
+        if member_keep is None:
+            kept_for_member = {d.name for d in member.declarations}
+        else:
+            kept_for_member = set(member_keep) & {d.name for d in member.declarations}
+            if not kept_for_member:
+                kept_for_member = {d.name for d in member.declarations}
+        kept_map[member.name] = kept_for_member
         if stubbed_only is not _NOT_STUBBED or member_keep is not None:
             source, orig_lines = _transform_member_source(
                 member, raw_source, stubbed_only, member_keep, warnings=warnings
@@ -278,7 +296,7 @@ def build_payload(
     if hoisted:
         lines.extend(hoisted)
         lines.append("")
-    result = Payload(content="", lines=[], sections={}, line_map={})
+    result = Payload(content="", lines=[], sections={}, line_map={}, kept={})
     for index, (member, section, line_numbers) in enumerate(sections):
         if index:
             lines.append("")
@@ -288,6 +306,7 @@ def build_payload(
         result.line_map[member.name] = line_numbers
     result.lines = lines
     result.content = "\n".join(lines) + "\n"
+    result.kept = kept_map
     return result
 
 

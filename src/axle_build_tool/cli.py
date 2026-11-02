@@ -1605,9 +1605,15 @@ def _verify_scope(
 ) -> _VerifyScope:
     by_name = manifest.by_name()
     closure = [by_name[node_name] for node_name in payload.sections]
-    verifiable = [
-        d for node in closure for d in node.declarations if d.kind in _VERIFY_KINDS
-    ]
+    verifiable = []
+    for node in closure:
+        kept = payload.kept.get(node.name)
+        if not kept:
+            kept = {d.name for d in node.declarations}
+        verifiable.extend(
+            d for d in node.declarations
+            if d.kind in _VERIFY_KINDS and d.name in kept
+        )
     # Declarations stubbed by `--sorry` are sorried by construction:
     # they are excused in the verification and skipped by the local
     # guard (their recorded is_sorry refers to the original source).
@@ -1683,7 +1689,9 @@ def _verify_scope(
         d.name
         for node in closure
         for d in node.declarations
-        if d.kind in _VERIFY_KINDS and cache_valid(d, node.name)
+        if d.kind in _VERIFY_KINDS
+        and cache_valid(d, node.name)
+        and (node.name not in payload.kept or d.name in payload.kept[node.name])
     ]
     permitted = stubbed_names | set(user_permitted) | set(cached)
     to_verify = [d.name for d in verifiable if d.name not in permitted]
@@ -1936,6 +1944,8 @@ def verify(
                 d.name
                 for node_name in payload.sections
                 for d in by_name[node_name].declarations
+                if node_name not in payload.kept
+                or d.name in payload.kept[node_name]
             }
             missing = user_permitted - closure_decls
             if missing:
