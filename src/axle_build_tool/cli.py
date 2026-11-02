@@ -2269,7 +2269,10 @@ def verify(
     "--force",
     is_flag=True,
     default=False,
-    help="Re-verify in the verify pass even when the cache is still valid.",
+    help=(
+        "Re-judge in both passes even when every declaration already "
+        "holds a valid stamp (bypasses the delta cache)."
+    ),
 )
 @click.option(
     "--select",
