@@ -1,0 +1,16 @@
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 74-84,86,88-91,243,752-764,1058,1462,1814,2451,2548
+tests/test_delta_runs.py
+  h_4cc74772b10fd4 92-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ebd474d8a9e0b0f47ec473e8ae986d5151c71395",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
