@@ -965,7 +965,7 @@ class TestSorry:
         assert status_line(result.output, "M.B.middle") == "M.B.middle OK"
         persisted = root / ".axbt" / "compiled" / "M_B_stubbed.lean"
         content = persisted.read_text(encoding="utf-8")
-        assert "theorem sibling : base = 1 := by sorry" in content
+        assert "theorem sibling : base = 1 := by sorry" not in content
         assert "theorem middle : base = 1 := rfl" in content
 
     def test_sorry_naming_only_the_selected_declaration_is_rejected(

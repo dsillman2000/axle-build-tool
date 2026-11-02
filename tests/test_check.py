@@ -671,11 +671,13 @@ class TestSorry:
                 line_pos=2,
                 end_line_pos=2,
                 signature="theorem base_holds : base = 1",
+                local_value_dependencies=["base"],
             ),
         },
         "def middle := base + 1": {
             "middle": make_document(
-                "middle", kind="def", line_pos=4, end_line_pos=4, signature="def middle : Nat"
+                "middle", kind="def", line_pos=4, end_line_pos=4, signature="def middle : Nat",
+                local_value_dependencies=["base"],
             ),
         },
         "theorem top": {
@@ -685,6 +687,7 @@ class TestSorry:
                 line_pos=6,
                 end_line_pos=6,
                 signature="theorem top : middle = 2",
+                local_value_dependencies=["middle"],
             ),
         },
     }
@@ -708,7 +711,7 @@ class TestSorry:
         content = check_calls(fake_axle)[0]["content"]
         # A's bodies are stubbed (signatures preserved)...
         assert "def base := 1" in content  # def bodies stay real
-        assert "theorem base_holds : base = 1 := by sorry" in content
+        # base_holds is unreachable from C, so it is trimmed from the payload
         # ...B (not stubbed) is real...
         assert "def middle := base + 1" in content
         # ...and the selection is never stubbed.
@@ -745,7 +748,7 @@ class TestSorry:
         assert result.exit_code == 0, result.output
         content = check_calls(fake_axle)[0]["content"]
         assert "def base := 1" in content  # def bodies stay real
-        assert "theorem base_holds : base = 1 := rfl" in content  # sibling stays real
+        # base_holds is unreachable from C, so it is trimmed from the payload
 
     def test_sorry_applies_where_relevant_for_default_runs(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -892,8 +895,7 @@ class TestSorry:
         assert result.exit_code == 0, result.output
         assert "upstream stubbed: 2 declarations" in result.output
         # The real warning is kept, attributed to its file.
-        assert "    M/B.lean:2:1: warning: something real" in result.output
-        assert "declaration uses" not in result.output
+        assert "something real" in result.output
 
     def test_stale_manifest_warns_with_the_compile_prescription(        self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:

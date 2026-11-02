@@ -1072,7 +1072,7 @@ def check(
         #: selected declaration(s) plus their transitive dependency
         #: closure; unrelated declarations in the same file are dropped.
         trim_roots: list[str] | None = None
-        if select is not None and not sorry:
+        if select is not None:
             _sel = resolve_selection(select, config, manifest)
             if _sel.declaration is not None:
                 trim_roots = [_sel.declaration]
@@ -1848,11 +1848,8 @@ def verify(
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
-        import os, sys
-        if os.environ.get("AXBT_DEBUG"):
-            print("VERIFY stub_map=", stub_map, "sorry=", sorry, "select=", select, file=sys.stderr)
         trim_roots: list[str] | None = None
-        if select is not None and not sorry:
+        if select is not None:
             _sel = resolve_selection(select, config, manifest)
             if _sel.declaration is not None:
                 trim_roots = [_sel.declaration]
