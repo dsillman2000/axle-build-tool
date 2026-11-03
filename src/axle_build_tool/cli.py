@@ -1084,6 +1084,8 @@ def check(
         signature_options = _signature_options(config, minified)
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        if sorry:
+            signature_options = {**signature_options, "sorry": " ".join(sorted(sorry))}
         stub_warnings: list[str] = []
         applied: set[str] = set()
         #: Declaration-level trimming for `--select` runs: keep the
@@ -1871,6 +1873,8 @@ def verify(
         signature_options = _signature_options(config, minified)
         plan = _build_plan(select, config, manifest)
         stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        if sorry:
+            signature_options = {**signature_options, "sorry": " ".join(sorted(sorry))}
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
