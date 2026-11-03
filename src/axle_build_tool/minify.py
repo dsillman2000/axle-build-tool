@@ -49,7 +49,7 @@ from dataclasses import dataclass
 #: options material (via `signature_marker`), so a behavior change here
 #: invalidates stamps and the verify cache exactly once, instead of
 #: silently covering submissions shaped differently.
-MINIFIER_VERSION = 2
+MINIFIER_VERSION = 3
 
 
 def signature_marker(enabled: bool) -> str:
@@ -161,7 +161,7 @@ def minify_lines(source: str) -> Minified | None:
             i += 1
             continue
 
-        if c == "'" and (last is None or last not in _IDENT_CHARS):
+        if c == "'" and not (last is not None and (last.isalnum() or last in "_'")):
             # Char literal (`'"'`, `'-\''`): consume the whole literal
             # without interpreting it, so a raw quote inside cannot be
             # mistaken for a string boundary.
