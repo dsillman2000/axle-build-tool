@@ -301,3 +301,168 @@ class TestUnderStubbingWarnings:
         assert stubbed_source(node, "theorem t : 1 = 1 := rfl\n") == (
             "theorem t : 1 = 1 := rfl\n"
         )
+
+
+class TestSpanHeadMatches:
+    """The span-head check: which first lines can carry a declaration."""
+
+    def test_modifier_prefixed_heads_match_their_kind(self) -> None:
+        from axle_build_tool.stubbing import _span_head_matches
+
+        assert _span_head_matches("private theorem twoPowSq : …", "theorem")
+        assert _span_head_matches("private def base := 1", "def")
+        assert _span_head_matches("protected def middle := 1", "def")
+        assert _span_head_matches("noncomputable def f : Nat := 0", "def")
+        assert _span_head_matches("unsafe def f : Nat := 0", "def")
+        assert _span_head_matches("partial def f : Nat → Nat", "def")
+        assert _span_head_matches("@[simp] theorem sniffed : True", "theorem")
+        assert _span_head_matches("  private lemma tucked : True", "lemma")
+
+    def test_other_kinds_and_misaligned_heads_do_not_match(self) -> None:
+        from axle_build_tool.stubbing import _span_head_matches
+
+        assert not _span_head_matches("private theorem twoPowSq : …", "def")
+        assert not _span_head_matches("rw [twoPow]", "theorem")
+        assert not _span_head_matches("end KaratsubaSqrt", "theorem")
+        # The docstring fallback stays accepted (extraction's own record).
+        assert _span_head_matches("  /-- docstring -/", "theorem")
+
+
+class TestTransformMemberSourcePartition:
+    """`_transform_member_source` is a strict partition of the source.
+
+    Stale or corrupt spans degrade a declaration to its real text;
+    they may never duplicate content, whatever the manifest carries.
+    """
+
+    @staticmethod
+    def node_with(declarations) -> ManifestNode:
+        return NODE.model_copy(update={"declarations": declarations})
+
+    SOURCE = "\n".join(
+        [
+            "import Dep",                                                       # 1
+            "",                                                                 # 2
+            "namespace Sqrt",                                                   # 3
+            "",                                                                 # 4
+            "private theorem addZero : Nat.zero = Nat.zero := rfl",             # 5
+            "private theorem twoPowSq : Nat.one = Nat.one := by",               # 6
+            "  rw [Nat.one_def]",                                               # 7
+            "private theorem powSqSucc : Nat.two = Nat.two := by",              # 8
+            "  rw [Nat.two_def]",                                               # 9
+            "",                                                                 # 10
+            "theorem guardrail_39999_total : Nat.four = Nat.four := by",        # 11
+            "  sorry",                                                          # 12
+            "",                                                                 # 13
+            "end Sqrt",                                                         # 14
+        ]
+    ) + "\n"
+
+    #: The exact corruption shape issue 38 reports: several sibling
+    #: `private theorem`s whose `line_pos` snapped forward onto the
+    #: guardrail target's line, so their spans read inverted or
+    #: overlapping against their recorded ends.
+    CORRUPT_DECLS = [
+        decl("addZero", "theorem", 11, 5, "private theorem addZero : Nat.zero = Nat.zero"),
+        decl("twoPowSq", "theorem", 11, 7, "private theorem twoPowSq : Nat.one = Nat.one"),
+        decl("powSqSucc", "theorem", 11, 9, "private theorem powSqSucc : Nat.two = Nat.two"),
+        decl("guardrail_39999_total", "theorem", 11, 12, "theorem guardrail_39999_total : Nat.four = Nat.four"),
+    ]
+
+    def test_snapped_forward_spans_emit_each_sibling_once(self) -> None:
+        from axle_build_tool.payloads import _transform_member_source
+
+        node = self.node_with(self.CORRUPT_DECLS)
+        warnings: list[str] = []
+
+        transformed, orig = _transform_member_source(
+            node, self.SOURCE, frozenset(["guardrail_39999_total"]), None, warnings
+        )
+
+        for header in (
+            "private theorem addZero",
+            "private theorem twoPowSq",
+            "private theorem powSqSucc",
+            "theorem guardrail_39999_total",
+        ):
+            assert transformed.count(header) == 1, transformed
+        # The grant is honored: the guardrail's proof is stubbed.
+        assert (
+            "theorem guardrail_39999_total : Nat.four = Nat.four := by sorry"
+            in transformed
+        )
+        # Sibling bodies (not granted) keep their real text.
+        assert "  rw [Nat.one_def]" in transformed
+        assert "  rw [Nat.two_def]" in transformed
+        # The untreatable spans are called out, once per declaration.
+        assert len(warnings) == 3
+        for warning in warnings:
+            assert "M/A.lean" in warning
+            assert "run `axbt compile`" in warning
+
+    def test_the_walk_never_emits_a_source_line_twice(self) -> None:
+        from axle_build_tool.payloads import _transform_member_source
+
+        # Two flavors of corrupt data at once: inverted sibling spans
+        # and one that swallows the next declaration's lines.
+        spans = list(self.CORRUPT_DECLS) + [
+            decl("overshooting", "theorem", 11, 13, "theorem overshooting : True")
+        ]
+        node = self.node_with(spans)
+        warnings: list[str] = []
+
+        transformed, orig = _transform_member_source(
+            node, self.SOURCE, frozenset(["guardrail_39999_total"]), None, warnings
+        )
+
+        non_stub = [line for line in orig if line is not None]
+        assert len(non_stub) == len(set(non_stub)), non_stub
+
+    def test_overlapping_healthy_spans_cannot_swallow_a_sibling(self) -> None:
+        """A span reaching past the next declaration is clamped, so a
+        stub never consumes (or later re-emits) a sibling's lines."""
+        from axle_build_tool.payloads import _transform_member_source
+
+        node = self.node_with(
+            [
+                # `outer`'s recorded end includes the guardrail's header.
+                decl("outer", "theorem", 6, 12, "private theorem outer : True"),
+                decl("guardrail_39999_total", "theorem", 11, 12, "theorem guardrail_39999_total : Nat.four = Nat.four"),
+            ]
+        )
+        warnings: list[str] = []
+
+        transformed, orig = _transform_member_source(
+            node, self.SOURCE, frozenset(["guardrail_39999_total"]), None, warnings
+        )
+
+        assert transformed.count("theorem guardrail_39999_total") == 1
+        assert (
+            "theorem guardrail_39999_total : Nat.four = Nat.four := by sorry"
+            in transformed
+        )
+
+    def test_module_level_grant_stubs_private_siblings(self) -> None:
+        """With every proof declaration granted, modifier heads are
+        stubbed like any other (the pre-#38 transform left them real)."""
+        from axle_build_tool.payloads import _transform_member_source
+
+        node = self.node_with(
+            [
+                decl("addZero", "theorem", 5, 5, "private theorem addZero : Nat.zero = Nat.zero"),
+                decl("twoPowSq", "theorem", 6, 7, "private theorem twoPowSq : Nat.one = Nat.one"),
+            ]
+        )
+        source = self.SOURCE
+
+        transformed, _orig = _transform_member_source(
+            node, source, None, None, None
+        )
+
+        assert (
+            "private theorem addZero : Nat.zero = Nat.zero := by sorry" in transformed
+        )
+        assert (
+            "private theorem twoPowSq : Nat.one = Nat.one := by sorry" in transformed
+        )
+        assert "  rw [Nat.one_def]" not in transformed

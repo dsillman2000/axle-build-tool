@@ -12,6 +12,7 @@ import yaml
 from click.testing import CliRunner
 
 from axle_build_tool import main
+from axle_build_tool.manifest import MANIFEST_VERSION
 from axle_build_tool.config import (
     CACHE_DIRNAME,
     CONFIG_FILENAME,
@@ -73,7 +74,7 @@ class TestDebug:
         assert "90 s" in result.output
         assert "maxHeartbeats=100000" in result.output
         # Cache state, reported from the manifest the ritual wrote.
-        assert "version 2" in result.output
+        assert f"version {MANIFEST_VERSION}" in result.output
         assert "1 (0 clean, 0 changed, 1 new)" in result.output
         assert "1 extracted" in result.output
         # The key is verified (the fake serves the probes) and masked.

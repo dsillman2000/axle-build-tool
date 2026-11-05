@@ -168,3 +168,66 @@ class TestBuildSequencing:
         assert "Build stopped by fail-fast in the check pass; verify not run" in (
             result.output
         )
+
+
+#: Issue 38's shape — a file granted a single `--sorry` target whose
+#: check submission fails; the verify pass must skip it without
+#: resurrecting a spurious `--sorry` application error.
+GRANTED_FILES = {
+    "M/A.lean": (
+        "namespace Sqrt\n"                                     # 1
+        "private theorem sib : 1 = 1 := rfl\n"                 # 2
+        "theorem target : 2 = 2 := by\n"                       # 3
+        "  sorry\n"                                            # 4
+        "end Sqrt\n"                                           # 5
+    ),
+}
+GRANTED_CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets: []
+"""
+GRANTED_DOCS = {
+    "private theorem sib : 1 = 1 := rfl": {
+        "sib": make_document(
+            "sib",
+            line_pos=2,
+            end_line_pos=2,
+            signature="private theorem sib : 1 = 1",
+        ),
+        "target": make_document(
+            "target",
+            is_sorry=True,
+            line_pos=3,
+            end_line_pos=4,
+            signature="theorem target : 2 = 2",
+        ),
+    },
+}
+
+
+class TestBuildSorryPropagation:
+    def test_failed_check_does_not_resurrect_the_sorry_error(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The check pass fails the granted selection; the verify pass
+        skips it (nothing rebuilt), and the run's `--sorry` application
+        is not judged again — no spurious "not a dependency" error after
+        the wasted run (issue 38's follow-up error)."""
+        root = make_project(tmp_path, GRANTED_CONFIG, GRANTED_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = GRANTED_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        fake_axle.check_failures.add("theorem target : 2 = 2 := by")
+
+        result = runner.invoke(
+            main, ["build", "--sorry", "M.A.target"]
+        )
+
+        assert result.exit_code == 1, result.output
+        assert "check pass failed this selection above" in result.output
+        assert "not a dependency of any planned selection" not in result.output
+        assert "Built 1 selection(s): 1 failed" in result.output

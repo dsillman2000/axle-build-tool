@@ -335,18 +335,25 @@ def _build_stub_map(
     selectors: tuple[str, ...] | list[str],
     config: ProjectConfig,
     manifest: Manifest,
-) -> dict[str, frozenset[str] | None]:
+) -> tuple[dict[str, frozenset[str] | None], dict[str, list[str]]]:
     """Resolve `--sorry` selectors into per-node stub instructions.
 
     Maps node names to the declarations to stub in that node — `None`
     meaning every stubbable declaration. Repeatable selectors merge
     (an all-declarations stub absorbs narrower ones).
+
+    The second map records, per node, the user's `--sorry` tokens that
+    resolved there — diagnostics report those, not the internal node keys.
     """
     stub_map: dict[str, frozenset[str] | None] = {}
+    origin: dict[str, list[str]] = {}
     for selector in selectors:
         for token in selector.split():
             selection = resolve_selection(token, config, manifest)
             for node in selection.payload_nodes(manifest):
+                tokens = origin.setdefault(node.name, [])
+                if token not in tokens:
+                    tokens.append(token)
                 names = (
                     None
                     if selection.declaration is None
@@ -358,7 +365,7 @@ def _build_stub_map(
                     stub_map[node.name] = None
                 else:
                     stub_map[node.name] = stub_map[node.name] | names
-    return stub_map
+    return stub_map, origin
 
 
 def _refine_stub_map(
@@ -501,20 +508,26 @@ def _require_stub_application(
     stub_map: dict[str, frozenset[str] | None],
     applied: set[str],
     plan: list[tuple[str, Selection]],
+    origin: dict[str, list[str]] | None = None,
 ) -> None:
     """Fail when a `--sorry` target applies to no planned selection.
 
     A stub that is relevant to some selections but not others is fine
     (a default run checks every target; not all of them need the
     stub). Applying nowhere at all means a misunderstanding — most
-    likely a mistyped selector — and is rejected.
+    likely a mistyped selector — and is rejected. The report names the
+    user's `--sorry` token(s), not the internal node keys.
     """
     never_applied = sorted(set(stub_map) - applied)
     if not never_applied:
         return
+    tokens = [
+        ", ".join(repr(token) for token in (origin or {}).get(name, [name]))
+        for name in never_applied
+    ]
     labels = ", ".join(label for label, _, _ in plan)
     raise SelectionError(
-        f"--sorry {', '.join(repr(name) for name in never_applied)}: not a "
+        f"--sorry {', '.join(tokens)}: not a "
         f"dependency of any planned selection ({labels}); stubbing applies "
         "to the selections' dependency closures."
     )
@@ -533,16 +546,21 @@ _SORRY_WARNING = re.compile(r"declaration uses [`']sorry[`']")
 def _stub_context_line(
     stub_map: dict[str, frozenset[str] | None],
     selection: Selection,
+    payload: Payload,
     manifest: Manifest,
 ) -> str | None:
     """A dim report line describing a payload's stubs — always shown
-    when stubs are present, so stubbing is never invisible."""
+    when stubs are present, so stubbing is never invisible. Only stubs
+    that actually shape this payload (their node is one of its sections)
+    are counted — a stub relevant to other selections says nothing here."""
     if not stub_map:
         return None
     by_name = manifest.by_name()
     own = {node.name for node in selection.payload_nodes(manifest)}
     upstream = siblings = 0
     for name, names in stub_map.items():
+        if name not in payload.sections:
+            continue
         node = by_name.get(name)
         if node is None:
             continue
@@ -726,6 +744,11 @@ class _BuildState:
     tier: str = "check"
     #: Selection labels whose check-tier submission failed.
     skip_verify: set[str] = field(default_factory=set)
+    #: Node names whose `--sorry` grants the check pass applied this run.
+    #: The verify pass unions them into its own application accounting so
+    #: selections the check pass failed (and skipped) don't resurrect a
+    #: spurious "not a dependency of any planned selection" error.
+    stub_applied: set[str] = field(default_factory=set)
     #: Selection labels that failed either tier (the build summary).
     failed_labels: set[str] = field(default_factory=set)
     #: Selection count, set by the check pass as it builds its report.
@@ -1083,7 +1106,11 @@ def check(
         minified = config.minify if minify_flag is None else minify_flag
         signature_options = _signature_options(config, minified)
         plan = _build_plan(select, config, manifest)
-        stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        stub_origin: dict[str, list[str]] = {}
+        if sorry:
+            stub_map, stub_origin = _build_stub_map(sorry, config, manifest)
+        else:
+            stub_map = {}
         if sorry:
             signature_options = {**signature_options, "sorry": " ".join(sorted(sorry))}
         stub_warnings: list[str] = []
@@ -1128,7 +1155,12 @@ def check(
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
             checks.append((label, selection, payload, refined, None))
-        _require_stub_application(stub_map, applied, plan)
+        _require_stub_application(stub_map, applied, plan, stub_origin)
+        if _build_state is not None:
+            #: The build's verify pass re-checks application with its own
+            #: sharing the check pass's outcomes: a selection the check
+            #: pass failed and skipped still had its stub applied here.
+            _build_state.stub_applied = set(applied)
         for warning in dict.fromkeys(stub_warnings):
             click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
@@ -1339,7 +1371,7 @@ def check(
                     )
                     for message in kept:
                         click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
-                    stub_line = _stub_context_line(refined, selection, manifest)
+                    stub_line = _stub_context_line(refined, selection, payload, manifest)
                     if stub_line:
                         click.secho(f"    {stub_line}", dim=True)
                     if (
@@ -1872,8 +1904,10 @@ def verify(
         minified = config.minify if minify_flag is None else minify_flag
         signature_options = _signature_options(config, minified)
         plan = _build_plan(select, config, manifest)
-        stub_map = _build_stub_map(sorry, config, manifest) if sorry else {}
+        stub_origin: dict[str, list[str]] = {}
+        stub_map: dict[str, frozenset[str] | None] = {}
         if sorry:
+            stub_map, stub_origin = _build_stub_map(sorry, config, manifest)
             signature_options = {**signature_options, "sorry": " ".join(sorted(sorry))}
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
@@ -1894,6 +1928,13 @@ def verify(
             trim_roots = _trim or None
         stub_warnings: list[str] = []
         applied: set[str] = set()
+        if _build_state is not None and _build_state.stub_applied:
+            #: In a build, the check pass already accounted for this run's
+            #: `--sorry` application — including the selections it failed
+            #: and skipped (their payloads are not built here). Requiring
+            #: the stubs to apply again would fire a spurious "not a
+            #: dependency of any planned selection" after a wasted run.
+            applied |= _build_state.stub_applied
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -2001,7 +2042,7 @@ def verify(
                     ),
                 )
             )
-        _require_stub_application(stub_map, applied, plan)
+        _require_stub_application(stub_map, applied, plan, stub_origin)
         for warning in dict.fromkeys(stub_warnings):
             click.secho(f"  warning: {warning}", fg="yellow")
     except (ConfigError, ManifestError, SelectionError, OSError) as exc:
@@ -2240,7 +2281,7 @@ def verify(
                             click.echo(
                                 f"    {_rewrite_message_position(message, payload, paths)}"
                             )
-                        stub_line = _stub_context_line(refined, selection, manifest)
+                        stub_line = _stub_context_line(refined, selection, payload, manifest)
                         if stub_line:
                             click.secho(f"    {stub_line}", dim=True)
                         if (

@@ -86,6 +86,15 @@ def _transform_member_source(
     for stub lines, which have no raw-source counterpart). Both
     transformations key on the manifest's raw-file spans, so they can run
     together without one invalidating the other's coordinates.
+
+    The walk is a strict partition of the file's lines: every source line
+    is emitted at most once, and the cursor only ever advances past
+    content already emitted. Spans are also clamped to the next
+    declaration's line — two declarations cannot share a line, so a span
+    reaching past its neighbor is corrupt (mis-snapped or overshooting).
+    Declarations whose spans fail these checks keep their real source and
+    lose only their stub/trim treatment, keeping the payload's content
+    complete even when a manifest is stale.
     """
     lines = source.splitlines()
     if not lines:
@@ -103,17 +112,30 @@ def _transform_member_source(
     )):
         return source, list(range(1, len(lines) + 1))
 
+    ordered = sorted(node.declarations, key=lambda d: d.line_pos)
+    #: Exclusive line bound per declaration, clamped to the next
+    #: declaration's first line (sibling spans never overlap lines).
+    capped = []
+    for position, declaration in enumerate(ordered):
+        cap = (
+            ordered[position + 1].line_pos - 1
+            if position + 1 < len(ordered)
+            else len(lines)
+        )
+        capped.append(min(declaration.end_line_pos, cap))
+
     out_lines: list[str] = []
     out_orig: list[int | None] = []
     cursor = 0
-    for declaration in sorted(node.declarations, key=lambda d: d.line_pos):
+    for index, declaration in enumerate(ordered):
         start = declaration.line_pos - 1
-        end = declaration.end_line_pos
-        # Defensive: stale/overlapping spans are left untouched.
+        end = capped[index]
+        # Defensive: stale/overlapping spans are left untouched. The raw
+        # end matters here: an end past the file's last line is corrupt.
         stale = (
             start < cursor
             or start >= end
-            or end > len(lines)
+            or declaration.end_line_pos > len(lines)
             or not stubbing._span_head_matches(lines[start], declaration.kind)
         )
         kept = keep_names is None or declaration.name in keep_names
@@ -133,35 +155,37 @@ def _transform_member_source(
                 if j >= cursor:
                     trim_start = j
 
-        # Lines before the (possibly extended) span survive.
+        # Lines before the (possibly extended) span survive — and the
+        # cursor must never fall behind content already emitted.
         for i in range(cursor, min(trim_start, len(lines))):
             out_lines.append(lines[i])
             out_orig.append(i + 1)
+        cursor = max(cursor, min(trim_start, len(lines)))
 
         if stale:
-            if warnings is not None and stubbed_only is not _NOT_STUBBED and _is_stubbed_decl(declaration, stubbed_only):
+            if warnings is not None:
                 warnings.append(
                     f"{node.path}: declaration '{declaration.name}' could not be "
                     "stubbed (the manifest is out of date with the source); "
                     "run `axbt compile` to rebuild it."
                 )
-            for i in range(start, min(end, len(lines))):
+            for i in range(max(start, cursor), min(end, len(lines))):
                 out_lines.append(lines[i])
                 out_orig.append(i + 1)
             cursor = max(cursor, min(end, len(lines)))
             continue
         if not kept:
-            cursor = end
+            cursor = max(cursor, end)
             continue
         if _is_stubbed_decl(declaration, stubbed_only):
             out_lines.append(stubbing._stub_line(declaration))
             out_orig.append(None)
-            cursor = end
+            cursor = max(cursor, end)
             continue
         for i in range(start, end):
             out_lines.append(lines[i])
             out_orig.append(i + 1)
-        cursor = end
+        cursor = max(cursor, end)
 
     for i in range(cursor, len(lines)):
         out_lines.append(lines[i])

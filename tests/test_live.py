@@ -904,6 +904,61 @@ class TestLiveTrimming:
         assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
 
 
+class TestLiveSorryTarget:
+    """Issue #38: `axbt build --sorry <module>.<file>.<declaration>`
+    over a file with `private theorem` siblings of the target.
+
+    The affected shape: before the fix, the extraction snap of a
+    modifier-prefixed declaration walked its recorded start onto a later
+    declaration's line; the granted payload then re-emitted sibling
+    bodies, and Lean rejected them (`private declaration 'X' has already
+    been declared`) — while the same file ran clean both plain and
+    with a module-level `--sorry`.
+    """
+
+    SOURCE = (
+        "namespace KaratsubaSqrt\n"                       # 1
+        "\n"                                              # 2
+        "private theorem mulTwo (n : Nat) : n * 2 = n * 2 := rfl\n"   # 3
+        "\n"                                              # 4
+        "private theorem powSq (n : Nat) : (n + 1) ^ 2 = (n + 1) ^ 2 := rfl\n"  # 5
+        "\n"                                              # 6
+        "theorem guardrail_39999_total (n : Nat) : n * n = n * n := by\n"  # 7
+        "  sorry\n"                                       # 8
+        "\n"                                              # 9
+        "end KaratsubaSqrt\n"                             # 10
+    )
+
+    def test_build_sorry_dot_qualified_target_with_private_siblings(
+        self, make_live_project
+    ) -> None:
+        make_live_project({"M/A.lean": self.SOURCE}, targets=["A.guardrail_39999_total"])
+        compile_result = runner.invoke(main, ["compile"])
+        assert compile_result.exit_code == 0, compile_result.output
+        from axle_build_tool.manifest import load_manifest
+
+        node = load_manifest(Path.cwd()).by_name()["M.A"]
+        spans = {decl.name: (decl.line_pos, decl.end_line_pos) for decl in node.declarations}
+        # A `private theorem`'s recorded span points at its own keyword
+        # line and covers its own lines — never a later declaration's.
+        assert spans["KaratsubaSqrt.mulTwo"] == (3, 3)
+        assert spans["KaratsubaSqrt.powSq"] == (5, 5)
+        assert spans["KaratsubaSqrt.guardrail_39999_total"] == (7, 8)
+        assert next(decl for decl in node.declarations if decl.name == "KaratsubaSqrt.guardrail_39999_total").is_sorry
+
+        result = runner.invoke(
+            main, ["build", "--sorry", "M.A.guardrail_39999_total"]
+        )
+
+        assert result.exit_code == 0, result.output
+        # Both tiers judged the selection cleanly: no duplicate private
+        # declarations, and the granted target was stubbed, not judged.
+        assert "already been declared" not in result.output
+        assert status_line(result.output, "M.A") == "M.A OK"
+        assert "Built 1 selection(s): all OK in" in result.output
+        assert "siblings stubbed: 1 declaration" in result.output
+
+
 class TestLiveDependencyNames:
     """The dependency names recorded per declaration are the graph's
     edges (#22): they must match how axbt extracts the declarations
