@@ -42,14 +42,9 @@ from axle.types import Document
 from axle_build_tool.axle_service import AxleService, AxleServiceError
 from axle_build_tool.manifest import ExtractedDecl, Manifest, ManifestNode
 from axle_build_tool.payloads import build_file_payload
+from axle_build_tool.stubbing import DECLARATION_HEAD
 
 logger = logging.getLogger(__name__)
-
-#: Declaration keyword heads, used to snap reported line positions onto the
-#: declaration's keyword line.
-_DECLARATION_KEYWORD = re.compile(
-    r"^\s*(theorem|lemma|def|abbrev|instance|structure|class|inductive|example)\b"
-)
 
 
 class ExtractionError(Exception):
@@ -78,8 +73,9 @@ def _decl_from_document(
     counterpart).
 
     Because the reported start can sit on a (multi-line) docstring, scan
-    forward (bounded) to the keyword line so the stored position
-    reliably points at the declaration.
+    forward (bounded) to the keyword line — the declaration's header
+    may carry modifiers (`private`, `protected`, …) — so the stored
+    position reliably points at the declaration.
     """
     section_start, section_end = payload.sections[node_name]
     line_map = payload.line_map[node_name]
@@ -89,7 +85,7 @@ def _decl_from_document(
     keyword_line = start
     bound = min(section_end, keyword_line + 64)
     scanned = 0
-    while scanned < 64 and keyword_line <= bound and not _DECLARATION_KEYWORD.match(
+    while scanned < 64 and keyword_line <= bound and not DECLARATION_HEAD.match(
         payload.lines[keyword_line - 1]
     ):
         keyword_line += 1

@@ -21,7 +21,10 @@ from axle_build_tool.imports import parse_imports
 from axle_build_tool.scanner import scan_module
 
 MANIFEST_FILENAME = "manifest.json"
-MANIFEST_VERSION = 2
+#: v2 -> v3: the extraction snap recognizes declaration modifiers
+#: (`private theorem`, …), so recorded spans changed shape; a version
+#: mismatch triggers the full self-healing re-extract at next compile.
+MANIFEST_VERSION = 3
 
 
 class ManifestError(Exception):

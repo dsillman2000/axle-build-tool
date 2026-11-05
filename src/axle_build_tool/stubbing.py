@@ -44,6 +44,17 @@ import re
 
 from axle_build_tool.manifest import ExtractedDecl, ManifestNode
 
+#: A declaration header line: optional `@[...]` attribute, optional Lean
+#: modifiers (`private`, `protected`, `noncomputable`, `unsafe`, `partial`),
+#: then the declaration kind keyword. Extraction's line snapping and the
+#: stub transforms' span-head checks share this single shape, so both key
+#: on the same notion of "this line starts a declaration of kind X".
+DECLARATION_HEAD = re.compile(
+    r"^\s*(?:@\[[^\]]*\]\s*)?"
+    r"(?:(?:private|protected|noncomputable|unsafe|partial)\s+)*"
+    r"(?P<kind>theorem|lemma|example|def|abbrev|structure|class|inductive|instance)\b"
+)
+
 #: Kinds whose bodies are proofs — stubbed with `:= by sorry`.
 PROOF_KINDS = frozenset({"theorem", "lemma", "example"})
 #: Kinds a `--sorry` grant covers: proof kinds get stubbed bodies; def
@@ -77,11 +88,15 @@ def _span_head_matches(line: str, kind: str) -> bool:
 
     Extraction snaps `line_pos` onto the declaration's keyword line, so a
     healthy span starts there (or, in the rare snap-fallback case, on the
-    declaration's docstring). Anything else means the manifest is out of
-    date with the source.
+    declaration's docstring). Modifier-prefixed heads (`private theorem`,
+    `@[simp] def`, …) count as the keyword line they wrap — anything else
+    means the manifest is out of date with the source.
     """
     stripped = line.lstrip()
-    return stripped.startswith(kind) or stripped.startswith("/-")
+    if stripped.startswith("/-"):
+        return True
+    match = DECLARATION_HEAD.match(stripped)
+    return match is not None and match.group("kind") == kind
 
 
 #: The declaration keywords a signature can start (after modifiers).
