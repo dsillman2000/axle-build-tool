@@ -1,0 +1,28 @@
+README.md
+  h_4cc74772b10fd4 91
+tests/test_build.py
+  h_4cc74772b10fd4 171-233
+tests/test_check.py
+  h_4cc74772b10fd4 932-1116
+tests/test_cli.py
+  h_4cc74772b10fd4 15,77
+tests/test_compile.py
+  h_4cc74772b10fd4 104
+tests/test_extraction.py
+  h_4cc74772b10fd4 1-149
+tests/test_live.py
+  h_4cc74772b10fd4 907-961
+tests/test_stubbing.py
+  h_4cc74772b10fd4 304-468
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3c8a5e74208fd663836480d5873f2b301f4639e7",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
