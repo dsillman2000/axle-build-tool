@@ -929,6 +929,191 @@ class TestSorry:
         assert "def base := 1" in content
 
 
+ISSUE38_FILES = {
+    "M/Karatsuba.lean": "theorem helper : True := trivial\n",
+    "M/Total.lean": (
+        "import Karatsuba\n"                                     # 1
+        "namespace Sqrt\n"                                       # 2
+        "private theorem addZero : Nat.zero = Nat.zero := rfl\n"  # 3
+        "private theorem twoPowSq : Nat.one = Nat.one := by\n"    # 4
+        "  rw [Nat.one_def]\n"                                   # 5
+        "private theorem powSqSucc : Nat.two = Nat.two := by\n"   # 6
+        "  rw [Nat.two_def]\n"                                   # 7
+        "\n"                                                     # 8
+        "theorem guardrail_39999_total : Nat.four = Nat.four := by\n"  # 9
+        "  sorry\n"                                              # 10
+        "\n"                                                     # 11
+        "private theorem closing : Nat.three = Nat.three := rfl\n"    # 12
+        "end Sqrt\n"                                             # 13
+    ),
+}
+
+#: Documents the API would report for issue 38's shape: the start of
+#: each `private theorem` sits on its own `private` line (in the payload's
+#: coordinates: the dependency note is inlined first, `M/Total.lean`'s
+#: import line leaves the section, so payload line n maps to file line
+#: n - 2). Ends are the declarations' last payload lines.
+ISSUE38_DOCS = {
+    "theorem helper : True := trivial": {
+        "helper": make_document(
+            "helper", line_pos=1, end_line_pos=1, signature="theorem helper : True"
+        ),
+    },
+    "private theorem addZero": {
+        "addZero": make_document(
+            "addZero",
+            line_pos=4,
+            end_line_pos=4,
+            signature="private theorem addZero : Nat.zero = Nat.zero",
+        ),
+        "twoPowSq": make_document(
+            "twoPowSq",
+            line_pos=5,
+            end_line_pos=6,
+            signature="private theorem twoPowSq : Nat.one = Nat.one",
+        ),
+        "powSqSucc": make_document(
+            "powSqSucc",
+            line_pos=7,
+            end_line_pos=8,
+            signature="private theorem powSqSucc : Nat.two = Nat.two",
+        ),
+        "guardrail_39999_total": make_document(
+            "guardrail_39999_total",
+            is_sorry=True,
+            line_pos=10,
+            end_line_pos=11,
+            signature="theorem guardrail_39999_total : Nat.four = Nat.four",
+        ),
+        "closing": make_document(
+            "closing",
+            line_pos=13,
+            end_line_pos=13,
+            signature="private theorem closing : Nat.three = Nat.three",
+        ),
+    },
+}
+
+
+class TestSorrySiblingDuplication:
+    """Issue 38: `--sorry <module>.<file>.<declaration>` must neither
+    duplicate sibling declarations nor mis-report the stub run.
+
+    The fixture mirrors the affected project: `private theorem` siblings
+    of a sorried target, with a later public declaration in the file —
+    before the fix, the extraction snap of a modifier-prefixed
+    declaration walked past its own line, producing spans that
+    duplicated sibling content in granted payloads.
+    """
+
+    def compile_chain(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> Path:
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, ISSUE38_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = ISSUE38_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        return root
+
+    def test_extracted_spans_land_on_their_own_lines(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The snap must not walk a `private theorem` onto a later
+        declaration's line — the recorded span points at the
+        declaration."""
+        from axle_build_tool.manifest import load_manifest, manifest_path
+
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, ISSUE38_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = ISSUE38_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        manifest = load_manifest(root)
+        by_name = {d.name: d for node in manifest.nodes for d in node.declarations}
+        assert by_name["addZero"].line_pos == 3
+        assert by_name["twoPowSq"].line_pos == 4
+        assert by_name["powSqSucc"].line_pos == 6
+        assert by_name["guardrail_39999_total"].line_pos == 9
+        assert by_name["closing"].line_pos == 12
+        manifest_path(root)  # (keeps unused-import lints honest)
+
+    def test_target_grant_keeps_each_sibling_exactly_once(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """`--sorry <file>.<guard>`: the payload judges the file with
+        only the granted target stubbed — each sibling appears exactly
+        once (the bug duplicated them into 'already been declared')."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.Total", "--sorry", "M.Total.guardrail_39999_total"]
+        )
+
+        assert result.exit_code == 0, result.output
+        content = check_calls(fake_axle)[0]["content"]
+        for header in (
+            "private theorem addZero",
+            "private theorem twoPowSq",
+            "private theorem powSqSucc",
+            "private theorem closing",
+            "theorem guardrail_39999_total",
+        ):
+            assert content.count(header) == 1, content
+        # The grant stubs the target's proof; the siblings keep theirs.
+        assert (
+            "theorem guardrail_39999_total : Nat.four = Nat.four := by sorry"
+            in content
+        )
+        assert "  rw [Nat.one_def]" in content
+        assert "  rw [Nat.two_def]" in content
+
+    def test_module_level_grant_still_skips_the_granted_file(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """`--sorry <file>` (the working variant): the whole file is
+        taken as granted and never submitted."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(main, ["check", "--sorry", "M.Total"])
+
+        assert result.exit_code == 0, result.output
+        assert "taken as granted (--sorry)" in result.output
+        assert len(check_calls(fake_axle)) == 1
+
+    def test_stub_error_names_the_user_selector(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A `--sorry` applying nowhere reports the argument the user
+        typed — not the internal node key."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--select", "M.Karatsuba", "--sorry", "M.Total.guardrail_39999_total"]
+        )
+
+        assert result.exit_code == 1
+        assert (
+            "--sorry 'M.Total.guardrail_39999_total': not a dependency of any "
+            "planned selection" in result.output
+        )
+        assert "--sorry 'M.Total': not a" not in result.output
+
+    def test_stub_metadata_only_counts_applied_stubs(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """The dim stub line describes this payload's stubs: a grant
+        outside a selection's closure is not reported under it."""
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+
+        result = runner.invoke(
+            main, ["check", "--sorry", "M.Total.guardrail_39999_total"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "upstream stubbed" not in result.output
+        assert "siblings stubbed: 1 declaration" in result.output
+        assert len(check_calls(fake_axle)) == 2
+
+
 class TestRitual:
     def test_compile_then_check_ritual(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle

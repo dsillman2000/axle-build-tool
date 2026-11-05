@@ -101,7 +101,7 @@ class TestCompileProject:
 
         raw = json.loads(manifest_path(root).read_text(encoding="utf-8"))
         assert set(raw) == {"version", "generated_at", "nodes"}
-        assert raw["version"] == 2
+        assert raw["version"] == MANIFEST_VERSION
         names = {node["name"] for node in raw["nodes"]}
         assert names == {"M.A", "M.B"}
         # And it still loads through our own loader.
