@@ -1,0 +1,22 @@
+README.md
+  h_4cc74772b10fd4 92
+src/axle_build_tool/payloads.py
+  h_4cc74772b10fd4 31-38,106-112,158-165,168-188
+tests/test_check.py
+  h_4cc74772b10fd4 186-336
+tests/test_live.py
+  h_4cc74772b10fd4 287-318
+tests/test_stubbing.py
+  h_4cc74772b10fd4 80-272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2ed633ceb13f4543f7dea6b2c5ff3a2d63dcc737",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
