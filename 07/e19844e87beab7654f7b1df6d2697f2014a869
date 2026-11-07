@@ -1,0 +1,14 @@
+skills/axbt/SKILL.md
+  h_4cc74772b10fd4 68-71,123-125,127-137,158-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07e19844e87beab7654f7b1df6d2697f2014a869",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
