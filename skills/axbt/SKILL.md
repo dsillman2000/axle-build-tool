@@ -65,7 +65,10 @@ Guidance for structuring Lean code:
 ## The iteration loop
 
 Work from the project root (axbt writes `.axbt/` there — a compact
-single-line `manifest.json` cache plus inspectable payloads; gitignore it).
+single-line `manifest.json` cache, inspectable payloads under `compiled/`,
+and failing submissions under `failed/`; gitignore it. `compile` prunes
+`compiled/` files whose source files are gone — "cache dir ⊋ manifest ⇒
+delete" — while `failed/` payloads survive recompiles untouched).
 
 1. **Edit** the Lean source.
 2. **`axbt compile`** — scan, detect changes (MD5), extract declarations via
@@ -117,10 +120,21 @@ Key semantics when advising the user:
 - **`--force`** (check/verify/build) re-judges every selection even when
   all declarations already carry a valid stamp, bypassing the delta cache.
   `build` passes it to both tiers.
-- **Minification is on by default**: comments and blank lines are stripped
-  from submitted payloads (docstrings and indentation survive; attribution
-  stays exact). `--no-minify` opts a run out;
+- **Minification is on by default**: comments, docstrings, and blank lines
+  are stripped from submitted payloads (structural indentation survives;
+  attribution stays exact). `--no-minify` opts a run out;
   `project.minify: false` changes the default.
+- **Failing submissions persist automatically** (issue 42's debugging
+  workflow): on a FAIL verdict, the exact submitted content (minified and
+  trimmed as sent — the shape the printed coordinates refer to) is written
+  to `.axbt/failed/<request-id>.lean`, with `<request-id>.map.json` carrying
+  the payload→source position map (sections, per-section source line lists,
+  node→source paths, tier, request id). The FAIL row names both paths, and
+  attributable diagnostics carry the covering declaration:
+  `<file>:<line> ... (declaration 'name')`. Nothing persists on OK or SKIP,
+  failures of repeat runs accumulate side by side (keyed on request id),
+  and recompiles never prune `failed/`. This makes FAIL-span autopsies a
+  local, offline operation — no dependency on `--share`'s web UI.
 - **`--share`** (check/verify/build) prints a web link to that exact run —
   check runs open the check UI, verify runs the verify_proof UI. Best
   effort; never affects exit codes.
@@ -141,6 +155,20 @@ Key semantics when advising the user:
   `axbt build --sorry <upstream-file>` (grants apply in both passes), or
   `--permitted-sorries <selector>` when only that one declaration is
   sorried in source.
+- When a FAIL needs investigating (usually reading attributed positions
+  isn't enough — e.g. out-of-reach span positions like a `whnf` timeout,
+  or a composition/shape question that doesn't reproduce from source):
+  read the failing run's `.axbt/failed/<request-id>.lean` — the exact
+  bytes the API saw — and walk its coordinates through `.map.json`
+  (`line_map` per section → original file lines; `paths` names the
+  files). The report line above the diagnostics already names the paths.
+  Deterministic failures persist the same content on every retry, so an
+  unrelated edit (run again, fail again) still gets a fresh request id.
+- When tidying a project (files deleted, stems renamed): `compile` (or
+  `--full-refresh`) prunes the dead payloads from `.axbt/compiled/` and
+  prints what it pruned; if a stale `--select` on a former file stem
+  reports "no file stem matches", the manifest is already right — the
+  old cache artifact was the only residue, and the same run removes it.
 - Before claiming success to the user: the success criterion for a Lean
   project here is the verify tier exiting 0 (i.e. `axbt verify` or
   `axbt build` exiting 0) — a green `check` is not sufficient on its own.
