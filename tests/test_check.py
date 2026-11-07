@@ -183,6 +183,157 @@ class TestSelection:
         assert "Checked 1 selection(s): all OK" in result.output
 
 
+class TestScopedOptionPrefixTrimming:
+    """Trimming takes `set_option … in` prefixes with their declarations.
+
+    `set_option … in` attaches to the declaration whose span follows;
+    a scoped (`--select`) submission whose trimming leaves the prefix
+    behind strands it — at worst as the payload's last line, where the
+    API parser fails with a real parse error (issue 41).
+    """
+
+    SCOPED_SOURCE = "\n".join(
+        [
+            "def base := 1",                                     # 1
+            "",                                                  # 2
+            "set_option maxHeartbeats 400000 in",                # 3
+            "/-- scoped doc -/",                                 # 4
+            "theorem scoped_one : base = base := rfl",           # 5
+            "",                                                  # 6
+            "set_option maxHeartbeats 400000 in",                # 7
+            "theorem scoped_two : base = base := rfl",           # 8
+        ]
+    ) + "\n"
+
+    DOCS = {
+        "def base := 1": {
+            "base": make_document("base", kind="def", line_pos=1, end_line_pos=1),
+        },
+        "theorem scoped_two": {
+            "scoped_one": make_document(
+                "scoped_one",
+                line_pos=5,
+                end_line_pos=5,
+                local_value_dependencies=["base"],
+            ),
+            "scoped_two": make_document(
+                "scoped_two", line_pos=8, end_line_pos=8
+            ),
+        },
+    }
+
+    def test_trimmed_select_absorbs_the_dropped_scoped_prefixes(self, make_project, tmp_path, monkeypatch, fake_axle) -> None:
+        root = make_project(
+            tmp_path, NO_TARGETS_CONFIG, {"M/Scoped.lean": self.SCOPED_SOURCE}
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--select", "M.Scoped.scoped_one"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.Scoped.scoped_one") == (
+            "M.Scoped.scoped_one OK"
+        )
+        calls = check_calls(fake_axle)
+        assert len(calls) == 1
+        assert calls[0]["names"] == ["scoped_one"]
+        # The kept declaration's own prefix rides above it; the dropped
+        # sibling's prefix went with the sibling — exactly one
+        # `set_option … in` in the payload, and not as the last line.
+        content = calls[0]["content"]
+        assert content.count("set_option maxHeartbeats 400000 in") == 1, content
+        assert "def base := 1" in content
+        stripped = [line for line in content.splitlines() if line.strip()]
+        assert "set_option maxHeartbeats 400000 in" in stripped[1:-1], stripped
+        assert stripped[-1] == "theorem scoped_one : base = base := rfl", stripped
+
+    def test_trimmed_select_over_an_inlined_dependency_leaves_no_cross_file_strands(self, make_project, tmp_path, monkeypatch, fake_axle) -> None:
+        root = make_project(
+            tmp_path,
+            NO_TARGETS_CONFIG,
+            {
+                "M/Deps.lean": (
+                    "def unimportant : Nat := 1\n"
+                    "\n"
+                    "set_option maxHeartbeats 400000 in\n"      # 3
+                    "/-- scoped doc -/\n"                        # 4
+                    "theorem scoped_p : unimportant = unimportant := by\n"
+                    "  simp [unimportant]\n"                     # 6
+                    "\n"
+                    "set_option maxHeartbeats 400000 in\n"       # 8
+                    "theorem scoped_q : unimportant = unimportant := by\n"
+                    "  simp [unimportant]\n"                     # 10
+                ),
+                "M/Sections.lean": (
+                    "import Deps\n"                              # 1 (internal)
+                    "\n"
+                    "section HeavySection\n"                     # 3
+                    "\n"
+                    "set_option maxHeartbeats 800000\n"          # 5
+                    "/-- section-scoped doc -/\n"                # 6
+                    "theorem section_a : unimportant = unimportant := by\n"
+                    "  simp [unimportant]\n"                     # 8
+                    "\n"
+                    "theorem section_b : unimportant * unimportant = unimportant := by\n"  # 10
+                    "  simp [unimportant]\n"                     # 11
+                    "\n"
+                    "end HeavySection\n"                         # 13
+                ),
+            },
+        )
+        monkeypatch.chdir(root)
+        # Extraction coordinates: payloads are assembled with the
+        # dependencies' proof bodies stubbed, so sections shrink by one
+        # line per stub — see the markers' recorded positions below.
+        fake_axle._extract_documents_by_marker = {
+            "def unimportant : Nat := 1": {
+                "unimportant": make_document(
+                    "unimportant", kind="def", line_pos=1, end_line_pos=1
+                ),
+                "scoped_p": make_document(
+                    "scoped_p", line_pos=5, end_line_pos=6,
+                    local_value_dependencies=["unimportant"],
+                ),
+                "scoped_q": make_document(
+                    "scoped_q", line_pos=9, end_line_pos=10,
+                    local_value_dependencies=["unimportant"],
+                ),
+            },
+            "section_b : unimportant": {
+                "section_a": make_document(
+                    "section_a", line_pos=15, end_line_pos=16,
+                    local_value_dependencies=["unimportant"],
+                ),
+                "section_b": make_document(
+                    "section_b", line_pos=18, end_line_pos=19,
+                    local_value_dependencies=["unimportant"],
+                ),
+            },
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--select", "M.Sections.section_b"])
+
+        assert result.exit_code == 0, result.output
+        calls = check_calls(fake_axle)
+        assert len(calls) == 1
+        content = calls[0]["content"]
+        stripped = [line for line in content.splitlines() if line.strip()]
+        # The inlined dependency kept only its used def; both scoped
+        # decls and their prefixes left with them.
+        assert stripped[0] == "def unimportant : Nat := 1", stripped
+        assert not any("400000" in line for line in stripped), stripped
+        # The section frame survived: the section-scoped option is
+        # attached to the kept theorem, and the section closes.
+        assert "section HeavySection" in stripped
+        assert stripped.count("set_option maxHeartbeats 800000") == 1
+        assert stripped[-1] == "end HeavySection", stripped
+
+
 class TestMinification:
     """Payload minification is on by default; `--no-minify` opts a run
     out (and both document the exact escape-hatch behavior)."""
