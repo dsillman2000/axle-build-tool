@@ -23,9 +23,7 @@ uv tool upgrade axle-build-tool   # later: pick up new commits from the repo
 uvx --from git+https://github.com/dsillman2000/axle-build-tool axbt <command>
 ```
 
-Scaffold a new project """
-
-Bash:
+Scaffold a new project:
 
 ```bash
 # Scaffold a new axbt project anywhere:
@@ -85,8 +83,8 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 
 * `--incremental` (default) — re-extract only new and changed files; a clean tree makes no API calls.
 * `--full-refresh` — ignore the previous manifest and re-extract everything.
-* `--no-compile` (check/verify/build) — take the existing manifest at face value.
-* `--fail-fast` / `-x` (check/verify/build) — stop at the first failing selection: cancel all ongoing submissions and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`); under `build`, a fail-fast in the check pass ends the build before the verify pass.
+* `--no-compile` (check/verify/build) — take the existing manifest at face value. It never rescans, so an edit made after the last compile will not be noticed (cached verdicts serve); run a plain check or compile first for fresh content.
+* `--fail-fast` / `-x` (check/verify/build) — stop at the first failing selection: cancel every submission still in flight and report the failure instead of finishing the run. The summary counts what was not judged (`2 cancelled by fail-fast`); under `build`, a fail-fast in the check pass ends the build before the verify pass.
 * `--force` (check/verify/build) — re-judge every selection even when all declarations already carry a valid stamp (bypasses the delta cache). `build` passes it to both tiers.
 * `--sorry <selector>` (repeatable) — grant a dependency subtree: theorem proof bodies become `sorry` stubs in the submitted payload (signatures intact), and the granted declarations are excused — skipped under check, auto-permitted under verify. Def/abbrev bodies stay real: they are definitional content that downstream proofs unfold (anonymous constructors, projections, `rfl`), so stubbing them would break the very elaboration the grants are meant to leave working. Verify theorems against trusted dependency signatures, or check without paying for slow or broken upstream proofs. Selectors may name a module, a file, or a dot-qualified declaration; a mistyped selector that applies to no planned selection is rejected up front — with the selector text you typed, not an internal key.
 * `--select <selector>` (check/verify/build) — when selecting a declaration, the submitted payload is trimmed to that declaration plus its transitive dependency closure: declarations unreachable from the selection (in the selected file and its dependency files) are dropped, so a selection no longer pulls in unrelated work. File- and module-level selections keep every declaration in the selected files. A dropped declaration leaves with what Lean attaches to it — its docstring and any chained `set_option … in` prefixes directly above it — so scoped options never survive detached from their declaration (a payload ending in a stranded `set_option … in` would fail to parse outright).
@@ -121,7 +119,8 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 14:22:04.185 [ 2/2] M.B.t2  START  [RUN]
 14:22:04.492 [ 1/2] M.A.t1  OK  0.312s
 14:22:05.725 [ 2/2] M.B.t2  FAIL  1.234s
-    [line 3, col 5 of M/B.lean] ...
+    failed submission saved: .axbt/failed/9f0f26e7.lean (+ .map.json; payload coordinates map to source through its line_map)
+    M/B.lean:3:5: error: unsolved goals
 14:22:05.726 [ 3/3] M.C.t3  SKIP
 14:22:05.730 Checked 3 selection(s): 1 failed, 2 OK in 1.589s
 ```
@@ -144,7 +143,7 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 
 ### Outcome records in the manifest
 
-The manifest records three kinds of per-declaration facts (all additive, optional fields — old manifests load unchanged, and new runs backfill them):
+The manifest records three kinds of per-declaration facts (all additive, optional fields — a manifest version upgrade simply self-heals with one full re-extract):
 
 * **Dependencies** (`compile`) — every extracted declaration carries `dependencies` (the deduplicated, sorted union of the API's local type/value/syntactic dependency lists; declaration names as the API reports them, cross-file edges included) and `external_dependencies` (names outside the project — tooltip material, not graph nodes).
 * **Check stamps** (`check`) — a payload that passed clean stamps every declaration it judged with `checked_sig`/`checked_at`/`checked_request_id`. The signature covers the file dependency closure's content, the resolved environment, and the global options — the same key material the verify cache uses. A file whose declarations all carry a matching stamp is not re-submitted (`OK (cached)`), so `checked_*` means "last actually judged"; cached selections keep their (stale-but-valid) stamps. `--force` re-judges everything. `--sorry`-stubbed and failing payloads record nothing.
@@ -206,8 +205,11 @@ M/…                   # module source directories (`.lean` files)
   compiled/           #   the exact standalone payloads submitted to the API
                       #   (minified by default, like the submissions). GC'd on
                       #   every manifest rewrite: files with no live node go.
+                      #   `--sorry` runs also persist the `_stubbed.lean`
+                      #   variants they sent.
   failed/             #   failing submissions' exact payloads (+ `.map.json`,
                       #   the payload→source position map), one pair per FAIL
+  graph.html          #   the rendered dependency graph (from `axbt graph`)
 ```
 
 ## Development
@@ -220,4 +222,4 @@ AXLE_API_KEY=… uv run pytest -m live   # live suite against the real API
 
 CI runs the offline suite on every PR, the live suite and the demo pipeline (`compile && check && verify` per demo) on every PR and push to `main`.
 
-See the GitHub issues for the phase-by-phase history.
+See the GitHub issues for the design and close-out history.
