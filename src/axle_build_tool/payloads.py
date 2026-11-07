@@ -28,6 +28,14 @@ from axle_build_tool.stubbing import PROOF_KINDS, stubbed_source
 
 _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:--.*)?$")
 
+#: A line opening a scoped-option prefix (`set_option … in`) that Lean
+#: attaches to the next command — i.e. to the declaration its span covers.
+#: Only the split-line form matters here: `set_option … in theorem …` on a
+#: single line is inside the declaration's own span. Responsible for the
+#: dangling `in`-continuations of issue 41 (the payload parser receiving
+#: the trimmed content sees `set_option` as a standalone command).
+_SCOPED_OPTION_PREFIX_LINE = re.compile(r"^\s*set_option\s+.+\bin\s*$")
+
 #: Subdirectory of the cache holding persisted payloads.
 COMPILED_DIRNAME = "compiled"
 
@@ -95,6 +103,13 @@ def _transform_member_source(
     Declarations whose spans fail these checks keep their real source and
     lose only their stub/trim treatment, keeping the payload's content
     complete even when a manifest is stale.
+
+    Trimmed declarations leave with what Lean attaches to them: the
+    declaration's docstring and any chained `set_option … in` prefixes
+    directly above it, plus the blank lines woven between (see the
+    trim-extension walk below). Keeping those behind detaches scoped
+    options from their declaration — a payload ending in a stranded
+    `set_option … in` fails to parse outright.
     """
     lines = source.splitlines()
     if not lines:
@@ -140,20 +155,37 @@ def _transform_member_source(
         )
         kept = keep_names is None or declaration.name in keep_names
 
-        # For trimmed declarations, extend the removed span upward to
-        # include a directly-preceding docstring, so it does not become
-        # an orphan in the submitted payload.
+        # For trimmed declarations, extend the removed span upward so the
+        # lines Lean attaches to the declaration go with it: its
+        # directly-preceding docstring, and any directly-preceding chained
+        # `set_option … in` scoped-option prefixes (in either order, with
+        # blank lines woven between). Dropping the declaration without
+        # them strands the prefix above whatever survives — or as the
+        # payload section's last content, where the API parser sees
+        # `set_option … in` as an unterminated command (issue 41).
         trim_start = start
         if (not kept) and (not stale):
-            i = start - 1
-            while i >= cursor and lines[i].strip() == "":
-                i -= 1
-            if i >= cursor and lines[i].strip().endswith("-/"):
-                j = i
-                while j >= cursor and not lines[j].strip().startswith("/-"):
-                    j -= 1
-                if j >= cursor:
-                    trim_start = j
+            probe = start - 1
+            while probe >= cursor:
+                if lines[probe].strip() == "":
+                    probe -= 1
+                    continue
+                if _SCOPED_OPTION_PREFIX_LINE.match(lines[probe]):
+                    probe -= 1
+                    continue
+                if lines[probe].strip().endswith("-/"):
+                    open_index = probe
+                    while (
+                        open_index >= cursor
+                        and not lines[open_index].strip().startswith("/-")
+                    ):
+                        open_index -= 1
+                    if open_index < cursor:
+                        break
+                    probe = open_index - 1
+                    continue
+                break
+            trim_start = probe + 1
 
         # Lines before the (possibly extended) span survive — and the
         # cursor must never fall behind content already emitted.

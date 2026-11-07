@@ -77,6 +77,199 @@ def stubbed_node(declarations) -> ManifestNode:
     return NODE.model_copy(update={"declarations": declarations})
 
 
+SCOPED_SOURCE = "\n".join(
+    [
+        "def base : Nat := 1",                          # 1
+        "",                                             # 2
+        "set_option maxHeartbeats 400000 in",           # 3
+        "/-- scoped doc -/",                            # 4
+        "theorem scoped_a : base = 1 := by",            # 5
+        "  simp [base]",                                # 6
+        "",                                             # 7
+        "set_option maxHeartbeats 400000 in",           # 8
+        "theorem scoped_b : base * 2 = 2 := by",        # 9
+        "  simp [base]",                                # 10
+        "",                                             # 11
+        "theorem tail : base = 1 := rfl",               # 12
+    ]
+) + "\n"
+
+SCOPED_DECLS = [
+    decl("base", "def", 1, 1, "def base : Nat"),
+    decl("scoped_a", "theorem", 5, 6, "theorem scoped_a : base = 1"),
+    decl("scoped_b", "theorem", 9, 10, "theorem scoped_b : base * 2 = 2"),
+    decl("tail", "theorem", 12, 12, "theorem tail : base = 1"),
+]
+
+
+class TestTrimAbsorbsScopedOptionPrefixes:
+    """Trimming a declaration takes its `set_option … in` prefixes with it.
+
+    Lean attaches a scoped-option prefix line to the declaration whose
+    span follows; a trim that leaves the prefix behind detaches it — at
+    worst stranding `set_option … in` as the payload's last content,
+    which fails to parse outright (issue 41).
+    """
+
+    def transform(self, keep, source=SCOPED_SOURCE, declarations=SCOPED_DECLS):
+        from axle_build_tool.payloads import _NOT_STUBBED, _transform_member_source
+
+        warnings: list[str] = []
+        transformed, orig = _transform_member_source(
+            self.node_with(declarations), source, _NOT_STUBBED, frozenset(keep), warnings
+        )
+        return transformed, orig
+
+    @staticmethod
+    def node_with(declarations) -> ManifestNode:
+        return NODE.model_copy(update={"declarations": declarations})
+
+    def test_trimming_scoped_declarations_leaves_no_dangling_prefix(self) -> None:
+        transformed, _orig = self.transform({"base", "tail"})
+
+        assert "set_option" not in transformed, transformed
+        assert "def base : Nat := 1" in transformed
+        assert "theorem tail : base = 1 := rfl" in transformed
+        assert "scoped_a" not in transformed
+        assert "scoped_b" not in transformed
+
+    def test_prefix_above_docstring_absorbs_both(self) -> None:
+        source = "\n".join(
+            [
+                "def x : Nat := 1",                        # 1
+                "",                                        # 2
+                "set_option maxHeartbeats 400000 in",      # 3
+                "/-- doc -/",                              # 4
+                "theorem dd : x = 1 := rfl",               # 5
+            ]
+        ) + "\n"
+        transformed, _orig = self.transform(
+            {"x"},
+            source=source,
+            declarations=[decl("x", "def", 1, 1, "def x : Nat"),
+                          decl("dd", "theorem", 5, 5, "theorem dd : x = 1")],
+        )
+
+        assert transformed == "def x : Nat := 1\n", transformed
+
+    def test_prefix_below_docstring_absorbs_both(self) -> None:
+        source = "\n".join(
+            [
+                "def x : Nat := 1",                        # 1
+                "",                                        # 2
+                "/-- doc -/",                              # 3
+                "set_option maxHeartbeats 400000 in",      # 4
+                "theorem dd : x = 1 := rfl",               # 5
+            ]
+        ) + "\n"
+        transformed, _orig = self.transform(
+            {"x"},
+            source=source,
+            declarations=[decl("x", "def", 1, 1, "def x : Nat"),
+                          decl("dd", "theorem", 5, 5, "theorem dd : x = 1")],
+        )
+
+        assert transformed == "def x : Nat := 1\n", transformed
+
+    def test_chained_prefixes_absorb_together(self) -> None:
+        source = "\n".join(
+            [
+                "def x : Nat := 1",                        # 1
+                "",                                        # 2
+                "set_option pp.all true in",               # 3
+                "set_option maxHeartbeats 400000 in",      # 4
+                "/-- doc -/",                              # 5
+                "theorem dd : x = 1 := rfl",               # 6
+            ]
+        ) + "\n"
+        transformed, _orig = self.transform(
+            {"x"},
+            source=source,
+            declarations=[decl("x", "def", 1, 1, "def x : Nat"),
+                          decl("dd", "theorem", 6, 6, "theorem dd : x = 1")],
+        )
+
+        assert transformed == "def x : Nat := 1\n", transformed
+
+    def test_bare_set_option_without_in_stays(self) -> None:
+        """A section-scoped option (no `in`) belongs to the section, not
+        to the next declaration — it must survive the trim."""
+        source = "\n".join(
+            [
+                "def x : Nat := 1",                        # 1
+                "",                                        # 2
+                "set_option maxHeartbeats 800000",         # 3
+                "/-- doc -/",                              # 4
+                "theorem dd : x = 1 := rfl",               # 5
+            ]
+        ) + "\n"
+        transformed, _orig = self.transform(
+            {"x"},
+            source=source,
+            declarations=[decl("x", "def", 1, 1, "def x : Nat"),
+                          decl("dd", "theorem", 5, 5, "theorem dd : x = 1")],
+        )
+
+        assert "set_option maxHeartbeats 800000" in transformed, transformed
+        assert "theorem dd" not in transformed
+
+    def test_line_comment_mentioning_the_form_is_not_absorbed(self) -> None:
+        source = "\n".join(
+            [
+                "def x : Nat := 1",                        # 1
+                "",                                        # 2
+                "-- set_option maxHeartbeats 400000 in",   # 3
+                "/-- doc -/",                              # 4
+                "theorem dd : x = 1 := rfl",               # 5
+            ]
+        ) + "\n"
+        transformed, _orig = self.transform(
+            {"x"},
+            source=source,
+            declarations=[decl("x", "def", 1, 1, "def x : Nat"),
+                          decl("dd", "theorem", 5, 5, "theorem dd : x = 1")],
+        )
+
+        assert "-- set_option maxHeartbeats 400000 in" in transformed, transformed
+
+    def test_kept_declaration_keeps_its_prefix_and_docstring(self) -> None:
+        transformed, _orig = self.transform({"base", "scoped_a"})
+
+        assert "set_option maxHeartbeats 400000 in" in transformed, transformed
+        assert "/-- scoped doc -/" in transformed
+        assert "theorem scoped_a : base = 1 := by" in transformed
+        # The dropped sibling's prefix went with it.
+        assert transformed.count("set_option") == 1, transformed
+        assert "scoped_b" not in transformed
+
+    def test_prefix_boundary_is_the_previous_kept_content(self) -> None:
+        """The absorb walk stops on the first line that neither ends a
+        docstring nor opens a scoped-option prefix — a kept sibling's
+        own content is never consumed."""
+        source = "\n".join(
+            [
+                "theorem kept : True := rfl",              # 1
+                "set_option maxHeartbeats 400000 in",      # 2
+                "theorem dd : True := rfl",                # 3
+            ]
+        ) + "\n"
+        transformed, _orig = self.transform(
+            {"kept"},
+            source=source,
+            declarations=[decl("kept", "theorem", 1, 1, "theorem kept : True"),
+                          decl("dd", "theorem", 3, 3, "theorem dd : True")],
+        )
+
+        assert transformed.splitlines()[0] == "theorem kept : True := rfl", transformed
+        assert "set_option" not in transformed
+
+    def test_absorbed_trims_stay_a_strict_partition(self) -> None:
+        transformed, orig = self.transform({"base", "tail"})
+
+        non_stub = [line for line in orig if line is not None]
+        assert len(non_stub) == len(set(non_stub)), non_stub
+        assert "set_option" not in transformed
+
 class TestStubbedSource:
     def test_stubbed_bodies_keep_signatures_and_context(self) -> None:
         result = stubbed_source(stubbed_node(DECLS), SOURCE)

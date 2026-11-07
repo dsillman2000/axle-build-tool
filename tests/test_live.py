@@ -284,6 +284,38 @@ class TestLiveCheck:
             "M.User.derived_holds OK"
         )
 
+    def test_check_select_absorbs_scoped_option_prefixes(self, make_live_project) -> None:
+        """Trimming a scoped-option declaration takes its `set_option … in`
+        prefix with it, so the payload still parses (issue 41).
+
+        Before this the trimmed payload stranded `set_option … in` as its
+        last line and the API answered with a parse error; with the
+        prefix absorbed the same selection checks cleanly.
+        """
+        make_live_project(
+            {
+                "M/Base.lean": BASE_SOURCE,
+                "M/Scoped.lean": (
+                    "import Base\n"
+                    "\n"
+                    "set_option maxHeartbeats 400000 in\n"
+                    "/-- docstring for the scoped theorem -/\n"
+                    "theorem scoped_holds : base = 1 := by simp [base]\n"
+                    "\n"
+                    "set_option maxHeartbeats 400000 in\n"
+                    "theorem scoped_other : base + 0 = 1 := by simp [base]\n"
+                ),
+            },
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        result = runner.invoke(main, ["check", "--select", "M.Scoped.scoped_holds"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.Scoped.scoped_holds") == (
+            "M.Scoped.scoped_holds OK"
+        )
+
     def test_check_failure_exits_1_with_messages(self, make_live_project) -> None:
         """A source corrupted after compile fails check with attribution."""
         root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
