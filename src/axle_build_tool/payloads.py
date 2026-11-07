@@ -15,8 +15,10 @@ incremental plan).
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -38,6 +40,11 @@ _SCOPED_OPTION_PREFIX_LINE = re.compile(r"^\s*set_option\s+.+\bin\s*$")
 
 #: Subdirectory of the cache holding persisted payloads.
 COMPILED_DIRNAME = "compiled"
+
+#: Subdirectory of the cache holding failed submissions' payloads and
+#: position maps (`.axbt/failed/`). Sibling of `compiled/` so the
+#: compiled-payload GC pass never has to special-case it.
+FAILED_DIRNAME = "failed"
 
 
 @dataclass
@@ -391,6 +398,97 @@ def source_position(payload: Payload, line: int) -> tuple[str, int] | None:
         if start <= line <= end:
             return node_name, payload.line_map[node_name][line - start]
     return None
+
+
+def gc_compiled_payloads(manifest: Manifest, project_root: Path) -> list[Path]:
+    """Delete stale files under `.axbt/compiled/` ("cache dir ⊋ manifest ⇒ delete").
+
+    A name corresponds to a live manifest state if it is a node's
+    `isolated` payload, a persisted `stubbed` variant of that node, or a
+    module-level `stubbed`/`isolated` per-selection payload of a module
+    that still has nodes. Anything else under the directory (left over
+    from a deleted source file, a renamed stem, or a dropped module)
+    is removed, since stale module-slug files invite tooling to trust
+    code the project no longer contains.
+
+    Runs at manifest-rewrite time — the compile precursor's pass after
+    the fresh manifest is known. Files under other cache subdirectories
+    (notably `.axbt/failed/`) are untouched; the pass only sweeps
+    `compiled/`.
+    """
+    directory = compiled_payload_dir(project_root)
+    if not directory.is_dir():
+        return []
+    live: set[str] = set()
+    for node in manifest.nodes:
+        base = f"{node.module}_{dotted_stem_of(node).replace('.', '_')}"
+        live.add(f"{base}_isolated.lean")
+        live.add(f"{base}_stubbed.lean")
+    for module in {node.module for node in manifest.nodes}:
+        live.add(f"{module}_isolated.lean")
+        live.add(f"{module}_stubbed.lean")
+    removed: list[Path] = []
+    for entry in sorted(directory.iterdir()):
+        if entry.is_file() and entry.name not in live:
+            try:
+                entry.unlink()
+            except OSError:
+                continue  # a busy file is re-swept at the next compile
+            removed.append(entry)
+    return removed
+
+
+def failed_payload_dir(project_root: Path) -> Path:
+    """The `.axbt/failed/` directory of `project_root`."""
+    return project_root / CACHE_DIRNAME / FAILED_DIRNAME
+
+
+def persist_failed_payload(
+    content: str,
+    payload: Payload,
+    *,
+    project_root: Path,
+    request_id: str | None,
+    tier: str,
+    paths: dict[str, str],
+) -> tuple[Path, Path]:
+    """Persist a failing submission's exact payload and position map.
+
+    Writes `<id>.lean` — the submitted content verbatim, the shape the
+    FAIL diagnostics' coordinates refer to — and `<id>.map.json` along-
+    side it: the payload→source position map (sections, the per-section
+    source line lists, and node→source paths) plus the run context.
+    Only called on a FAIL verdict; ids key on the API's request id when
+    present (opaque stem, falling back to a UTC timestamp), so repeated
+    failures of the same selection land side by side instead of
+    clobbering each other.
+    """
+    if request_id:
+        stem = re.sub(r"[^A-Za-z0-9._-]", "_", request_id)
+    else:
+        stem = datetime.now(timezone.utc).strftime("noid-%Y%m%dT%H%M%S.%fZ")
+    directory = failed_payload_dir(project_root)
+    directory.mkdir(parents=True, exist_ok=True)
+    lean_path = directory / f"{stem}.lean"
+    map_path = directory / f"{stem}.map.json"
+    lean_path.write_text(content, encoding="utf-8")
+    map_path.write_text(
+        json.dumps(
+            {
+                "request_id": request_id,
+                "tier": tier,
+                "sections": {
+                    name: list(span) for name, span in payload.sections.items()
+                },
+                "line_map": payload.line_map,
+                "paths": paths,
+            },
+            indent=1,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return lean_path, map_path
 
 
 def build_file_payload(

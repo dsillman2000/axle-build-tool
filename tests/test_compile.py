@@ -447,6 +447,77 @@ class TestExtraction:
         (node,) = load_manifest(root).nodes
         assert node.declarations[0].is_sorry is True
 
+    def test_compilation_gcs_payload_artifacts_of_dropped_nodes(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
+        """Deleting a source file and recompiling prunes its `.axbt/compiled/`
+        payloads — stale module-slug files must not survive the manifest
+        rewrite (issue 43). Live stubbed and module-level variants of
+        *live* nodes, and failing submissions under `.axbt/failed/`, stay.
+        """
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {
+                "M/A.lean": "def x := 1\n",
+                "M/B.lean": "theorem y : True := rfl\n",
+            },
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "def x := 1": {
+                "x": make_document("x", kind="def", line_pos=1, end_line_pos=1)
+            },
+            "theorem y": {
+                "y": make_document("y", kind="theorem", line_pos=1, end_line_pos=1)
+            },
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        compiled = root / ".axbt" / "compiled"
+        assert (compiled / "M_A_isolated.lean").is_file()
+        assert (compiled / "M_B_isolated.lean").is_file()
+
+        # Stale candidates plus kept artifacts: the dropped node's stubbed
+        # variant, a module-level stubbed variant (module still live), and
+        # a failing submission under `.axbt/failed/`.
+        (compiled / "M_B_stubbed.lean").write_text("stubbed\n", encoding="utf-8")
+        (compiled / "M_stubbed.lean").write_text("stubbed\n", encoding="utf-8")
+        failed = root / ".axbt" / "failed"
+        failed.mkdir(parents=True, exist_ok=True)
+        (failed / "req-1.lean").write_text("payload\n", encoding="utf-8")
+        (root / "M" / "B.lean").unlink()
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert load_manifest(root).by_name().keys() == {"M.A"}
+        assert (compiled / "M_A_isolated.lean").is_file()
+        assert not (compiled / "M_B_isolated.lean").exists()
+        assert not (compiled / "M_B_stubbed.lean").exists()
+        # Module M is still live, so its per-selection stubbed payload stays —
+        # and `.axbt/failed/` is a sibling of the swept directory.
+        assert (compiled / "M_stubbed.lean").is_file()
+        assert (failed / "req-1.lean").is_file()
+        assert "Pruned 2 stale payload file(s)" in result.output
+        assert (
+            ".axbt/compiled/M_B_isolated.lean, .axbt/compiled/M_B_stubbed.lean"
+            in result.output
+        )
+
+    def test_compilation_without_dead_artifacts_makes_no_prune_note(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
+        root = make_project(
+            tmp_path, SIMPLE_CONFIG, {"M/A.lean": "def x := 1\n"}
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "def x := 1": {
+                "x": make_document("x", kind="def", line_pos=1, end_line_pos=1)
+            },
+        }
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert "Pruned" not in result.output
+
     def test_declaration_dependencies_are_recorded(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
     ) -> None:

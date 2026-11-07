@@ -221,6 +221,52 @@ class TestSelection:
         assert status_line(result.output, "M") == "M OK"
 
 
+class TestFailedSubmissionPersistence:
+    """A FAILing verify submission persists its payload and map (issue 42)."""
+
+    def test_failing_verify_persists_payload_and_map(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        import json as jsonlib
+
+        root = make_project(
+            tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": "theorem t1 : 1 = 1 :=\n  rfl\n"}
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document("t1", kind="theorem", line_pos=1, end_line_pos=2)
+            }
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        fake_axle.verify_result = make_response(
+            VerifyProofResponse,
+            okay=False,
+            negation=None,
+            lean_messages=Messages(["-:2:3: error: boom"], [], []),
+        )
+
+        result = runner.invoke(main, ["verify", "--select", "M.A"])
+
+        assert result.exit_code == 1, result.output
+        rid = fake_axle.request_ids[-1]
+        failed_dir = root / ".axbt" / "failed"
+        assert (failed_dir / f"{rid}.lean").is_file(), result.output
+        # The persisted content is the verify submission's own payload
+        # (the formal-statement transform rides alongside it, not in it).
+        assert (failed_dir / f"{rid}.lean").read_text(
+            encoding="utf-8"
+        ) == verify_calls(fake_axle)[0]["content"]
+        position_map = jsonlib.loads(
+            (failed_dir / f"{rid}.map.json").read_text(encoding="utf-8")
+        )
+        assert position_map["request_id"] == rid
+        assert position_map["tier"] == "verify"
+        assert position_map["paths"] == {"M.A": "M/A.lean"}
+        assert f".axbt/failed/{rid}.lean" in result.output
+
+
 class TestSkipsAndLocalFailures:
     def test_definition_targets_are_skipped_with_a_note(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -312,9 +358,7 @@ class TestFailureReporting:
         assert "    M/A.lean:2:3: error: boom" in result.output
         assert "Verified 1 selection(s): 1 failed, 0 OK" in result.output
 
-    def test_failure_without_messages_reports_failed_declarations(
-        self, make_project, tmp_path: Path, monkeypatch, fake_axle
-    ) -> None:
+    def test_failure_without_messages_reports_failed_declarations(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
         root = make_project(tmp_path, NO_TARGETS_CONFIG, THEOREM_FILES)
         monkeypatch.chdir(root)
         fake_axle._extract_documents_by_marker = THEOREM_DOCS
