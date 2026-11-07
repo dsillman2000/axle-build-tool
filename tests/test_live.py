@@ -316,6 +316,32 @@ class TestLiveCheck:
             "M.Scoped.scoped_holds OK"
         )
 
+    def test_failed_check_persists_payload_and_position_map(self, make_live_project) -> None:
+        """A live FAIL leaves the submitted payload and its payload→source
+        position map under `.axbt/failed/` (issue 42)."""
+        root = make_live_project(
+            {"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"]
+        )
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        base = root / "M" / "Base.lean"
+        base.write_text(BASE_SOURCE.replace("= rfl", "= Hoff"), encoding="utf-8")
+
+        result = runner.invoke(main, ["check", "--no-compile"])
+
+        assert result.exit_code == 1, result.output
+        lean_files = sorted((root / ".axbt" / "failed").glob("*.lean"))
+        map_files = sorted((root / ".axbt" / "failed").glob("*.map.json"))
+        assert lean_files, result.output
+        assert map_files, result.output
+        # The persisted payload is the submitted content — the broken
+        # theorem is in it, positions autopsie without the web share.
+        payload = lean_files[0].read_text(encoding="utf-8")
+        assert "Hoff" in payload
+        position_map = json.loads(map_files[0].read_text(encoding="utf-8"))
+        assert position_map["tier"] == "check"
+        assert position_map["paths"], position_map
+        assert position_map["line_map"], position_map
+
     def test_check_failure_exits_1_with_messages(self, make_live_project) -> None:
         """A source corrupted after compile fails check with attribution."""
         root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])

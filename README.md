@@ -73,7 +73,7 @@ axle:
 | Command | Purpose |
 | --- | --- |
 | `axbt init [PATH]` | Scaffold a new project (config + starter module). |
-| `axbt compile` | Scan modules, extract declarations via the API, write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/`. |
+| `axbt compile` | Scan modules, extract declarations via the API, write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/` (pruning payloads whose source files are gone). |
 | `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every file in every configured module (ordered along the import DAG) — or a `--select`ion — as a standalone payload with dependencies inlined. A file whose declarations all already carry a matching `checked_sig` is skipped (`OK (cached)`); `--force` re-checks everything. Clean outcomes are recorded per declaration in the manifest. |
 | `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. A fully cached selection skips submission (`OK (cached)`). For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
 | `axbt build` | Both tiers in one run, dbt-style: the check tier streams first, then the verify tier — skipping the selections whose check failed — and the run exits nonzero if either tier failed. Verdict rows carry a `[check]`/`[verify]` tier suffix so the two passes tell apart. |
@@ -91,6 +91,7 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 * `--sorry <selector>` (repeatable) — grant a dependency subtree: theorem proof bodies become `sorry` stubs in the submitted payload (signatures intact), and the granted declarations are excused — skipped under check, auto-permitted under verify. Def/abbrev bodies stay real: they are definitional content that downstream proofs unfold (anonymous constructors, projections, `rfl`), so stubbing them would break the very elaboration the grants are meant to leave working. Verify theorems against trusted dependency signatures, or check without paying for slow or broken upstream proofs. Selectors may name a module, a file, or a dot-qualified declaration; a mistyped selector that applies to no planned selection is rejected up front — with the selector text you typed, not an internal key.
 * `--select <selector>` (check/verify/build) — when selecting a declaration, the submitted payload is trimmed to that declaration plus its transitive dependency closure: declarations unreachable from the selection (in the selected file and its dependency files) are dropped, so a selection no longer pulls in unrelated work. File- and module-level selections keep every declaration in the selected files. A dropped declaration leaves with what Lean attaches to it — its docstring and any chained `set_option … in` prefixes directly above it — so scoped options never survive detached from their declaration (a payload ending in a stranded `set_option … in` would fail to parse outright).
 * `--minify/--no-minify` (check/verify/build) — payload minification is on by default: comments, docstrings, blank lines, and redundant horizontal whitespace are stripped from the submitted content (structural indentation stays put), shrinking request bodies and the `.axbt/compiled/` inspection artifacts. Attribution is unaffected — line maps are built from the surviving lines' original numbers, and files that don't track cleanly are submitted unminified. `--no-minify` opts a run out; set `minify: false` under `project:` in `axbt_project.yml` to change the default. The cached/stamped signature material includes the effective setting, so flipping the mode re-verifies once under the new payload shape.
+* Failure persistence (check/verify/build, automatic) — on a FAIL verdict the exact submitted payload and a payload→source position map are written to `.axbt/failed/<request-id>.lean` (+ `.map.json`), and the FAIL row names both paths. The message attribution also names the declaration whose span covers each attributable position, so a diagnostic like a `whnf` timeout is self-explanatory without fetching the web-share run. Nothing persists on OK (or SKIP) verdicts; the compiled-payload GC pass never touches `failed/`.
 
 ### Building both tiers
 
@@ -203,7 +204,10 @@ M/…                   # module source directories (`.lean` files)
   manifest.json       #   the DAG: nodes, md5 fingerprints, extraction metadata
                       #   (compact single-line JSON; inspect via `python -m json.tool`)
   compiled/           #   the exact standalone payloads submitted to the API
-                      #   (minified by default, like the submissions)
+                      #   (minified by default, like the submissions). GC'd on
+                      #   every manifest rewrite: files with no live node go.
+  failed/             #   failing submissions' exact payloads (+ `.map.json`,
+                      #   the payload→source position map), one pair per FAIL
 ```
 
 ## Development

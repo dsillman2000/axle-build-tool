@@ -50,6 +50,8 @@ from axle_build_tool.payloads import (
     Payload,
     build_payload,
     compiled_payload_dir,
+    gc_compiled_payloads,
+    persist_failed_payload,
     source_position,
     write_compiled_payloads,
 )
@@ -187,6 +189,7 @@ def _run_compile(
         payload_paths = write_compiled_payloads(
             manifest, project_root, minify=config.minify
         )
+        pruned = gc_compiled_payloads(manifest, project_root)
         written = save_manifest(manifest, project_root)
     except (
         ConfigError,
@@ -222,6 +225,11 @@ def _run_compile(
         f"Wrote {len(payload_paths)} payload(s) to {compiled_payload_dir(project_root)}",
         dim=True,
     )
+    if pruned:
+        clicked = ", ".join(p.relative_to(project_root).as_posix() for p in pruned)
+        click.secho(
+            f"Pruned {len(pruned)} stale payload file(s): {clicked}", dim=True
+        )
     click.secho(f"Wrote {written}", dim=True)
     return config, manifest
 
@@ -934,7 +942,10 @@ def _latest_checked_request_id(manifest: Manifest, names: list[str]) -> str | No
 
 
 def _rewrite_message_position(
-    message: str, payload: Payload, paths: dict[str, str]
+    message: str,
+    payload: Payload,
+    paths: dict[str, str],
+    manifest: Manifest | None = None,
 ) -> str:
     """Attribute a Lean diagnostic's payload position to its source file.
 
@@ -943,26 +954,84 @@ def _rewrite_message_position(
     range) into `<file>:<line>` form using the payload's line map.
     Messages without a mappable leading position (e.g. errors on the
     hoisted import header) are returned unchanged.
+
+    With a `manifest`, the rewritten message also names the declaration
+    whose span covers the (start) position — the context a bare
+    `<file>:<line>` pair takes an autopsy report to reconstruct.
     """
     match = _MESSAGE_POSITION.match(message)
     if match is None:
         return message
 
-    def locate(line: str) -> str | None:
+    def locate(line: str) -> tuple[str, str, int] | None:
         found = source_position(payload, int(line))
         if found is None:
             return None
         node_name, source_line = found
-        return f"{paths.get(node_name, node_name)}:{source_line}"
+        return f"{paths.get(node_name, node_name)}:{source_line}", node_name, source_line
 
     start_line, start_col, end_line, end_col = match.groups()
     start = locate(start_line)
     if start is None or (end_line is not None and locate(end_line) is None):
         return message
-    prefix = f"{start}:{start_col}"
+    start_text, node_name, source_line = start
+    prefix = f"{start_text}:{start_col}"
     if end_line is not None:
-        prefix += f"-{locate(end_line)}:{end_col}"
-    return prefix + message[match.end():]
+        end = locate(end_line)
+        assert end is not None
+        prefix += f"-{end[0]}:{end_col}"
+    suffix = ""
+    if manifest is not None:
+        node = manifest.by_name().get(node_name)
+        if node is not None:
+            covering = next(
+                (
+                    d.name
+                    for d in node.declarations
+                    if d.line_pos <= source_line <= d.end_line_pos
+                ),
+                None,
+            )
+            if covering is not None:
+                suffix = f" (declaration '{covering}')"
+    return prefix + message[match.end():] + suffix
+
+
+def _persist_failed_submission(
+    payload: Payload,
+    request_id: str | None,
+    tier: str,
+    project_root: Path,
+    paths: dict[str, str],
+) -> None:
+    """Persist a failing submission and announce the saved paths.
+
+    Writes the exact submitted content plus a payload→source position
+    map under `.axbt/failed/` so FAIL-span coordinates autopsie without
+    the API's web share (issue 42). Best-effort: an I/O failure warns
+    and never disturbs the run's exit path.
+    """
+    try:
+        lean_path, map_path = persist_failed_payload(
+            payload.content,
+            payload,
+            project_root=project_root,
+            request_id=request_id,
+            tier=tier,
+            paths=paths,
+        )
+    except OSError as exc:
+        click.secho(
+            f"    failed-payload persist error: {exc}", dim=True, fg="yellow"
+        )
+        return
+    shown = lambda path: str(path.relative_to(project_root).as_posix())
+    click.secho(
+        f"    failed submission saved: {shown(lean_path)} "
+        f"(+ {shown(map_path)}; payload coordinates map to source "
+        "through its line_map)",
+        dim=True,
+    )
 
 
 @main.command()
@@ -1353,6 +1422,13 @@ def check(
                         f"  {_timing_text(elapsed)}{_report_tier_tag()}"
                     )
                     if not response.okay:
+                        _persist_failed_submission(
+                            payload,
+                            (response.info or {}).get("request_id"),
+                            "check",
+                            project_root,
+                            paths,
+                        )
                         for printed, node, decl in _printed_lines(label, selection, manifest):
                             if node is None:
                                 continue
@@ -1370,7 +1446,9 @@ def check(
                         stub_map,
                     )
                     for message in kept:
-                        click.echo(f"    {_rewrite_message_position(message, payload, paths)}")
+                        click.echo(
+                            f"    {_rewrite_message_position(message, payload, paths, manifest)}"
+                        )
                     stub_line = _stub_context_line(refined, selection, payload, manifest)
                     if stub_line:
                         click.secho(f"    {stub_line}", dim=True)
@@ -2257,6 +2335,9 @@ def verify(
                                 f"{click.style('FAIL', fg='red')}  {_timing_text(elapsed)}"
                                 f"{_report_tier_tag()}"
                             )
+                            _persist_failed_submission(
+                                payload, rid, "verify", project_root, paths
+                            )
                             if vacuous:
                                 click.echo(
                                     "    the negation is also provable; "
@@ -2279,7 +2360,7 @@ def verify(
                         )
                         for message in kept:
                             click.echo(
-                                f"    {_rewrite_message_position(message, payload, paths)}"
+                                f"    {_rewrite_message_position(message, payload, paths, manifest)}"
                             )
                         stub_line = _stub_context_line(refined, selection, payload, manifest)
                         if stub_line:

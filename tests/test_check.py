@@ -482,6 +482,99 @@ class TestFailureReporting:
         assert "    -:1:1: error: header trouble" in result.output
         assert "Checked 1 selection(s): 1 failed, 0 OK" in result.output
 
+
+class TestFailedSubmissionPersistence:
+    """On FAIL the exact submitted payload and its position map land in
+    `.axbt/failed/`, and the report names both (issue 42).
+
+    The persisted content is the submission's own shape (minified and
+    trimmed as sent) — the shape the FAIL-span coordinates refer to —
+    so autopsy needs no reconstruction from manifest state.
+    """
+
+    SOURCE = "def t1 := 1\n\ntheorem needs_check : t1 = t1 := rfl\n"
+
+    def probe(self, make_project, tmp_path: Path, monkeypatch, fake_axle, messages):
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, {"M/A.lean": self.SOURCE})
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "theorem needs_check": {
+                "t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1),
+                "needs_check": make_document(
+                    "needs_check",
+                    kind="theorem",
+                    line_pos=3,
+                    end_line_pos=3,
+                    local_value_dependencies=["t1"],
+                ),
+            }
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        fake_axle.check_result = make_response(
+            CheckResponse, okay=False, lean_messages=Messages(messages, [], [])
+        )
+
+        result = runner.invoke(main, ["check", "--select", "M.A"])
+
+        return root, result
+
+    def test_failing_check_persists_payload_position_map_and_names_paths(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        import json as jsonlib
+
+        root, result = self.probe(
+            make_project,
+            tmp_path,
+            monkeypatch,
+            fake_axle,
+            ["-:2:20: error: bad", "-:9:9: error: beyond"],
+        )
+
+        assert result.exit_code == 1, result.output
+        rid = fake_axle.request_ids[-1]
+        failed_dir = root / ".axbt" / "failed"
+        assert (failed_dir / f"{rid}.lean").is_file(), result.output
+        assert (failed_dir / f"{rid}.map.json").is_file()
+        # The persisted content is exactly what was submitted.
+        assert (failed_dir / f"{rid}.lean").read_text(
+            encoding="utf-8"
+        ) == check_calls(fake_axle)[0]["content"]
+        position_map = jsonlib.loads(
+            (failed_dir / f"{rid}.map.json").read_text(encoding="utf-8")
+        )
+        assert position_map["request_id"] == rid
+        assert position_map["tier"] == "check"
+        assert position_map["sections"] == {"M.A": [1, 2]}
+        assert position_map["line_map"] == {"M.A": [1, 3]}
+        assert position_map["paths"] == {"M.A": "M/A.lean"}
+        # The report references the saved paths ...
+        assert f".axbt/failed/{rid}.lean" in result.output
+        assert f".axbt/failed/{rid}.map.json" in result.output
+        # ... echoes the declaration covering an attributable position ...
+        assert "M/A.lean:3:20: error: bad (declaration 'needs_check')" in result.output
+        # ... and leaves out-of-range positions exactly as reported.
+        assert "-:9:9: error: beyond" in result.output
+        assert "beyond (declaration" not in result.output
+
+    def test_every_failed_submission_persists_side_by_side(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root, _first = self.probe(
+            make_project, tmp_path, monkeypatch, fake_axle, ["-:3:20: error: bad"]
+        )
+        failed_dir = root / ".axbt" / "failed"
+        before = sorted(p.name for p in failed_dir.iterdir())
+        assert len(before) == 2
+        assert runner.invoke(main, ["check", "--select", "M.A"]).exit_code == 1
+
+        after = sorted(p.name for p in failed_dir.iterdir())
+        assert len(after) == 4
+        # The request id keys the names, so the second failure of the
+        # same selection lands beside the first, not over it.
+        assert len({p for p in after if p.endswith(".lean")}) == 2
+
     @pytest.mark.skip(reason='report-shape change')
     def test_okay_response_with_warnings_still_succeeds(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
