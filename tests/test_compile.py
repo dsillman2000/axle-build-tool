@@ -835,3 +835,115 @@ class TestCompiledPayloads:
         assert (
             root / ".axbt" / "compiled" / "M_A_isolated.lean"
         ).read_text(encoding="utf-8") == first
+
+
+class TestFailedExtractionPersistence:
+    """A failed node's extraction payload is persisted like a failing
+    submission — `.axbt/failed/<id>.lean` (+ `.map.json`) with the
+    `extract` tier — and the error listing names the saved paths.
+
+    Nothing else survives a failed compile (the manifest is
+    all-or-nothing), so this is the only autopsy surface for extraction
+    diagnostics quoting payload coordinates.
+    """
+
+    FILES = {
+        "M/A.lean": "def x := 1\n",
+        "M/B.lean": "import A\n\ntheorem y : x = x := by\n  rw [x]\n",
+    }
+    DOCS = {
+        "def x := 1": {
+            "x": make_document("x", kind="def", line_pos=1, end_line_pos=1)
+        },
+        "theorem y : x = x": {
+            "y": make_document(
+                "y",
+                kind="theorem",
+                line_pos=4,
+                end_line_pos=4,
+                local_value_dependencies=["x"],
+            )
+        },
+    }
+
+    @staticmethod
+    def probe(make_project, tmp_path: Path, monkeypatch, fake_axle):
+        root = make_project(tmp_path, SIMPLE_CONFIG, TestFailedExtractionPersistence.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = TestFailedExtractionPersistence.DOCS
+        return root
+
+    def test_lean_error_extraction_persists_payload_and_maps(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        import json as jsonlib
+
+        root = self.probe(make_project, tmp_path, monkeypatch, fake_axle)
+        fake_axle._extract_lean_errors = ["-:3:5: error: unknown identifier 'x'"]
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 1, result.output
+        # Error lines name the persisted artifacts per failed node.
+        assert ".axbt/failed/" in result.output
+        assert "error: unknown identifier" in result.output
+        failed_dir = root / ".axbt" / "failed"
+        lean_files = sorted(failed_dir.glob("*.lean"))
+        # Both filesystems failed (the fixture's errors apply to every
+        # extraction call): one pair per node's own extraction payload.
+        assert [p.name for p in lean_files], result.output
+        for lean_file in lean_files:
+            stem = lean_file.name[: -len(".lean")]
+            mapped = jsonlib.loads(
+                (failed_dir / f"{stem}.map.json").read_text(encoding="utf-8")
+            )
+            assert mapped["tier"] == "extract"
+        # Each pair keyed on its own extraction's request id.
+        assert {
+            jsonlib.loads(
+                (failed_dir / f"{p.name[:-len('.lean')]}.map.json").read_text(
+                    encoding="utf-8"
+                )
+            )["request_id"]
+            for p in lean_files
+        } == set(fake_axle.request_ids)
+        # The inlined payload shape survived: A's pair maps its own
+        # section alone; B's pair also carries A's inlined (stubbed)
+        # section above it.
+        by_request = {
+            m["request_id"]: m
+            for m in (
+                jsonlib.loads(
+                    (failed_dir / f"{p.name[:-len('.lean')]}.map.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                for p in lean_files
+            )
+        }
+        assert by_request[fake_axle.request_ids[0]]["sections"] == {"M.A": [1, 1]}
+        assert by_request[fake_axle.request_ids[1]]["sections"] == {
+            "M.A": [1, 1],
+            "M.B": [3, 5],
+        }
+
+    def test_call_error_extraction_persists_with_timestamp_stem(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = self.probe(make_project, tmp_path, monkeypatch, fake_axle)
+        from axle_build_tool.axle_service import AxleServiceError
+
+        fake_axle.extract_error = AxleServiceError("connection reset by peer")
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 1, result.output
+        failed_dir = root / ".axbt" / "failed"
+        pairs = sorted(failed_dir.glob("*"))
+        # Two failed nodes: two persisted pairs, named with the noid
+        # fallback (no response, so the id-keyed stem cannot be minted).
+        assert len([p for p in pairs if p.name.endswith(".lean")]) == 2, (
+            [p.relative_to(root).as_posix() for p in pairs]
+        )
+        # The failing result names the saved artifact paths.
+        assert "(payload saved: .axbt/failed/noid-" in result.output

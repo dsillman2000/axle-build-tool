@@ -342,6 +342,29 @@ class TestLiveCheck:
         assert position_map["paths"], position_map
         assert position_map["line_map"], position_map
 
+    def test_failed_extraction_persists_payload_and_position_map(self, make_live_project) -> None:
+        """A compile whose extraction fails leaves the failed node's
+        extraction payload and its position map under `.axbt/failed/`
+        (the extract tier), and the error listing names the paths."""
+        root = make_live_project({"M/Broken.lean": BROKEN_SOURCE})
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 1, result.output
+        failed_dir = root / ".axbt" / "failed"
+        lean_files = sorted(failed_dir.glob("*.lean"))
+        map_files = sorted(failed_dir.glob("*.map.json"))
+        assert lean_files, result.output
+        assert map_files, result.output
+        # The project-layout error output quotes the coordinates of the
+        # (never-written) extraction payload; the payload itself and its
+        # map are now on disk.
+        assert "(payload saved: .axbt/failed/" in result.output
+        assert ".map.json" in result.output
+        position_map = json.loads(map_files[0].read_text(encoding="utf-8"))
+        assert position_map["tier"] == "extract"
+        assert position_map["paths"], position_map
+        assert position_map["sections"], position_map
+
     def test_check_failure_exits_1_with_messages(self, make_live_project) -> None:
         """A source corrupted after compile fails check with attribution."""
         root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])

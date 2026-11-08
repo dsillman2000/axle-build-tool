@@ -20,6 +20,13 @@ payload's Lean-errors verdict no longer certifies the dependencies'
 proofs — each dependency's own extraction (and later check/verify) does
 that.
 
+A failed node's extraction payload is persisted like a failing
+submission: the exact content sent (inlined, hoisted, and stubbed as
+the extracted quotes) plus the payload→source position map land in
+`.axbt/failed/` with the `extract` tier, so the diagnostics' payload
+coordinates autopsie offline instead of requiring a hand rebuild of the
+composition.
+
 Declaration-free nodes (import-only aggregates: a docstring plus
 imports) skip their extraction request entirely — they'd otherwise pay
 a full dependency-closure extraction payload for an empty document set.
@@ -41,7 +48,11 @@ from axle.types import Document
 
 from axle_build_tool.axle_service import AxleService, AxleServiceError
 from axle_build_tool.manifest import ExtractedDecl, Manifest, ManifestNode
-from axle_build_tool.payloads import build_file_payload
+from axle_build_tool.payloads import (
+    Payload,
+    build_file_payload,
+    persist_failed_payload,
+)
 from axle_build_tool.stubbing import DECLARATION_HEAD
 
 logger = logging.getLogger(__name__)
@@ -156,6 +167,39 @@ def _source_has_declarations(project_root: Path, node: ManifestNode) -> bool:
     return _DECLARATION_KEYWORD_SEARCH.search(source) is not None
 
 
+def _persist_and_report(
+    payload: Payload,
+    node: ManifestNode,
+    manifest: Manifest,
+    project_root: Path,
+    request_id: str | None,
+    failure: str,
+) -> str:
+    """Persist a failed extraction payload; return the failure message.
+
+    The extraction payload is the shape the reported coordinates refer
+    to (dependencies inlined and stubbed, imports hoisted, minification
+    never applied here), so it lands in `.axbt/failed/` beside the
+    check/verify failures, keyed on the extraction's request id when
+    the API assigned one. Persistence is best-effort: an I/O failure
+    keeps the plain failure message.
+    """
+    paths = {member.name: member.path for member in manifest.nodes}
+    try:
+        lean_path, map_path = persist_failed_payload(
+            payload.content,
+            payload,
+            project_root=project_root,
+            request_id=request_id,
+            tier="extract",
+            paths=paths,
+        )
+    except OSError:
+        return failure
+    shown = lambda path: str(path.relative_to(project_root).as_posix())
+    return f"{failure} (payload saved: {shown(lean_path)} + {shown(map_path)})"
+
+
 async def _extract_node(
     service: AxleService,
     node: ManifestNode,
@@ -164,6 +208,7 @@ async def _extract_node(
     semaphore: asyncio.Semaphore,
 ) -> tuple[ManifestNode, str | None]:
     """Extract one node. Returns (updated_node, failure_message_or_None)."""
+    payload: Payload | None = None
     started: float | None = None
     try:
         payload = build_file_payload(node, manifest, project_root, stub_dependencies=True)
@@ -184,14 +229,27 @@ async def _extract_node(
     except AxleServiceError as exc:
         elapsed = time.monotonic() - started if started is not None else -1.0
         logger.info("extraction %s FAILED after %.1fs (%s)", node.name, elapsed, exc)
-        return node, f"{node.path}: {exc}"
+        failure = f"{node.path}: {exc}"
+        if payload is not None:
+            # The transport failure arrived with the payload built (or
+            # mid-submission), so the exact content sent autopsies too;
+            # there is no response, so the id-keyed name falls back to
+            # the timestamp stem.
+            failure = _persist_and_report(
+                payload, node, manifest, project_root, None, failure
+            )
+        return node, failure
     except OSError as exc:
         return node, f"{node.path}: could not read source: {exc}"
 
     if response.lean_messages.errors:
-        return node, (
+        failure = (
             f"{node.path}: Axle reported Lean errors: "
             f"{'; '.join(response.lean_messages.errors)}"
+        )
+        rid = (response.info or {}).get("request_id")
+        return node, _persist_and_report(
+            payload, node, manifest, project_root, rid, failure
         )
 
     declarations = [

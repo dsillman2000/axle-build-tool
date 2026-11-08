@@ -65,12 +65,14 @@ Everything under `.axbt/` (gitignore it) is offline and free to inspect:
   runs also persist the `_stubbed.lean` variants actually sent. Scripted
   `--select` trim shapes and OK-run submissions are NOT here — only
   `failed/` carries exact per-selection content.
-- `failed/` — one `<id>.lean` + `<id>.map.json` pair per FAIL (check or
-  verify): the exact bytes the API saw, and the payload→source map
-  (`sections`, per-section `line_map` → original file lines, `paths`,
-  `tier`, `request_id`). Survives recompiles; request-id-keyed so retries
-  accumulate side by side (`noid-…` stems when the API returns no id).
-  OK/SKIP verdicts persist nothing.
+- `failed/` — one `<id>.lean` + `<id>.map.json` pair per failing
+  submission (check or verify FAIL) *and* per failed declaration
+  extraction during `compile` (`tier: "extract"`): the exact bytes the
+  API saw, and the payload→source map (`sections`, per-section
+  `line_map` → original file lines, `paths`, `tier`, `request_id`).
+  Survives recompiles; request-id-keyed so retries accumulate side by
+  side (`noid-…` stems when the API returns no id). OK/SKIP verdicts
+  and successful extractions persist nothing.
 
 ## The iteration loop
 
@@ -99,7 +101,11 @@ covering declaration: `<file>:<line> … (declaration 'name')`. Fall
 through to the disk artifacts only when positions are out-of-reach (the
 unrewritten `-:N:N` form — header or out-of-range), when a
 composition/shape question is involved, or when byte-level evidence is
-needed.
+needed. This equally covers a failed `axbt compile` (extraction): the
+per-node error line names the persisted extraction payload — the
+inlined, stubbed content whose coordinates the API quoted — so
+composition mysteries (import-edges, stub-shape interactions) never
+need a from-source rebuild.
 
 **FAIL autopsy (usually all offline):**
 

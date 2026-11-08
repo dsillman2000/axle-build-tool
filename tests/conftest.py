@@ -368,6 +368,10 @@ class FakeAxleClient:
         #: like `check_delays`: a set of substrings; when any occurs in
         #: the submitted content the call's response is okay=False).
         self.check_failures: set[str] = set()
+        #: An exception raised only from `extract_decls` (after the
+        #: environment-validated stage), driving `_extract_node`'s
+        #: transport-failure branch with a built payload.
+        self.extract_error: Exception | None = None
         #: Artificial per-submission delays, letting tests control the
         #: order submissions complete in (and so the streaming report's
         #: completion-order lines). Keyed by a content marker, routed to
@@ -464,6 +468,8 @@ class FakeAxleClient:
         self.calls.append(("extract_decls", kwargs))
         if self._error:
             raise self._error
+        if self.extract_error is not None:
+            raise self.extract_error
         content = kwargs.get("content", "")
         # The target's own file is inlined last in a payload, so route on
         # the marker that occurs latest in the content.
