@@ -379,6 +379,9 @@ class FakeAxleClient:
         #: own file is inlined last.
         self.check_delays: dict[str, float] = {}
         self.verify_delays: dict[str, float] = {}
+        #: Same routing for extraction submissions (per-node payloads),
+        #: controlling the compile-stage streaming report's order.
+        self.extract_delays: dict[str, float] = {}
         self._extract_lean_errors = list(extract_lean_errors or [])
         self._environments = (
             environments if environments is not None else [{"name": "lean-4.35.0"}]
@@ -471,6 +474,11 @@ class FakeAxleClient:
         if self.extract_error is not None:
             raise self.extract_error
         content = kwargs.get("content", "")
+        from asyncio import sleep as _sleep
+
+        delay = self._delay_for(self.extract_delays, content)
+        if delay:
+            await _sleep(delay)
         # The target's own file is inlined last in a payload, so route on
         # the marker that occurs latest in the content.
         documents = self._extract_documents
