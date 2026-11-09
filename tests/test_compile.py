@@ -22,7 +22,7 @@ from axle_build_tool.manifest import (
     load_manifest,
     manifest_path,
 )
-from conftest import make_document, make_extract_response
+from conftest import make_document, make_extract_response, start_line, status_line, stripped_lines
 
 runner = CliRunner()
 
@@ -947,3 +947,114 @@ class TestFailedExtractionPersistence:
         )
         # The failing result names the saved artifact paths.
         assert "(payload saved: .axbt/failed/noid-" in result.output
+
+
+class TestExtractionProgress:
+    """The compile stage streams dbt-style progress: per-node START at
+    dispatch, verdicts with measured durations at completion (completion
+    order), and dim SKIP lines for declaration-free nodes — so a slow
+    extraction's wall time is visible while the run lives.
+    """
+
+    DOCS = {
+        "def x := 1": {
+            "x": make_document("x", kind="def", line_pos=1, end_line_pos=1)
+        },
+        "theorem y : x = x": {
+            "y": make_document(
+                "y",
+                kind="theorem",
+                line_pos=4,
+                end_line_pos=4,
+                local_value_dependencies=["x"],
+            )
+        },
+    }
+
+    @staticmethod
+    def strip_timing(line: str) -> str:
+        """A streamed row without its trailing measured duration."""
+        import re
+
+        return re.sub(r" \d+\.\d{3}s$", "", line)
+
+    def test_started_lines_and_durations_are_streamed(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
+        files = {"M/A.lean": "def x := 1\n", "M/B.lean": "import A\ntheorem y : x = x := by\n  rw [x]\n"}
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        # B's payload contains A's source (inlined last), so the marker
+        # routes 'def x' to whichever payload mentions it LATER — make
+        # A fast and B slow by routing on B's own line.
+        fake_axle.extract_delays = {"theorem y : x = x": 0.15}
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        # START lines at the same counter their verdicts pair under.
+        assert start_line(result.output, "M.A") == "M.A START [RUN]"
+        assert start_line(result.output, "M.B") == "M.B START [RUN]"
+        assert status_line(result.output, "M.A") == "M.A OK"
+        assert status_line(result.output, "M.B") == "M.B OK"
+        # Durations are printed on every verdict row.
+        ok_rows = [line for line in result.output.splitlines() if " OK  " in line]
+        assert len(ok_rows) == 2
+        assert all(row.rstrip().endswith("s") for row in ok_rows)
+        # Completion order streams A first (B pays the artificial delay).
+        verdicts = [self.strip_timing(line) for line in stripped_lines(result.output)]
+        assert verdicts.index("M.A OK") < verdicts.index("M.B OK")
+
+    def test_declaration_free_nodes_report_skips(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {
+                "M/A.lean": "def x := 1\n",
+                "M/Agg.lean": "\n/-! # Aggregate -/\nimport A\n",
+            },
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "def x := 1": {
+                "x": make_document("x", kind="def", line_pos=1, end_line_pos=1)
+            }
+        }
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        normalized = stripped_lines(result.output)
+        assert "M.Agg SKIP" in normalized
+        assert any("declaration-free" in line for line in normalized)
+        # The aggregate made no extraction call and shows no START.
+        with pytest.raises(AssertionError):
+            start_line(result.output, "M.Agg")
+
+    def test_failed_extraction_streams_fail_rows_with_durations(self, make_project, tmp_path: Path, monkeypatch, fake_axle) -> None:
+        import json as jsonlib
+
+        files = {"M/A.lean": "def x := 1\n", "M/B.lean": "import A\ntheorem y : x = x := by\n  rw [x]\n"}
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        fake_axle._extract_lean_errors = ["-:3:5: error: unknown identifier 'x'"]
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 1, result.output
+        # Verdict rows carry their durations; the timing-stripped stream
+        # has a FAIL row for every failing node's own counter.
+        verdicts = [self.strip_timing(line) for line in stripped_lines(result.output)]
+        assert "M.A FAIL" in verdicts
+        assert "M.B FAIL" in verdicts
+        # The verdict reason, with the persisted-payload reference.
+        assert any("error: unknown identifier" in line for line in verdicts + stripped_lines(result.output))
+        assert any("payload saved: .axbt/failed/" in line for line in verdicts + stripped_lines(result.output))
+        # The end-of-run listing survives alongside the streaming rows.
+        assert "Failed to extract declarations:" in result.output
+        # The persisted map of the failing node still parses.
+        failed_dir = root / ".axbt" / "failed"
+        pairs = sorted(failed_dir.glob("*.map.json"))
+        assert [p.name for p in pairs]
+        for pair in pairs:
+            assert jsonlib.loads(pair.read_text(encoding="utf-8"))["tier"] == "extract"

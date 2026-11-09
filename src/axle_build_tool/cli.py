@@ -55,6 +55,9 @@ from axle_build_tool.payloads import (
     source_position,
     write_compiled_payloads,
 )
+from axle_build_tool.report import clock as _clock
+from axle_build_tool.report import item_counter as _item_counter
+from axle_build_tool.report import timing_text as _timing_text
 from axle_build_tool.scanner import ScanError, scan_module
 from axle_build_tool.stubbing import GRANTED_KINDS, bare_name
 from axle_build_tool.selection import Selection, SelectionError, resolve_selection
@@ -684,28 +687,6 @@ def _printed_lines(
         for decl in node.declarations
     ]
     return expanded or [(label, None, None)]
-
-
-def _timing_text(seconds: float) -> str:
-    """A measured duration formatted for the report, e.g. `1.234s`."""
-    return f"{seconds:.3f}s"
-
-
-def _clock() -> str:
-    """The report timestamp: local `HH:MM:SS.mmm`, fixed width so every
-    report line's columns align."""
-    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
-
-
-def _item_counter(position: int, total: int) -> str:
-    """The dbt-style item counter `[ 3/25]`, padded for alignment.
-
-    Indexed by selection, not by completion order: a submission
-    announces itself (START) and reports its verdicts under the same
-    counter, dbt pairing, however the completions interleave.
-    """
-    width = max(len(str(total)), 1)
-    return f"[{position:>{width}}/{total}]"
 
 
 @dataclass

@@ -44,6 +44,8 @@ import re
 import time
 from pathlib import Path
 
+import click
+
 from axle.types import Document
 
 from axle_build_tool.axle_service import AxleService, AxleServiceError
@@ -53,6 +55,7 @@ from axle_build_tool.payloads import (
     build_file_payload,
     persist_failed_payload,
 )
+from axle_build_tool.report import clock, item_counter, timing_text
 from axle_build_tool.stubbing import DECLARATION_HEAD
 
 logger = logging.getLogger(__name__)
@@ -206,29 +209,63 @@ async def _extract_node(
     manifest: Manifest,
     project_root: Path,
     semaphore: asyncio.Semaphore,
+    *,
+    label_width: int,
+    counter_position: int,
+    counter_total: int,
 ) -> tuple[ManifestNode, str | None]:
-    """Extract one node. Returns (updated_node, failure_message_or_None)."""
+    """Extract one node, streaming its report line pair.
+
+    Prints the dbt-style START when its dispatch acquires the
+    semaphore, and the verdict (OK with the measured duration, or FAIL
+    with the reason) the moment its response completes — completion
+    order, so a slow node's wall time is visible while the run lives
+    rather than only in the summary. Returns (updated_node,
+    failure_message_or_None).
+    """
     payload: Payload | None = None
     started: float | None = None
+    counter = f"{item_counter(counter_position, counter_total)} "
     try:
         payload = build_file_payload(node, manifest, project_root, stub_dependencies=True)
         async with semaphore:
-            logger.info(
-                "dispatch %s (%d payload lines)",
-                node.name,
-                len(payload.lines),
+            click.echo(
+                f"{clock()} {counter}{node.name:<{label_width}}  "
+                f"{click.style('START', fg='white')}  [RUN]"
             )
             started = time.monotonic()
             response = await service.extract_decls(payload.content, context=node.path)
+            elapsed = time.monotonic() - started
             logger.info(
                 "extracted %s in %.1fs (%d declarations)",
                 node.name,
-                time.monotonic() - started,
+                elapsed,
                 len(response.documents),
             )
+            failed = bool(response.lean_messages.errors)
+            click.echo(
+                f"{clock()} {counter}{node.name:<{label_width}}  "
+                f"{click.style('FAIL' if failed else 'OK', fg='red' if failed else 'green')}  "
+                f"{timing_text(elapsed)}"
+            )
+            if failed:
+                failure = (
+                    f"{node.path}: Axle reported Lean errors: "
+                    f"{'; '.join(response.lean_messages.errors)}"
+                )
+                rid = (response.info or {}).get("request_id")
+                failure = _persist_and_report(
+                    payload, node, manifest, project_root, rid, failure
+                )
+                click.echo(f"    {failure}")
+                return node, failure
     except AxleServiceError as exc:
         elapsed = time.monotonic() - started if started is not None else -1.0
         logger.info("extraction %s FAILED after %.1fs (%s)", node.name, elapsed, exc)
+        if started is not None:
+            elapsed_text = timing_text(elapsed)
+        else:
+            elapsed_text = ""
         failure = f"{node.path}: {exc}"
         if payload is not None:
             # The transport failure arrived with the payload built (or
@@ -238,19 +275,15 @@ async def _extract_node(
             failure = _persist_and_report(
                 payload, node, manifest, project_root, None, failure
             )
+        if started is not None:
+            click.echo(
+                f"{clock()} {counter}{node.name:<{label_width}}  "
+                f"{click.style('FAIL', fg='red')}  {elapsed_text}"
+            )
+            click.echo(f"    {failure}")
         return node, failure
     except OSError as exc:
         return node, f"{node.path}: could not read source: {exc}"
-
-    if response.lean_messages.errors:
-        failure = (
-            f"{node.path}: Axle reported Lean errors: "
-            f"{'; '.join(response.lean_messages.errors)}"
-        )
-        rid = (response.info or {}).get("request_id")
-        return node, _persist_and_report(
-            payload, node, manifest, project_root, rid, failure
-        )
 
     declarations = [
         declaration
@@ -281,34 +314,63 @@ async def apply_extraction(
     bounded by the client's `max_concurrency`. Raises `ExtractionError`
     listing all failures if any node failed; the returned manifest is only
     meant to be persisted when extraction fully succeeds.
+
+    The streaming report prints one pair per submitted node — dbt-style
+    START at dispatch and a verdict (OK with the measured duration, or
+    FAIL with the reason) at completion — so a slow extraction's wall
+    time is visible while the run lives. Declaration-free skip nodes
+    print a dim SKIP line (no API call, no duration). The counter's
+    denominator is the pending-node count; carried-over files are not
+    extraction tasks.
     """
     pending = [node for node in manifest.nodes if node.status != "clean"]
     if not pending:
         return manifest
 
+    counter_total = len(pending)
+    headline = {node.name: position for position, node in enumerate(pending, start=1)}
+    label_width = max(len(node.name) for node in pending)
     submitted: list[ManifestNode] = []
     results: list[tuple[ManifestNode, str | None]] = []
-    for node in pending:
+    for pending_position, node in enumerate(pending, start=1):
         if _source_has_declarations(project_root, node):
             submitted.append(node)
-        else:
-            logger.info(
-                "skipping extraction of %s (declaration-free: no declaration "
-                "keywords in the source)",
-                node.name,
+            continue
+        logger.info(
+            "skipping extraction of %s (declaration-free: no declaration "
+            "keywords in the source)",
+            node.name,
+        )
+        click.echo(
+            f"{clock()} {item_counter(pending_position, counter_total)} "
+            f"{node.name:<{label_width}}  "
+            f"{click.style('SKIP', dim=True)}"
+        )
+        click.secho(
+            "    no extraction needed: declaration-free (imports/comments only)",
+            dim=True,
+        )
+        results.append(
+            (
+                node.model_copy(update={"declarations": [], "request_id": None}),
+                None,
             )
-            results.append(
-                (
-                    node.model_copy(update={"declarations": [], "request_id": None}),
-                    None,
-                )
-            )
+        )
 
     semaphore = asyncio.Semaphore(service.max_concurrency)
     if submitted:
         submitted_results = await asyncio.gather(
             *(
-                _extract_node(service, node, manifest, project_root, semaphore)
+                _extract_node(
+                    service,
+                    node,
+                    manifest,
+                    project_root,
+                    semaphore,
+                    label_width=label_width,
+                    counter_position=headline[node.name],
+                    counter_total=counter_total,
+                )
                 for node in submitted
             )
         )

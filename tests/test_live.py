@@ -26,7 +26,7 @@ import pytest
 from click.testing import CliRunner
 
 from axle_build_tool import main
-from conftest import status_line
+from conftest import start_line, status_line
 
 #: The live suite needs credentials; without them every test skips.
 HAVE_API_KEY = bool(os.environ.get("AXLE_API_KEY"))
@@ -195,6 +195,31 @@ class TestLiveCompile:
             assert node.declarations, f"{node.name} extracted nothing"
             # The sources are fully proved: no sorry anywhere.
             assert not any(decl.is_sorry for decl in node.declarations)
+
+    def test_compile_streams_per_node_progress(self, make_live_project) -> None:
+        """The compile stage streams dbt-style progress lines with
+        measured durations per extraction — dbt pairing of a START line
+        with its verdict, so a slow node's wall time is visible mid-run."""
+        make_live_project(
+            {"M/Base.lean": BASE_SOURCE, "M/User.lean": USER_SOURCE},
+        )
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert start_line(result.output, "M.Base") == "M.Base START [RUN]"
+        assert status_line(result.output, "M.Base") == "M.Base OK"
+        assert status_line(result.output, "M.User") == "M.User OK"
+        # Every verdict row carries its measured duration.
+        ok_rows = [
+            line
+            for line in result.output.splitlines()
+            if " OK  " in line and ("M.Base" in line or "M.User" in line)
+        ]
+        assert len(ok_rows) == 2
+        assert all(line.rstrip().endswith("s") for line in ok_rows)
+        # Both nodes were announced with a START before their verdicts.
+        assert "Extraction: 2 extracted now" in result.output
 
     def test_recompile_marks_everything_clean(self, make_live_project) -> None:
         """The incremental promise holds against the live API."""
@@ -418,7 +443,11 @@ class TestLiveCheck:
 
         assert result.exit_code == 0, result.output
         assert "2 new, 0 changed, 0 clean" in result.output
-        assert result.output.count("  OK") == 2
+        # The full-refresh precursor re-extracts (and now streams its own
+        # per-node extraction rows), then the check pass re-judges: two
+        # extraction OKs plus two check OKs.
+        assert result.output.count("  OK") == 4
+        assert "Extraction: 2 extracted now" in result.output
         assert "Checked 2 selection(s): all OK" in result.output
 
 

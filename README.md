@@ -112,7 +112,7 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 
 ### Streaming results
 
-`axbt check` / `axbt verify` print each result the moment its submission completes — in completion order, so progress appears live during long runs. Every submission also announces itself dbt-style with a white `START` line the moment it is actually dispatched (dispatch order under the concurrency bound; selections answered locally — skips, cached verifications, `--sorry` grants — submit nothing and print no START):
+`axbt check` / `axbt verify` print each result the moment its submission completes — in completion order, so progress appears live during long runs. Every submission also announces itself dbt-style with a white `START` line the moment it is actually dispatched (dispatch order under the concurrency bound; selections answered locally — skips, cached verifications, `--sorry` grants — submit nothing and print no START). `axbt compile` streams the same pairing for the extraction stage: each submitted node announces `START` at dispatch and reports `OK` with its measured duration (or `FAIL` with the reason — and the persisted payload paths — attributed immediately), so a slow node's wall time is visible mid-run instead of only in the summary:
 
 ```text
 14:22:04.183 [ 1/2] M.A.t1  START  [RUN]

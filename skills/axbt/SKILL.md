@@ -78,8 +78,10 @@ Everything under `.axbt/` (gitignore it) is offline and free to inspect:
 
 1. **Edit** the Lean source.
 2. **`axbt compile`** — MD5-diff, extract via the API (unchanged files
-   make no API calls); prunes dead payloads (issue-style GC, prints what
-   it pruned); regenerates `compiled/`.
+   make no API calls); streams per-node progress (`[n/m]` START at
+   dispatch, `OK` with the measured duration or `FAIL` with the reason
+   at completion) so a slow node's wall time shows while the run lives;
+   prunes dead payloads (prints what it prunes); regenerates `compiled/`.
 3. **`axbt build`** — check pass streams first, then verify skips the
    selections whose check failed; rows tag `[check]`/`[verify]`;
    `--fail-fast` in the check pass abandons the build before verifying.
