@@ -102,7 +102,7 @@ def minify_lines(source: str) -> Minified | None:
             joined = "".join(text)
             cur = joined[: len(joined) - len(joined.lstrip(" \t"))] if joined else ""
             if len(cur) < len(comment_open_leading):
-                text[0 : len(cur)] = list(comment_open_leading)
+                text[:] = list(comment_open_leading) + text[len(cur) :]
         lines.append("".join(text))
         numbers.append(current)
         continuation_pending = False
