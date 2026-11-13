@@ -1709,6 +1709,10 @@ class _VerifyScope:
     #: Verifiable declarations carrying a `sorry` — failed locally
     #: without an API call, since they cannot pass verification.
     sorried: list[str] = field(default_factory=list)
+    #: Whether a successful verification may be recorded as an
+    #: unconditional `verified_sig` stamp. False when the proof relied on
+    #: auto-excused or user-permitted declarations in its closure.
+    stamp: bool = True
 
 
 def _verify_scope(
@@ -1791,9 +1795,20 @@ def _verify_scope(
             | stubbed_names
             | set(user_permitted)
         )
+        # The declaration is judged in isolation by excusing its
+        # dependencies; if any of those was a sorried (or explicitly
+        # permitted) theorem, this run did not verify them, so the
+        # selected declaration must not be recorded as unconditionally
+        # verified.
+        auto_permitted_sorried = any(
+            d.is_sorry
+            for d in verifiable
+            if d.name != declaration.name and d.name not in excused
+        )
         return _VerifyScope(
             to_verify=[declaration.name],
             permitted=sorted(permitted) or None,
+            stamp=not auto_permitted_sorried and not bool(user_permitted),
         )
 
     # File/module-level: the formal statement covers every verifiable
@@ -1971,6 +1986,11 @@ def verify(
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
+        if permitted_sorries:
+            signature_options = {
+                **signature_options,
+                "permitted_sorries": " ".join(sorted(permitted_sorries)),
+            }
         trim_roots: list[str] | None = None
         if select is not None:
             _trim: list[str] = []
@@ -2281,7 +2301,7 @@ def verify(
                             response.negation is not None and response.negation.okay
                         )
                         if response.okay and not vacuous:
-                            if not refined:
+                            if not refined and not user_permitted and scope.stamp:
                                 now = datetime.now(timezone.utc)
                                 for name in scope.to_verify:
                                     node_name = None
