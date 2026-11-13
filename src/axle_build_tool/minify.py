@@ -49,7 +49,7 @@ from dataclasses import dataclass
 #: options material (via `signature_marker`), so a behavior change here
 #: invalidates stamps and the verify cache exactly once, instead of
 #: silently covering submissions shaped differently.
-MINIFIER_VERSION = 3
+MINIFIER_VERSION = 4
 
 
 def signature_marker(enabled: bool) -> str:
@@ -71,13 +71,6 @@ class Minified:
     source_lines: tuple[int, ...]
 
 
-#: Characters an identifier may continue with — an apostrophe right
-#: after these is an identifier tail (`x'`), not a char literal.
-_IDENT_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'"
-)
-
-
 def minify_lines(source: str) -> Minified | None:
     """`source` stripped of comments and blank lines (`None` = don't).
 
@@ -93,15 +86,26 @@ def minify_lines(source: str) -> Minified | None:
     numbers: list[int] = []
     text: list[str] = []  # characters of the line being built
     current = 1  # source line the line being built started on
-    last: str | None = None  # last content character appended
+    current_leading = ""  # leading horizontal whitespace of the line
+    at_line_start = True
     in_string = False
     string_escape = False
     depth = 0  # nesting of the block comment being stripped
-    keep_depth = 0  # nesting of the docstring being preserved
+    comment_open_leading = ""
+    comment_prev_nonspace = False
+    comment_had_newline = False
+    continuation_pending = False
 
     def emit() -> None:
+        nonlocal continuation_pending
+        if continuation_pending:
+            joined = "".join(text)
+            cur = joined[: len(joined) - len(joined.lstrip(" \t"))] if joined else ""
+            if len(cur) < len(comment_open_leading):
+                text[0 : len(cur)] = list(comment_open_leading)
         lines.append("".join(text))
         numbers.append(current)
+        continuation_pending = False
 
     i = 0
     n = len(source)
@@ -118,7 +122,7 @@ def minify_lines(source: str) -> Minified | None:
             elif c == "\n":
                 return None  # Lean strings are single-line
             text.append(c)
-            last = c
+            at_line_start = False
             i += 1
             continue
 
@@ -130,17 +134,39 @@ def minify_lines(source: str) -> Minified | None:
                 i += 2
                 continue
             if source.startswith("-/", i):
+                was_depth = depth
                 depth -= 1
                 i += 2
+                if was_depth == 1 and depth == 0:
+                    # Comment closed.
+                    if comment_had_newline:
+                        # Preserve the opening line's leading indentation on
+                        # the continuation line that closes this comment.
+                        continuation_pending = True
+                        current_leading = comment_open_leading
+                        at_line_start = True
+                    else:
+                        # Single-line inline comment: insert a separating
+                        # space when flanked by non-whitespace on the same
+                        # line, so adjacent tokens do not merge.
+                        if comment_prev_nonspace and i < n and source[i] not in " \t\n":
+                            if not text or not text[-1].isspace():
+                                text.append(" ")
                 continue
             if c == "\n":
                 emit()
                 text = []
+                current_leading = ""
+                at_line_start = True
+                comment_had_newline = True
                 current += 1
             i += 1
             continue
 
         if source.startswith("/-", i):
+            comment_prev_nonspace = bool(text) and text[-1].strip() != ""
+            comment_open_leading = current_leading
+            comment_had_newline = False
             depth = 1
             i += 2
             continue
@@ -157,11 +183,13 @@ def minify_lines(source: str) -> Minified | None:
             in_string = True
             string_escape = False
             text.append(c)
-            last = c
+            at_line_start = False
             i += 1
             continue
 
-        if c == "'" and not (last is not None and (last.isalnum() or last in "_'")):
+        if c == "'" and not (
+            i > 0 and (source[i - 1].isalnum() or source[i - 1] in "_'")
+        ):
             # Char literal (`'"'`, `'-\''`): consume the whole literal
             # without interpreting it, so a raw quote inside cannot be
             # mistaken for a string boundary.
@@ -182,24 +210,42 @@ def minify_lines(source: str) -> Minified | None:
             if not closed:
                 return None
             text.append(source[i:j])
-            last = "'"
+            at_line_start = False
             i = j
             continue
 
         if c == "\n":
             emit()
             text = []
+            current_leading = ""
+            at_line_start = True
             current += 1
             i += 1
             continue
 
+        if c in " \t":
+            if at_line_start:
+                text.append(c)
+                current_leading += c
+            else:
+                if text and text[-1] in " \t":
+                    # Collapse runs of horizontal whitespace to a single
+                    # space between tokens.
+                    text[-1] = " "
+                else:
+                    text.append(c)
+            i += 1
+            continue
+
         text.append(c)
-        last = c
+        at_line_start = False
         i += 1
+        continue
 
     if in_string or depth:
         return None
-    import re as _re
+    if text:
+        emit()
 
     out_lines: list[str] = []
     out_numbers: list[int] = []
@@ -207,14 +253,6 @@ def minify_lines(source: str) -> Minified | None:
         stripped_line = line.rstrip()
         if not stripped_line:
             continue  # blank lines are pure layout
-        # Collapse redundant horizontal whitespace between tokens while
-        # preserving leading structural indentation.
-        leading = stripped_line[: len(stripped_line) - len(stripped_line.lstrip(" \t"))]
-        rest = stripped_line[len(leading):]
-        rest = _re.sub(r"[ \t]{2,}", " ", rest)
-        out_line = leading + rest
-        if not out_line.strip():
-            continue
-        out_lines.append(out_line)
+        out_lines.append(stripped_line)
         out_numbers.append(number)
     return Minified(tuple(out_lines), tuple(out_numbers))

@@ -4,7 +4,7 @@ The minifier strips comments and blank lines from payload text while
 keeping every surviving line tagged with its original source line, so
 payload line maps attribute diagnostics exactly. Cases here pin the
 state machine's hazards: strings and char literals that contain
-comment-lookalikes, nested block comments, docstrings kept verbatim,
+comment-lookalikes, nested block comments, docstrings stripped,
 and the clean fallback (`None`) when text doesn't track.
 """
 
