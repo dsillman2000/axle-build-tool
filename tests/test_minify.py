@@ -4,7 +4,7 @@ The minifier strips comments and blank lines from payload text while
 keeping every surviving line tagged with its original source line, so
 payload line maps attribute diagnostics exactly. Cases here pin the
 state machine's hazards: strings and char literals that contain
-comment-lookalikes, nested block comments, docstrings kept verbatim,
+comment-lookalikes, nested block comments, docstrings stripped,
 and the clean fallback (`None`) when text doesn't track.
 """
 
@@ -138,3 +138,63 @@ class TestLineAccounting:
             "  exact absurd trivial",
         )
         assert minified.source_lines == (3, 5, 6)
+
+
+class TestIssue48:
+    def test_final_line_without_trailing_newline(self) -> None:
+        minified = minify_lines("foo := 1")
+        assert minified is not None
+        assert minified.lines == ("foo := 1",)
+        assert minified.source_lines == (1,)
+
+    def test_string_multiple_spaces_preserved(self) -> None:
+        minified = minify_lines('x := "a   b"')
+        assert minified is not None
+        assert minified.lines == ('x := "a   b"',)
+
+    def test_adjacent_tokens_block_comment(self) -> None:
+        minified = minify_lines("a/- c -/b")
+        assert minified is not None
+        assert minified.lines == ("a b",)
+        indented = minify_lines("    have x := /-\ncomment\n-/ 1")
+        assert indented is not None
+        assert indented.lines == ("    have x :=", "    1")
+        assert indented.source_lines == (1, 3)
+
+    def test_char_literal_at_column_zero(self) -> None:
+        minified = minify_lines("foo'\n'\"'\n")
+        assert minified is not None
+        assert minified.lines[0] == "foo'"
+        assert minified.lines[1] == "'" + '"' + "'"
+
+
+class TestIssue48Padding:
+    def test_less_indentation_padded(self) -> None:
+        minified = minify_lines("    have x := /-\ncomment\n-/ 1")
+        assert minified is not None
+        assert minified.lines == ("    have x :=", "    1")
+
+    def test_more_indentation_preserved(self) -> None:
+        minified = minify_lines("    have x := /-\ncomment\n-/      1")
+        assert minified is not None
+        assert minified.lines == ("    have x :=", "      1")
+
+    def test_opening_at_column_zero(self) -> None:
+        minified = minify_lines("/-\ncomment\n-/ 1")
+        assert minified is not None
+        assert minified.lines == (" 1",)
+
+    def test_closing_at_eof_no_trailing_newline(self) -> None:
+        minified = minify_lines("    have x := /-\ncomment\n-/ 1")
+        assert minified is not None
+        assert minified.lines == ("    have x :=", "    1")
+        assert minified.source_lines == (1, 3)
+
+    def test_nested_block_comments_tracked(self) -> None:
+        minified = minify_lines("/- outer /- inner -/ still outer -/\ncode\n")
+        assert minified is not None
+        assert minified.lines == ("code",)
+        # Multiline nested comment does not leak trailing comment text.
+        minified2 = minify_lines("/- outer /- inner\n-/ still outer -/\ncode\n")
+        assert minified2 is not None
+        assert minified2.lines == ("code",)
