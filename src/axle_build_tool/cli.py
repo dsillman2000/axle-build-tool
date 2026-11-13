@@ -1710,9 +1710,9 @@ class _VerifyScope:
     #: without an API call, since they cannot pass verification.
     sorried: list[str] = field(default_factory=list)
     #: Whether a successful verification may be recorded as an
-    #: unconditional `verified_sig` stamp. False when the proof relied on
-    #: auto-excused or user-permitted declarations in its closure.
-    stamp: bool = True
+    #: unconditional `verified_sig` stamp. Defaults to False (fail-closed);
+    #: only set True when the closure is known to be clean.
+    stamp: bool = False
 
 
 def _verify_scope(
@@ -1838,6 +1838,7 @@ def _verify_scope(
         to_verify=to_verify,
         cached=cached,
         permitted=sorted(permitted) or None,
+        stamp=not stubbed_names and not user_permitted,
     )
 
 
