@@ -1,0 +1,18 @@
+AGENTS.md
+  h_4cc74772b10fd4 35
+src/axle_build_tool/minify.py
+  h_4cc74772b10fd4 52,89-90,94-97,100-105,108,125,137,140-154,159-161,167-169,186,190-192,213,220-221,226-239,241,243,247-248,256
+tests/test_minify.py
+  h_4cc74772b10fd4 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e93074e24eca46800210ac9693b200c05a7d5d3e",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
