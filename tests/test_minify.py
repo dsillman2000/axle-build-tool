@@ -166,3 +166,12 @@ class TestIssue48:
         assert minified is not None
         assert minified.lines[0] == "foo'"
         assert minified.lines[1] == "'" + '"' + "'"
+
+    def test_nested_block_comments_tracked(self) -> None:
+        minified = minify_lines("/- outer /- inner -/ still outer -/\ncode\n")
+        assert minified is not None
+        assert minified.lines == ("code",)
+        # Multiline nested comment does not leak trailing comment text.
+        minified2 = minify_lines("/- outer /- inner\n-/ still outer -/\ncode\n")
+        assert minified2 is not None
+        assert minified2.lines == ("code",)
