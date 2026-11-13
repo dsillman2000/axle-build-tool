@@ -167,6 +167,29 @@ class TestIssue48:
         assert minified.lines[0] == "foo'"
         assert minified.lines[1] == "'" + '"' + "'"
 
+
+class TestIssue48Padding:
+    def test_less_indentation_padded(self) -> None:
+        minified = minify_lines("    have x := /-\ncomment\n-/ 1")
+        assert minified is not None
+        assert minified.lines == ("    have x :=", "    1")
+
+    def test_more_indentation_preserved(self) -> None:
+        minified = minify_lines("    have x := /-\ncomment\n-/      1")
+        assert minified is not None
+        assert minified.lines == ("    have x :=", "      1")
+
+    def test_opening_at_column_zero(self) -> None:
+        minified = minify_lines("/-\ncomment\n-/ 1")
+        assert minified is not None
+        assert minified.lines == (" 1",)
+
+    def test_closing_at_eof_no_trailing_newline(self) -> None:
+        minified = minify_lines("    have x := /-\ncomment\n-/ 1")
+        assert minified is not None
+        assert minified.lines == ("    have x :=", "    1")
+        assert minified.source_lines == (1, 3)
+
     def test_nested_block_comments_tracked(self) -> None:
         minified = minify_lines("/- outer /- inner -/ still outer -/\ncode\n")
         assert minified is not None
