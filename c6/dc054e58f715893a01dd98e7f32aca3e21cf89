@@ -1,0 +1,14 @@
+src/axle_build_tool/minify.py
+  h_4cc74772b10fd4 98,115-116,194-196,219
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6dc054e58f715893a01dd98e7f32aca3e21cf89",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
