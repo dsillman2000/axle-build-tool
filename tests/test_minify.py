@@ -138,3 +138,31 @@ class TestLineAccounting:
             "  exact absurd trivial",
         )
         assert minified.source_lines == (3, 5, 6)
+
+
+class TestIssue48:
+    def test_final_line_without_trailing_newline(self) -> None:
+        minified = minify_lines("foo := 1")
+        assert minified is not None
+        assert minified.lines == ("foo := 1",)
+        assert minified.source_lines == (1,)
+
+    def test_string_multiple_spaces_preserved(self) -> None:
+        minified = minify_lines('x := "a   b"')
+        assert minified is not None
+        assert minified.lines == ('x := "a   b"',)
+
+    def test_adjacent_tokens_block_comment(self) -> None:
+        minified = minify_lines("a/- c -/b")
+        assert minified is not None
+        assert minified.lines == ("a b",)
+        indented = minify_lines("    have x := /-\ncomment\n-/ 1")
+        assert indented is not None
+        assert indented.lines == ("    have x :=", "    1")
+        assert indented.source_lines == (1, 3)
+
+    def test_char_literal_at_column_zero(self) -> None:
+        minified = minify_lines("foo'\n'\"'\n")
+        assert minified is not None
+        assert minified.lines[0] == "foo'"
+        assert minified.lines[1] == "'" + '"' + "'"
