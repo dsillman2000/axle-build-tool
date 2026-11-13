@@ -95,6 +95,7 @@ def minify_lines(source: str) -> Minified | None:
     comment_prev_nonspace = False
     comment_had_newline = False
     continuation_pending = False
+    just_consumed_char = False
 
     def emit() -> None:
         nonlocal continuation_pending
@@ -111,6 +112,8 @@ def minify_lines(source: str) -> Minified | None:
     n = len(source)
     while i < n:
         c = source[i]
+        prev_consumed_char = just_consumed_char
+        just_consumed_char = False
 
         if in_string:
             if string_escape:
@@ -188,7 +191,9 @@ def minify_lines(source: str) -> Minified | None:
             continue
 
         if c == "'" and not (
-            i > 0 and (source[i - 1].isalnum() or source[i - 1] in "_'")
+            i > 0
+            and (source[i - 1].isalnum() or source[i - 1] in "_'")
+            and not prev_consumed_char
         ):
             # Char literal (`'"'`, `'-\''`): consume the whole literal
             # without interpreting it, so a raw quote inside cannot be
@@ -211,6 +216,7 @@ def minify_lines(source: str) -> Minified | None:
                 return None
             text.append(source[i:j])
             at_line_start = False
+            just_consumed_char = True
             i = j
             continue
 
