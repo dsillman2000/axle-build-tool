@@ -470,7 +470,12 @@ def _signature_options(
     submitted payload is part of what a stamp or cache entry certifies,
     so a minifier change invalidates exactly once (one-time,
     self-healing)."""
-    return {**config.axle.global_options, "minify": signature_marker(minified)}
+    return {
+        **config.axle.global_options,
+        "minify": signature_marker(minified),
+        #: Invalidate stamps written before the excused-stamp fix.
+        "verified_stamp": "v2",
+    }
 
 
 def _resolve_permitted_sorries(
