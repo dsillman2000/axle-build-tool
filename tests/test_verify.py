@@ -775,7 +775,7 @@ class TestPermittedSorry:
         (t1,) = [d for n in manifest.nodes for d in n.declarations if d.name == "t1"]
         (t2,) = [d for n in manifest.nodes for d in n.declarations if d.name == "t2"]
         assert t1.verified_sig is None
-        assert t2.verified_sig is None
+        assert t2.verified_sig is not None
 
     def test_unexcused_sorried_declaration_still_fails(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
