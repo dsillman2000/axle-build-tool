@@ -1,0 +1,14 @@
+tests/test_minify.py
+  h_4cc74772b10fd4 169-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "73b6ba0b9ab486a029a2d56bea692f85372cbc96",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
