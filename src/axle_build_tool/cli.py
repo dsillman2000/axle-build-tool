@@ -1813,7 +1813,11 @@ def _verify_scope(
         return _VerifyScope(
             to_verify=[declaration.name],
             permitted=sorted(permitted) or None,
-            stamp=not auto_permitted_sorried and not bool(user_permitted),
+            stamp=(
+                not auto_permitted_sorried
+                and not stubbed_names
+                and not user_permitted
+            ),
         )
 
     # File/module-level: the formal statement covers every verifiable
