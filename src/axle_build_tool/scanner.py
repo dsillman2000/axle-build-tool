@@ -27,16 +27,26 @@ def is_ignored(name: str) -> bool:
 
 
 def _walk(dir_path: Path) -> list[Path]:
-    """Recursively collect `.lean` paths relative to `dir_path` (unsorted)."""
+    """Iteratively collect `.lean` paths relative to `dir_path` (unsorted)."""
     found: list[Path] = []
-    for entry in dir_path.iterdir():
-        if is_ignored(entry.name):
-            continue
-        if entry.is_dir():
-            for nested in _walk(entry):
-                found.append(Path(entry.name) / nested)
-        elif entry.is_file() and entry.suffix == LEAN_SUFFIX:
-            found.append(Path(entry.name))
+    root_stat = dir_path.stat()
+    stack: list[tuple[Path, Path, frozenset[tuple[int, int]]]] = [
+        (dir_path, Path(), frozenset({(root_stat.st_dev, root_stat.st_ino)}))
+    ]
+    while stack:
+        current_dir, rel_dir, ancestors = stack.pop()
+        for entry in current_dir.iterdir():
+            if is_ignored(entry.name):
+                continue
+            relative = rel_dir / entry.name if rel_dir != Path() else Path(entry.name)
+            if entry.is_dir():
+                stat = entry.stat()
+                dir_id = (stat.st_dev, stat.st_ino)
+                if dir_id in ancestors:
+                    continue
+                stack.append((entry, relative, ancestors | {dir_id}))
+            elif entry.is_file() and entry.suffix == LEAN_SUFFIX:
+                found.append(relative)
     return found
 
 

@@ -52,3 +52,14 @@ class TestScannerFiltering:
     def test_missing_module_dir_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ScanError, match="does not exist"):
             scan_module(tmp_path / "nope")
+
+    def test_symlink_directory_cycle_terminates(self, tmp_path: Path) -> None:
+        (tmp_path / "A.lean").write_text("-- a\n", encoding="utf-8")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "B.lean").write_text("-- b\n", encoding="utf-8")
+        try:
+            (tmp_path / "sub" / "loop").symlink_to(tmp_path, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks unavailable on this platform")
+
+        assert scan_module(tmp_path) == [Path("A.lean"), Path("sub/B.lean")]

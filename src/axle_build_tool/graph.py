@@ -35,13 +35,14 @@ manifest-derived string is escaped into tooltip markup with
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 import html
 import json
 from pathlib import Path
 from typing import Any
 
 from axle_build_tool.config import CACHE_DIRNAME
-from axle_build_tool.manifest import Manifest, ManifestNode
+from axle_build_tool.manifest import Manifest, ManifestNode, closure_nodes
 from axle_build_tool.payloads import dotted_stem_of
 from axle_build_tool.stubbing import PROOF_KINDS as _VERIFIABLE_KINDS
 from axle_build_tool.stubbing import bare_name
@@ -135,18 +136,7 @@ def rendered_nodes(
     declarations) and every ancestor; a module selection is every file
     of the module and the union's ancestors.
     """
-    by_name = manifest.by_name()
-    rendered: dict[str, ManifestNode] = {}
-
-    def visit(node: ManifestNode) -> None:
-        if node.name in rendered:
-            return
-        rendered[node.name] = node
-        for parent_name in sorted(node.parents):
-            visit(by_name[parent_name])
-
-    for node in selected:
-        visit(node)
+    rendered = closure_nodes(manifest, selected)
     return [rendered[name] for name in sorted(rendered)]
 
 
@@ -223,10 +213,39 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
     by_name = {node.name: node for node in files}
     modules = sorted({node.module for node in files})
 
-    def file_level(name: str) -> int:
-        """Longest import path above the file, within its column."""
-        parents = by_name[name].parents
-        return 1 + max((file_level(p) for p in parents if p in by_name), default=-1)
+    def _longest_paths(
+        keys: Iterable[str],
+        parents_of: Callable[[str], list[str]],
+    ) -> dict[str, int]:
+        """Compute longest-path depths iteratively, dropping cycle back-edges."""
+        memo: dict[str, int] = {}
+        visiting: set[str] = set()
+        work: list[tuple[str, list[str] | None]] = []
+        for start in keys:
+            if start in memo:
+                continue
+            work.append((start, None))
+            while work:
+                node, parents = work.pop()
+                if parents is not None:
+                    best = max((memo[p] for p in parents if p in memo), default=-1)
+                    memo[node] = 1 + best
+                    visiting.discard(node)
+                    continue
+                if node in memo or node in visiting:
+                    continue
+                visiting.add(node)
+                node_parents = parents_of(node)
+                work.append((node, node_parents))
+                for parent in node_parents:
+                    if parent not in memo and parent not in visiting:
+                        work.append((parent, None))
+        return memo
+
+    file_levels = _longest_paths(
+        sorted(by_name),
+        lambda name: [p for p in sorted(by_name[name].parents) if p in by_name],
+    )
 
     # Column order: longest-path layering of the module DAG induced by
     # the files' imports (dependencies first, left to right).
@@ -236,25 +255,20 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
             if parent in by_name:
                 module_parents[node.module].add(by_name[parent].module)
 
-    def module_level(module: str) -> int:
-        return 1 + max(
-            (
-                module_level(parent)
-                for parent in module_parents[module]
-                if parent != module
-            ),
-            default=-1,
-        )
+    module_levels = _longest_paths(
+        modules,
+        lambda module: sorted(p for p in module_parents[module] if p != module),
+    )
 
     positions: dict[str, dict[str, int]] = {}
     cells: dict[str, dict[str, int]] = {}
     x = 0
-    for module in sorted(modules, key=lambda name: (module_level(name), name)):
+    for module in sorted(modules, key=lambda name: (module_levels[name], name)):
         column_x = x
         y = _LAYOUT_TOP
         members = sorted(
             (node for node in files if node.module == module),
-            key=lambda node: (file_level(node.name), node.name),
+            key=lambda node: (file_levels[node.name], node.name),
         )
         for member in members:
             members_decls = sorted(member.declarations, key=lambda decl: decl.name)
@@ -538,9 +552,8 @@ def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
     )
 
 
-def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt graph") -> str:
-    """Render the single-file HTML (Cytoscape.js from the pinned CDN)."""
-    data = build_graph_data(manifest, files)
+def _render_html(data: dict[str, Any], title: str) -> str:
+    """Render the single-file HTML from prebuilt graph data."""
     counts = data["counts"]
     page_title = (
         f"{html.escape(title)} — {counts['files']} files, "
@@ -565,6 +578,11 @@ def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt
     return page
 
 
+def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt graph") -> str:
+    """Render the single-file HTML (Cytoscape.js from the pinned CDN)."""
+    return _render_html(build_graph_data(manifest, files), title)
+
+
 def write_graph(
     manifest: Manifest,
     project_root: Path,
@@ -580,10 +598,9 @@ def write_graph(
     """
     out = output if output is not None else graph_path(project_root)
     out.parent.mkdir(parents=True, exist_ok=True)
-    html_text = graph_html(manifest, files, title=title)
-    counts = build_graph_data(manifest, files)["counts"]
-    out.write_text(html_text, encoding="utf-8")
-    return out, counts
+    data = build_graph_data(manifest, files)
+    out.write_text(_render_html(data, title), encoding="utf-8")
+    return out, data["counts"]
 
 
 # --- The page template ---------------------------------------------------

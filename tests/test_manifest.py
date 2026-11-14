@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from axle_build_tool.manifest import (
     ExtractedDecl,
     build_manifest,
     check_targets,
+    closure_signature,
     load_manifest,
     manifest_path,
     save_manifest,
@@ -380,3 +382,47 @@ class TestTargetValidation:
             )],
         )
         check_targets(config, manifest)  # should not raise
+
+
+class TestClosureSignatureTraversal:
+    @staticmethod
+    def _node(name: str, parents: list[str], md5: str = "0" * 32) -> ManifestNode:
+        return ManifestNode(
+            name=name,
+            module=name.split(".", 1)[0],
+            path=f"{name.replace('.', '/')}.lean",
+            md5=md5,
+            status="clean",
+            parents=parents,
+        )
+
+    def test_deep_chain_beyond_recursion_limit(self) -> None:
+        depth = sys.getrecursionlimit() + 200
+        nodes = [
+            self._node(
+                f"M.F{i:04d}",
+                [f"M.F{i - 1:04d}"] if i > 0 else [],
+                md5=f"{i:032x}",
+            )
+            for i in range(depth)
+        ]
+        manifest = Manifest(generated_at=datetime.now(timezone.utc), nodes=nodes)
+        sig = closure_signature(nodes[-1], manifest, "lean-4.35.0", {})
+
+        mutated_nodes = [nodes[0].model_copy(update={"md5": "f" * 32}), *nodes[1:]]
+        mutated_manifest = manifest.model_copy(update={"nodes": mutated_nodes})
+        assert closure_signature(mutated_nodes[-1], mutated_manifest, "lean-4.35.0", {}) != sig
+
+    def test_handles_cycles_missing_parents_and_external_seed(self) -> None:
+        a = self._node("M.A", ["M.B"], md5="a" * 32)
+        b = self._node("M.B", ["M.A", "M.Missing"], md5="b" * 32)
+        manifest = Manifest(generated_at=datetime.now(timezone.utc), nodes=[a, b])
+
+        sig_a = closure_signature(a, manifest, "lean-4.35.0", {})
+        sig_b = closure_signature(b, manifest, "lean-4.35.0", {})
+        assert sig_a == sig_b
+
+        # A seed node outside `manifest.nodes` still computes cleanly.
+        external = self._node("M.External", ["M.A"], md5="e" * 32)
+        sig_ext = closure_signature(external, manifest, "lean-4.35.0", {})
+        assert isinstance(sig_ext, str) and len(sig_ext) == 32

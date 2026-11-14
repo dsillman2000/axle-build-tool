@@ -294,16 +294,24 @@ def build_payload(
     order: list[ManifestNode] = []
     seen: set[str] = set()
 
-    def visit(current: ManifestNode) -> None:
-        if current.name in seen:
-            return
-        seen.add(current.name)
-        for parent_name in sorted(current.parents):
-            visit(by_name[parent_name])
-        order.append(current)
-
+    # Iterative, cycle-safe, dependencies-first traversal of the file
+    # dependency closure. In acyclic graphs, a node is appended to `order`
+    # only after all of its resolved parents have been appended.
     for node in sorted(nodes, key=lambda n: n.name):
-        visit(node)
+        stack: list[tuple[ManifestNode, bool]] = [(node, False)]
+        while stack:
+            current, done = stack.pop()
+            if done:
+                order.append(current)
+                continue
+            if current.name in seen:
+                continue
+            seen.add(current.name)
+            stack.append((current, True))
+            for parent_name in sorted(current.parents, reverse=True):
+                parent = by_name.get(parent_name)
+                if parent is not None and parent.name not in seen:
+                    stack.append((parent, False))
 
     hoisted: list[str] = []
     hoisted_seen: set[str] = set()
@@ -352,7 +360,9 @@ def build_payload(
             else:
                 tagged = list(enumerate(source.splitlines(), start=1))
         internal_stems = {
-            dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
+            dotted_stem_of(by_name[parent_name])
+            for parent_name in member.parents
+            if parent_name in by_name
         }
         section: list[str] = []
         line_numbers: list[int] = []
