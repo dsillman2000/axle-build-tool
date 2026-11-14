@@ -359,14 +359,17 @@ def closure_signature(
     by_name = manifest.by_name()
     seen: set[str] = set()
 
-    def visit(current: ManifestNode) -> None:
+    # Iterative, cycle-safe traversal of the file dependency closure.
+    stack: list[ManifestNode] = [node]
+    while stack:
+        current = stack.pop()
         if current.name in seen:
-            return
+            continue
         seen.add(current.name)
-        for parent in sorted(current.parents):
-            visit(by_name[parent])
-
-    visit(node)
+        for parent_name in sorted(current.parents, reverse=True):
+            parent = by_name.get(parent_name)
+            if parent is not None and parent.name not in seen:
+                stack.append(parent)
     payload = "|".join(sorted(f"{name}:{by_name[name].md5}" for name in seen))
     options = "|".join(f"{k}={v}" for k, v in sorted(global_options.items()))
     material = f"{payload}#{environment}#{options}"

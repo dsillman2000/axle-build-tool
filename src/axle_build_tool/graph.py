@@ -138,15 +138,20 @@ def rendered_nodes(
     by_name = manifest.by_name()
     rendered: dict[str, ManifestNode] = {}
 
-    def visit(node: ManifestNode) -> None:
+    # Iterative traversal (with a cycle guard) so a deep or cyclic
+    # dependency graph can never overflow the interpreter's recursion
+    # limit the way the previous recursive walk could.
+    stack: list[ManifestNode] = list(selected)
+    while stack:
+        node = stack.pop()
         if node.name in rendered:
-            return
+            continue
         rendered[node.name] = node
-        for parent_name in sorted(node.parents):
-            visit(by_name[parent_name])
+        for parent_name in sorted(node.parents, reverse=True):
+            parent = by_name.get(parent_name)
+            if parent is not None and parent_name not in rendered:
+                stack.append(parent)
 
-    for node in selected:
-        visit(node)
     return [rendered[name] for name in sorted(rendered)]
 
 
@@ -223,10 +228,41 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
     by_name = {node.name: node for node in files}
     modules = sorted({node.module for node in files})
 
+    def _longest_paths(keys, parents_of):
+        memo: dict[Any, int] = {}
+        for start in keys:
+            if start in memo:
+                continue
+            visiting: set[Any] = set()
+            work: list[tuple[Any, bool]] = [(start, False)]
+            while work:
+                node, done = work.pop()
+                if done:
+                    best = -1
+                    for parent in parents_of(node):
+                        if parent in memo and memo[parent] > best:
+                            best = memo[parent]
+                    memo[node] = 1 + best
+                    visiting.discard(node)
+                    continue
+                if node in memo:
+                    continue
+                if node in visiting:
+                    continue
+                visiting.add(node)
+                work.append((node, True))
+                for parent in parents_of(node):
+                    if parent not in memo and parent not in visiting:
+                        work.append((parent, False))
+        return memo
+
+    file_levels = _longest_paths(
+        [node.name for node in files],
+        lambda name: [p for p in by_name[name].parents if p in by_name],
+    )
+
     def file_level(name: str) -> int:
-        """Longest import path above the file, within its column."""
-        parents = by_name[name].parents
-        return 1 + max((file_level(p) for p in parents if p in by_name), default=-1)
+        return file_levels[name]
 
     # Column order: longest-path layering of the module DAG induced by
     # the files' imports (dependencies first, left to right).
@@ -236,15 +272,13 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
             if parent in by_name:
                 module_parents[node.module].add(by_name[parent].module)
 
+    module_levels = _longest_paths(
+        modules,
+        lambda module: [p for p in module_parents[module] if p != module],
+    )
+
     def module_level(module: str) -> int:
-        return 1 + max(
-            (
-                module_level(parent)
-                for parent in module_parents[module]
-                if parent != module
-            ),
-            default=-1,
-        )
+        return module_levels[module]
 
     positions: dict[str, dict[str, int]] = {}
     cells: dict[str, dict[str, int]] = {}
