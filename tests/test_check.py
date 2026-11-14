@@ -2012,3 +2012,79 @@ class TestCheckStamps:
         manifest = load_manifest(root)
         assert checked_stamp_of(manifest, "t1").checked_sig is not None
         assert checked_stamp_of(manifest, "t2").checked_sig is not None
+
+
+class TestSorryCacheIsolation:
+    CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+      - C.t3
+"""
+    FILES = {
+        "M/A.lean": "theorem t1 : 1 = 1 := rfl\n",
+        "M/B.lean": "import A\ntheorem t2 : 1 = 1 := rfl\n",
+        "M/C.lean": "import B\ntheorem t3 : 1 = 1 := rfl\n",
+    }
+    DOCS = {
+        "theorem t1 : 1 = 1": {
+            "t1": make_document("t1", kind="theorem", line_pos=1, end_line_pos=1)
+        },
+        "theorem t2 : 1 = 1": {
+            "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+        },
+        "theorem t3 : 1 = 1": {
+            "t3": make_document("t3", kind="theorem", line_pos=5, end_line_pos=5)
+        },
+    }
+
+    def test_sorry_serves_cached_upstream_and_skips_stubbed_artifact(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, self.CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        assert runner.invoke(main, ["check"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["check", "--sorry", "M.B"])
+
+        assert result.exit_code == 0, result.output
+        assert status_line(result.output, "M.A") == "M.A OK (cached)"
+        assert status_line(result.output, "M.B") == "M.B SKIP"
+        assert status_line(result.output, "M.C") == "M.C OK"
+        # Only M.C was submitted; M.A came from cache.
+        assert len(check_calls(fake_axle)) == 1
+        compiled = root / ".axbt" / "compiled"
+        assert not (compiled / "M_A_stubbed.lean").exists()
+        assert (compiled / "M_C_stubbed.lean").exists()
+
+    def test_sorry_stamps_uncached_upstream_canonically(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, self.CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        first = runner.invoke(main, ["check", "--sorry", "M.B"])
+        assert first.exit_code == 0, first.output
+        manifest = load_manifest(root)
+        assert checked_stamp_of(manifest, "t1").checked_sig is not None
+        assert checked_stamp_of(manifest, "t3").checked_sig is None
+        compiled = root / ".axbt" / "compiled"
+        assert not (compiled / "M_A_stubbed.lean").exists()
+        assert (compiled / "M_C_stubbed.lean").exists()
+        fake_axle.calls.clear()
+
+        followup = runner.invoke(main, ["check"])
+        assert followup.exit_code == 0, followup.output
+        assert status_line(followup.output, "M.A") == "M.A OK (cached)"
+        # Only M.B and M.C are submitted on the follow-up bare check.
+        assert len(check_calls(fake_axle)) == 2
