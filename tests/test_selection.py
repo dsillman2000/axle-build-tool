@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
+import sys
 
 import pytest
 
 from axle_build_tool.config import load_config
-from axle_build_tool.manifest import build_manifest
+from axle_build_tool.manifest import Manifest, ManifestNode, build_manifest
 from axle_build_tool.payloads import (
     build_payload,
     compiled_filename,
@@ -382,3 +384,90 @@ class TestSelectionPayloads:
         # The hoisted import header has no source counterpart.
         assert source_position(payload, start - 1) is None
         assert source_position(payload, start) == ("M.A", mapped[0])
+
+    def test_build_payload_deep_chain_beyond_recursion_limit(self, tmp_path: Path) -> None:
+        depth = sys.getrecursionlimit() + 200
+        (tmp_path / "M").mkdir()
+        nodes: list[ManifestNode] = []
+        for i in range(depth):
+            rel = f"M/F{i:04d}.lean"
+            text = (
+                f"import F{i - 1:04d}\ndef v{i} := v{i - 1}\n"
+                if i > 0
+                else "def v0 := 0\n"
+            )
+            (tmp_path / rel).write_text(text, encoding="utf-8")
+            nodes.append(
+                ManifestNode(
+                    name=f"M.F{i:04d}",
+                    module="M",
+                    path=rel,
+                    md5=f"{i:032x}",
+                    status="clean",
+                    parents=[f"M.F{i - 1:04d}"] if i > 0 else [],
+                )
+            )
+        manifest = Manifest(generated_at=datetime.now(timezone.utc), nodes=nodes)
+
+        payload = build_payload([nodes[-1]], manifest, tmp_path)
+
+        assert list(payload.sections) == [f"M.F{i:04d}" for i in range(depth)]
+
+    def test_build_payload_diamond_preserves_dependencies_first_order(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "M").mkdir()
+        sources = {
+            "C": "def c := 1\n",
+            "X": "import C\ndef x := c\n",
+            "B": "import X\ndef b := x\n",
+            "D": "import B\nimport C\ndef d := b + c\n",
+        }
+        parents = {"C": [], "X": ["M.C"], "B": ["M.X"], "D": ["M.B", "M.C"]}
+        nodes = []
+        for name, text in sources.items():
+            rel = f"M/{name}.lean"
+            (tmp_path / rel).write_text(text, encoding="utf-8")
+            nodes.append(
+                ManifestNode(
+                    name=f"M.{name}",
+                    module="M",
+                    path=rel,
+                    md5="0" * 32,
+                    status="clean",
+                    parents=parents[name],
+                )
+            )
+        manifest = Manifest(generated_at=datetime.now(timezone.utc), nodes=nodes)
+
+        payload = build_payload([manifest.by_name()["M.D"]], manifest, tmp_path)
+
+        assert list(payload.sections) == ["M.C", "M.X", "M.B", "M.D"]
+
+    def test_build_payload_handles_cyclic_manifest_and_missing_parent(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "M").mkdir()
+        (tmp_path / "M/A.lean").write_text("import B\ndef a := 1\n", encoding="utf-8")
+        (tmp_path / "M/B.lean").write_text("import A\ndef b := 2\n", encoding="utf-8")
+        a = ManifestNode(
+            name="M.A",
+            module="M",
+            path="M/A.lean",
+            md5="0" * 32,
+            status="clean",
+            parents=["M.B", "M.Missing"],
+        )
+        b = ManifestNode(
+            name="M.B",
+            module="M",
+            path="M/B.lean",
+            md5="0" * 32,
+            status="clean",
+            parents=["M.A"],
+        )
+        manifest = Manifest(generated_at=datetime.now(timezone.utc), nodes=[a, b])
+
+        payload = build_payload([a], manifest, tmp_path)
+
+        assert set(payload.sections) == {"M.A", "M.B"}

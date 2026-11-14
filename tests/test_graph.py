@@ -8,7 +8,11 @@ the generated page's JSON block.
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,11 +20,17 @@ import pytest
 from click.testing import CliRunner
 
 from axle_build_tool import main
-from axle_build_tool.graph import rollup_state, state_of
-from axle_build_tool.graph import _layout_positions
+from axle_build_tool.graph import (
+    _layout_positions,
+    rendered_nodes,
+    rollup_state,
+    state_of,
+    write_graph,
+)
 from axle_build_tool.manifest import (
     MANIFEST_VERSION,
     ExtractedDecl,
+    Manifest,
     ManifestNode,
     load_manifest,
 )
@@ -701,3 +711,132 @@ class TestLayout:
         # No JS-graph-layout markers left: positions come from the data.
         assert "preset" in html_text
         assert "breadthfirst" not in html_text
+
+    def test_cross_module_import_cycle_renders_cleanly(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """File-acyclic cross-module zig-zag imports induce a cycle between
+        modules; `axbt graph` must render without RecursionError."""
+        root = make_project(
+            tmp_path,
+            "modules:\n  ModA:\n    targets: []\n  ModB:\n    targets: []\n",
+            {
+                "ModA/Base.lean": "def a1 := 1\n",
+                "ModB/Mid.lean": "import Base\ndef b1 := a1\n",
+                "ModA/Top.lean": "import Mid\ndef a2 := b1\n",
+            },
+        )
+        fake_axle._extract_documents_by_marker = {
+            "def a1 := 1": {
+                "a1": make_document("a1", kind="def", line_pos=1, end_line_pos=1)
+            },
+            "def b1 := a1": {
+                "b1": make_document("b1", kind="def", line_pos=3, end_line_pos=3)
+            },
+            "def a2 := b1": {
+                "a2": make_document("a2", kind="def", line_pos=5, end_line_pos=5)
+            },
+        }
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        _output, html_text = run_graph(root)
+        data = graph_data(html_text)
+        assert data["counts"]["modules"] == 2
+        assert data["counts"]["files"] == 3
+
+    def test_cross_module_cycle_layout_is_deterministic_across_hash_seeds(
+        self,
+    ) -> None:
+        snippet = (
+            "from axle_build_tool.manifest import ManifestNode\n"
+            "from axle_build_tool.graph import _layout_positions\n"
+            "def mk(name, parents):\n"
+            "    return ManifestNode(name=name, module=name.split('.', 1)[0], "
+            "path=f'{name}.lean', md5='0'*32, status='clean', parents=list(parents))\n"
+            "files = [\n"
+            "    mk('App.Main', ['CoreA.F1', 'CoreB.F1']),\n"
+            "    mk('CoreA.F1', ['CoreB.F2']),\n"
+            "    mk('CoreA.F2', []),\n"
+            "    mk('CoreB.F1', ['CoreA.F2']),\n"
+            "    mk('CoreB.F2', ['CoreA.F2']),\n"
+            "]\n"
+            "pos, _ = _layout_positions(files)\n"
+            "print(sorted((k, pos[k]['x'], pos[k]['y']) for k in pos))\n"
+        )
+        results = {
+            subprocess.check_output(
+                [sys.executable, "-c", snippet],
+                env={**os.environ, "PYTHONHASHSEED": str(seed)},
+                text=True,
+            ).strip()
+            for seed in range(6)
+        }
+        assert len(results) == 1
+
+    def test_dense_transitive_dag_layout_completes_quickly(self) -> None:
+        files = [
+            self.node(
+                f"M.F{i:02d}",
+                tuple(f"M.F{j:02d}" for j in range(i)),
+            )
+            for i in range(30)
+        ]
+        started = time.monotonic()
+        positions, _cells = _layout_positions(files)
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0
+        ys = [positions[f"file:M.F{i:02d}"]["y"] for i in range(30)]
+        assert ys == sorted(ys)
+        assert len(set(ys)) == 30
+
+    def test_deep_chain_exceeding_recursion_limit_does_not_overflow(self) -> None:
+        depth = sys.getrecursionlimit() + 200
+        nodes = [
+            self.node(f"M.F{i:04d}", (f"M.F{i - 1:04d}",) if i > 0 else ())
+            for i in range(depth)
+        ]
+        manifest = Manifest(
+            generated_at=datetime.now(timezone.utc),
+            nodes=nodes,
+        )
+        closure = rendered_nodes(manifest, [nodes[-1]])
+        assert len(closure) == depth
+
+        positions, _cells = _layout_positions(closure)
+        ys = [positions[f"file:M.F{i:04d}"]["y"] for i in range(depth)]
+        assert ys == sorted(ys)
+        assert len(set(ys)) == depth
+
+    def test_cyclic_manifest_terminates_cleanly(self) -> None:
+        nodes = [
+            self.node("M.A", ("M.B",)),
+            self.node("M.B", ("M.A",)),
+        ]
+        manifest = Manifest(
+            generated_at=datetime.now(timezone.utc),
+            nodes=nodes,
+        )
+        closure = rendered_nodes(manifest, [nodes[0]])
+        assert [node.name for node in closure] == ["M.A", "M.B"]
+
+        positions, _cells = _layout_positions(closure)
+        assert set(positions) == {"file:M.A", "file:M.B", "module:M"}
+
+    def test_write_graph_builds_graph_data_once(
+        self, graph_project: Path, monkeypatch
+    ) -> None:
+        import axle_build_tool.graph as graph_mod
+
+        calls = 0
+        original = graph_mod.build_graph_data
+
+        def counted(manifest, files):
+            nonlocal calls
+            calls += 1
+            return original(manifest, files)
+
+        monkeypatch.setattr(graph_mod, "build_graph_data", counted)
+        manifest = load_manifest(graph_project)
+        write_graph(manifest, graph_project, manifest.nodes)
+        assert calls == 1

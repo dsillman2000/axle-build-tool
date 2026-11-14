@@ -35,13 +35,14 @@ manifest-derived string is escaped into tooltip markup with
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 import html
 import json
 from pathlib import Path
 from typing import Any
 
 from axle_build_tool.config import CACHE_DIRNAME
-from axle_build_tool.manifest import Manifest, ManifestNode
+from axle_build_tool.manifest import Manifest, ManifestNode, closure_nodes
 from axle_build_tool.payloads import dotted_stem_of
 from axle_build_tool.stubbing import PROOF_KINDS as _VERIFIABLE_KINDS
 from axle_build_tool.stubbing import bare_name
@@ -135,23 +136,7 @@ def rendered_nodes(
     declarations) and every ancestor; a module selection is every file
     of the module and the union's ancestors.
     """
-    by_name = manifest.by_name()
-    rendered: dict[str, ManifestNode] = {}
-
-    # Iterative traversal (with a cycle guard) so a deep or cyclic
-    # dependency graph can never overflow the interpreter's recursion
-    # limit the way the previous recursive walk could.
-    stack: list[ManifestNode] = list(selected)
-    while stack:
-        node = stack.pop()
-        if node.name in rendered:
-            continue
-        rendered[node.name] = node
-        for parent_name in sorted(node.parents, reverse=True):
-            parent = by_name.get(parent_name)
-            if parent is not None and parent_name not in rendered:
-                stack.append(parent)
-
+    rendered = closure_nodes(manifest, selected)
     return [rendered[name] for name in sorted(rendered)]
 
 
@@ -228,41 +213,39 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
     by_name = {node.name: node for node in files}
     modules = sorted({node.module for node in files})
 
-    def _longest_paths(keys, parents_of):
-        memo: dict[Any, int] = {}
+    def _longest_paths(
+        keys: Iterable[str],
+        parents_of: Callable[[str], list[str]],
+    ) -> dict[str, int]:
+        """Compute longest-path depths iteratively, dropping cycle back-edges."""
+        memo: dict[str, int] = {}
+        visiting: set[str] = set()
+        work: list[tuple[str, list[str] | None]] = []
         for start in keys:
             if start in memo:
                 continue
-            visiting: set[Any] = set()
-            work: list[tuple[Any, bool]] = [(start, False)]
+            work.append((start, None))
             while work:
-                node, done = work.pop()
-                if done:
-                    best = -1
-                    for parent in parents_of(node):
-                        if parent in memo and memo[parent] > best:
-                            best = memo[parent]
+                node, parents = work.pop()
+                if parents is not None:
+                    best = max((memo[p] for p in parents if p in memo), default=-1)
                     memo[node] = 1 + best
                     visiting.discard(node)
                     continue
-                if node in memo:
-                    continue
-                if node in visiting:
+                if node in memo or node in visiting:
                     continue
                 visiting.add(node)
-                work.append((node, True))
-                for parent in parents_of(node):
+                node_parents = parents_of(node)
+                work.append((node, node_parents))
+                for parent in node_parents:
                     if parent not in memo and parent not in visiting:
-                        work.append((parent, False))
+                        work.append((parent, None))
         return memo
 
     file_levels = _longest_paths(
-        [node.name for node in files],
-        lambda name: [p for p in by_name[name].parents if p in by_name],
+        sorted(by_name),
+        lambda name: [p for p in sorted(by_name[name].parents) if p in by_name],
     )
-
-    def file_level(name: str) -> int:
-        return file_levels[name]
 
     # Column order: longest-path layering of the module DAG induced by
     # the files' imports (dependencies first, left to right).
@@ -274,21 +257,18 @@ def _layout_positions(files: list[ManifestNode]) -> dict[str, dict[str, int]]:
 
     module_levels = _longest_paths(
         modules,
-        lambda module: [p for p in module_parents[module] if p != module],
+        lambda module: sorted(p for p in module_parents[module] if p != module),
     )
-
-    def module_level(module: str) -> int:
-        return module_levels[module]
 
     positions: dict[str, dict[str, int]] = {}
     cells: dict[str, dict[str, int]] = {}
     x = 0
-    for module in sorted(modules, key=lambda name: (module_level(name), name)):
+    for module in sorted(modules, key=lambda name: (module_levels[name], name)):
         column_x = x
         y = _LAYOUT_TOP
         members = sorted(
             (node for node in files if node.module == module),
-            key=lambda node: (file_level(node.name), node.name),
+            key=lambda node: (file_levels[node.name], node.name),
         )
         for member in members:
             members_decls = sorted(member.declarations, key=lambda decl: decl.name)
@@ -572,9 +552,8 @@ def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
     )
 
 
-def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt graph") -> str:
-    """Render the single-file HTML (Cytoscape.js from the pinned CDN)."""
-    data = build_graph_data(manifest, files)
+def _render_html(data: dict[str, Any], title: str) -> str:
+    """Render the single-file HTML from prebuilt graph data."""
     counts = data["counts"]
     page_title = (
         f"{html.escape(title)} — {counts['files']} files, "
@@ -599,6 +578,11 @@ def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt
     return page
 
 
+def graph_html(manifest: Manifest, files: list[ManifestNode], title: str = "axbt graph") -> str:
+    """Render the single-file HTML (Cytoscape.js from the pinned CDN)."""
+    return _render_html(build_graph_data(manifest, files), title)
+
+
 def write_graph(
     manifest: Manifest,
     project_root: Path,
@@ -614,10 +598,9 @@ def write_graph(
     """
     out = output if output is not None else graph_path(project_root)
     out.parent.mkdir(parents=True, exist_ok=True)
-    html_text = graph_html(manifest, files, title=title)
-    counts = build_graph_data(manifest, files)["counts"]
-    out.write_text(html_text, encoding="utf-8")
-    return out, counts
+    data = build_graph_data(manifest, files)
+    out.write_text(_render_html(data, title), encoding="utf-8")
+    return out, data["counts"]
 
 
 # --- The page template ---------------------------------------------------

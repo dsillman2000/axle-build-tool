@@ -295,8 +295,8 @@ def build_payload(
     seen: set[str] = set()
 
     # Iterative, cycle-safe, dependencies-first traversal of the file
-    # dependency closure. A node is appended to `order` only after all of
-    # its (in-range) parents have been appended.
+    # dependency closure. In acyclic graphs, a node is appended to `order`
+    # only after all of its resolved parents have been appended.
     for node in sorted(nodes, key=lambda n: n.name):
         stack: list[tuple[ManifestNode, bool]] = [(node, False)]
         while stack:
@@ -360,7 +360,9 @@ def build_payload(
             else:
                 tagged = list(enumerate(source.splitlines(), start=1))
         internal_stems = {
-            dotted_stem_of(by_name[parent_name]) for parent_name in member.parents
+            dotted_stem_of(by_name[parent_name])
+            for parent_name in member.parents
+            if parent_name in by_name
         }
         section: list[str] = []
         line_numbers: list[int] = []

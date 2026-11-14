@@ -9,6 +9,7 @@ source (for incremental change detection), and a status.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -339,6 +340,29 @@ def check_targets(config: ProjectConfig, manifest: Manifest) -> None:
                 )
 
 
+def closure_nodes(
+    manifest: Manifest,
+    seeds: Iterable[ManifestNode],
+) -> dict[str, ManifestNode]:
+    """Collect the transitive parent closure of `seeds` as `{name: node}`.
+
+    Iterative and cycle-safe; missing parent names are skipped.
+    """
+    by_name = manifest.by_name()
+    visited: dict[str, ManifestNode] = {}
+    stack: list[ManifestNode] = list(seeds)
+    while stack:
+        current = stack.pop()
+        if current.name in visited:
+            continue
+        visited[current.name] = current
+        for parent_name in current.parents:
+            parent = by_name.get(parent_name)
+            if parent is not None and parent_name not in visited:
+                stack.append(parent)
+    return visited
+
+
 def closure_signature(
     node: ManifestNode,
     manifest: Manifest,
@@ -356,21 +380,10 @@ def closure_signature(
     invalidates it. Not tier-specific: the verify cache keys on it, and
     check's `checked_sig` stamps record it.
     """
-    by_name = manifest.by_name()
-    seen: set[str] = set()
-
-    # Iterative, cycle-safe traversal of the file dependency closure.
-    stack: list[ManifestNode] = [node]
-    while stack:
-        current = stack.pop()
-        if current.name in seen:
-            continue
-        seen.add(current.name)
-        for parent_name in sorted(current.parents, reverse=True):
-            parent = by_name.get(parent_name)
-            if parent is not None and parent.name not in seen:
-                stack.append(parent)
-    payload = "|".join(sorted(f"{name}:{by_name[name].md5}" for name in seen))
+    visited = closure_nodes(manifest, [node])
+    payload = "|".join(
+        sorted(f"{name}:{member.md5}" for name, member in visited.items())
+    )
     options = "|".join(f"{k}={v}" for k, v in sorted(global_options.items()))
     material = f"{payload}#{environment}#{options}"
     return hashlib.md5(material.encode("utf-8")).hexdigest()
