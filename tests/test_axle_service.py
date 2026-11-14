@@ -114,6 +114,27 @@ class TestConfigPlumbing:
         assert result == [{"name": "lean-4.35.0"}]
         assert [method for method, _ in fake.calls] == ["environments"]
 
+    def test_max_concurrency_caps_high_sdk_default_at_four(self, monkeypatch) -> None:
+        monkeypatch.delenv("AXLE_MAX_CONCURRENCY", raising=False)
+        fake = FakeAxleClient()
+        fake.max_concurrency = 20
+        service = AxleService(CONFIG, client_factory=lambda: fake)
+        assert service.max_concurrency == 4
+
+    def test_max_concurrency_respects_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("AXLE_MAX_CONCURRENCY", "8")
+        fake = FakeAxleClient()
+        fake.max_concurrency = 8
+        service = AxleService(CONFIG, client_factory=lambda: fake)
+        assert service.max_concurrency == 8
+
+    def test_max_concurrency_preserves_smaller_client_limit(self, monkeypatch) -> None:
+        monkeypatch.delenv("AXLE_MAX_CONCURRENCY", raising=False)
+        fake = FakeAxleClient()
+        fake.max_concurrency = 2
+        service = AxleService(CONFIG, client_factory=lambda: fake)
+        assert service.max_concurrency == 2
+
 
 class TestEnvironmentValidation:
     def test_pinned_environment_is_validated_against_the_api(self) -> None:

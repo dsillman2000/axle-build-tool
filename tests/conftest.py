@@ -383,6 +383,10 @@ class FakeAxleClient:
         #: controlling the compile-stage streaming report's order.
         self.extract_delays: dict[str, float] = {}
         self._extract_lean_errors = list(extract_lean_errors or [])
+        #: When True, `extract_decls(..., elaborate_proofs=False)` clears
+        #: `is_sorry` and `local_value_dependencies` on documents so tests can
+        #: verify local recovery of omitted theorem-proof metadata.
+        self.simulate_unelaborated_proofs = False
         self._environments = (
             environments if environments is not None else [{"name": "lean-4.35.0"}]
         )
@@ -491,6 +495,27 @@ class FakeAxleClient:
         self._request_counter += 1
         request_id = f"fake-req-{self._request_counter:04d}"
         self.request_ids.append(request_id)
+        if (names := kwargs.get("names")) is not None:
+            allowed = set(names)
+            documents = {k: v for k, v in documents.items() if k in allowed}
+        if kwargs.get("dependencies_only") or (
+            self.simulate_unelaborated_proofs and kwargs.get("elaborate_proofs") is False
+        ):
+            unelaborated = (
+                self.simulate_unelaborated_proofs
+                and kwargs.get("elaborate_proofs") is False
+            )
+            documents = {
+                k: dataclasses.replace(
+                    v,
+                    signature="" if kwargs.get("dependencies_only") else v.signature,
+                    is_sorry=False if unelaborated else v.is_sorry,
+                    local_value_dependencies=(
+                        [] if unelaborated else v.local_value_dependencies
+                    ),
+                )
+                for k, v in documents.items()
+            }
         response = make_extract_response(
             documents, info={"request_id": request_id, "environment": "lean-4.35.0"}
         )

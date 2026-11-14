@@ -79,11 +79,13 @@ axiom magic : 2 + 2 = 5
 theorem uses_axiom : 2 + 2 = 5 := magic
 """
 
-#: A Lean error: fails elaboration, so compile (not check/verify) gates it.
+#: A Lean error outside theorem proof bodies (definition/statement):
+#: fails compile (with `elaborate_proofs=False`), while theorem proof
+#: errors are deferred to check/verify.
 BROKEN_SOURCE = """\
 import Mathlib
 
-theorem broken : False := by rfl
+def broken : Nat := "not a nat"
 """
 
 
@@ -417,7 +419,7 @@ class TestLiveCheck:
         root = make_live_project({"M/Base.lean": BASE_SOURCE}, targets=["Base.base_holds"])
         assert runner.invoke(main, ["compile"]).exit_code == 0
         (root / "M" / "Base.lean").write_text(
-            BASE_SOURCE.replace("= rfl", "= Hoff"), encoding="utf-8"
+            BASE_SOURCE.replace(":= 1", ":= Hoff"), encoding="utf-8"
         )
 
         result = runner.invoke(main, ["check"])
@@ -1012,6 +1014,106 @@ class TestLiveTrimming:
 
         assert result.exit_code == 0, result.output
         assert status_line(result.output, "M.A.helper") == "M.A.helper OK"
+
+
+class TestLiveFastExtraction:
+    """Single-pass `elaborate_proofs=False` compile and `reparse=False` verify
+    against the real Axle API (issue #63)."""
+
+    @staticmethod
+    def _long_upstream() -> str:
+        defs = [f"def u_{i} : Nat := {i}" for i in range(55)]
+        defs.append("theorem up_thm : u_0 = 0 := rfl")
+        return "import Mathlib\n\n" + "\n".join(defs) + "\n"
+
+    def test_downstream_large_preamble_compile_check_and_verify(
+        self, make_live_project
+    ) -> None:
+        upstream = self._long_upstream()
+        downstream = (
+            "import A\n"
+            "\n"
+            "class Tag (α : Type) where\n"
+            "  label : Nat\n"
+            "\n"
+            "instance : Tag Nat := ⟨0⟩\n"
+            "\n"
+            "private theorem local_note : u_1 = 1 := rfl\n"
+            "\n"
+            "theorem derived : u_0 = 0 := by exact up_thm\n"
+            "\n"
+            "theorem gap : u_1 = 99 := by sorry\n"
+        )
+        root = make_live_project(
+            {"M/A.lean": upstream, "M/B.lean": downstream},
+        )
+
+        compiled = runner.invoke(main, ["compile"])
+        assert compiled.exit_code == 0, compiled.output
+
+        from axle_build_tool.manifest import load_manifest
+
+        b_decls = {
+            d.name: d for d in load_manifest(root).by_name()["M.B"].declarations
+        }
+        assert "Tag" in b_decls
+        assert "_instTagNat" in b_decls
+        assert "local_note" in b_decls
+        assert b_decls["derived"].signature == "theorem derived : u_0 = 0"
+        assert "up_thm" in b_decls["derived"].dependencies
+        assert b_decls["derived"].is_sorry is False
+        # Local proof scanner recovers `is_sorry` despite `elaborate_proofs=False`.
+        assert b_decls["gap"].is_sorry is True
+
+        checked = runner.invoke(
+            main, ["check", "--no-compile", "--select", "M.B.derived"]
+        )
+        assert checked.exit_code == 0, checked.output
+        assert status_line(checked.output, "M.B.derived") == "M.B.derived OK"
+
+        verified = runner.invoke(
+            main, ["verify", "--no-compile", "--sorry", "M.A", "--select", "M.B.derived"]
+        )
+        assert verified.exit_code == 0, verified.output
+        assert status_line(verified.output, "M.B.derived") == "M.B.derived OK"
+
+        verify_gap = runner.invoke(
+            main, ["verify", "--no-compile", "--select", "M.B.gap"]
+        )
+        assert verify_gap.exit_code != 0
+        assert "sorry" in verify_gap.output.lower()
+
+    def test_broken_proof_defers_to_check_while_statement_fails_compile(
+        self, make_live_project
+    ) -> None:
+        upstream = self._long_upstream()
+        root = make_live_project(
+            {
+                "M/A.lean": upstream,
+                "M/B.lean": "import A\n\ntheorem broken : False := by rfl\n",
+            }
+        )
+
+        # Proof-body error compiles cleanly when theorem proofs are skipped...
+        compiled = runner.invoke(main, ["compile"])
+        assert compiled.exit_code == 0, compiled.output
+
+        # ...and check / verify still catch the broken proof.
+        checked = runner.invoke(main, ["check", "--no-compile", "--select", "M.B"])
+        assert checked.exit_code != 0
+        verified = runner.invoke(
+            main, ["verify", "--no-compile", "--sorry", "M.A", "--select", "M.B"]
+        )
+        assert verified.exit_code != 0
+
+        # Invalid theorem statements still fail compile directly.
+        (root / "M/B.lean").write_text(
+            "import A\n\ntheorem bad_stmt : UnknownType := by trivial\n",
+            encoding="utf-8",
+        )
+        bad_compile = runner.invoke(main, ["compile"])
+        assert bad_compile.exit_code != 0
+        assert "M/B.lean" in bad_compile.output
 
 
 class TestLiveSorryTarget:

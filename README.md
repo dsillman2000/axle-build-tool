@@ -71,7 +71,7 @@ axle:
 | Command | Purpose |
 | --- | --- |
 | `axbt init [PATH]` | Scaffold a new project (config + starter module). |
-| `axbt compile` | Scan modules, extract declarations via the API, write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/` (pruning payloads whose source files are gone). |
+| `axbt compile` | Scan modules, extract declarations via the API (`elaborate_proofs=False` — checks theorem statements and non-theorem bodies while deferring proof checking to `check`/`verify`; concurrent requests default to 4 unless `AXLE_MAX_CONCURRENCY` is set), write `.axbt/manifest.json` and inspectable payloads to `.axbt/compiled/` (pruning payloads whose source files are gone). |
 | `axbt check` | Fast typechecking tier: compile first (incremental by default), then check every file in every configured module (ordered along the import DAG) — or a `--select`ion — as a standalone payload with dependencies inlined. A file whose declarations all already carry a matching `checked_sig` is skipped (`OK (cached)`); `--force` re-checks everything. Clean outcomes are recorded per declaration in the manifest. |
 | `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. A fully cached selection skips submission (`OK (cached)`). For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
 | `axbt build` | Both tiers in one run, dbt-style: the check tier streams first, then the verify tier — skipping the selections whose check failed — and the run exits nonzero if either tier failed. Verdict rows carry a `[check]`/`[verify]` tier suffix so the two passes tell apart. |
@@ -145,7 +145,7 @@ Run modes (shared by `compile`, `check`, `verify`, `build`):
 
 The manifest records three kinds of per-declaration facts (all additive, optional fields — a manifest version upgrade simply self-heals with one full re-extract):
 
-* **Dependencies** (`compile`) — every extracted declaration carries `dependencies` (the deduplicated, sorted union of the API's local type/value/syntactic dependency lists; declaration names as the API reports them, cross-file edges included) and `external_dependencies` (names outside the project — tooltip material, not graph nodes).
+* **Dependencies** (`compile`) — every extracted declaration carries `dependencies` (the deduplicated, sorted union of the API's local dependency lists supplemented with theorem proof-body references scanned locally from source; cross-file edges included) and `external_dependencies` (names outside the project — tooltip material, not graph nodes). `is_sorry` is likewise supplemented locally for theorems.
 * **Check stamps** (`check`) — a payload that passed clean stamps every declaration it judged with `checked_sig`/`checked_at`/`checked_request_id`. The signature covers the file dependency closure's content, the resolved environment, and the global options — the same key material the verify cache uses. A file whose declarations all carry a matching stamp is not re-submitted (`OK (cached)`), so `checked_*` means "last actually judged"; cached selections keep their (stale-but-valid) stamps. `--force` re-judges everything. `--sorry`-stubbed and failing payloads record nothing.
 * **Verify stamps** (`verify`) — kernel-level successes get `verified_sig`/`verified_at`/`verified_request_id`. They are consulted by the verify cache and never by check's records.
 

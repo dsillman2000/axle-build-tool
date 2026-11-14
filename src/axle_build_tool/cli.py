@@ -2275,13 +2275,16 @@ def verify(
                         # The formal statement is the payload with exactly
                         # the to-verify theorems' proofs stripped; cached,
                         # permitted, and stubbed declarations stay as they
-                        # are (and are excused from the sweep).
+                        # are (and are excused from the sweep). Skip
+                        # `theorem2sorry`'s own re-elaboration pass because
+                        # `verify_proof` immediately elaborates the result.
                         mark = time.monotonic()
                         spec = await service.theorem2sorry(
                             payload.content,
                             context=label,
                             theorems_only=True,
                             names=scope.to_verify,
+                            reparse=False,
                         )
                         response = await service.verify_proof(
                             spec.content,
