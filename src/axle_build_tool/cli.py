@@ -429,6 +429,13 @@ def _refine_stub_map(
     return refined
 
 
+def _has_stubbed_section(
+    payload: Payload, refined: dict[str, frozenset[str] | None]
+) -> bool:
+    """Whether any section in `payload` carries a `--sorry` stub."""
+    return any(name in payload.sections for name in refined)
+
+
 def _granted_skip_reason(
     selection: Selection,
     refined: dict[str, frozenset[str] | None],
@@ -1166,8 +1173,6 @@ def check(
             stub_map, stub_origin = _build_stub_map(sorry, config, manifest)
         else:
             stub_map = {}
-        if sorry:
-            signature_options = {**signature_options, "sorry": " ".join(sorted(sorry))}
         stub_warnings: list[str] = []
         applied: set[str] = set()
         #: Declaration-level trimming for `--select` runs: keep the
@@ -1320,7 +1325,7 @@ def check(
                 label, selection, payload, refined, granted = item
                 if granted is not None or payload is None:
                     continue
-                if force:
+                if force or _has_stubbed_section(payload, refined):
                     continue
                 if selection.declaration is not None:
                     judged = [(selection.node_name, selection.declaration)]
@@ -1453,9 +1458,7 @@ def check(
                     #: grant inside the payload (or any failure) leaves
                     #: every judged declaration unstamped, mirroring
                     #: verify's only-successes-get-stamped contract.
-                    if response.okay and not any(
-                        name in payload.sections for name in refined
-                    ):
+                    if response.okay and not _has_stubbed_section(payload, refined):
                         judged = (
                             [(selection.node_name, selection.declaration)]
                             if selection.declaration is not None
@@ -1504,8 +1507,8 @@ def check(
 
     if stub_map:
         try:
-            for _, selection, payload, _, _ in checks:
-                if payload is None:
+            for _, selection, payload, refined, _ in checks:
+                if payload is None or not _has_stubbed_section(payload, refined):
                     continue
                 out = compiled_payload_dir(project_root)
                 out.mkdir(parents=True, exist_ok=True)
@@ -1745,6 +1748,8 @@ def _verify_scope(
     # guard (their recorded is_sorry refers to the original source).
     stubbed_names: set[str] = set()
     for node_name, names in (stub_map or {}).items():
+        if node_name not in payload.sections:
+            continue
         node = by_name.get(node_name)
         if node is None:
             continue
@@ -1757,7 +1762,7 @@ def _verify_scope(
     excused = stubbed_names | set(user_permitted)
 
     def cache_valid(declaration: ExtractedDecl, node_name: str) -> bool:
-        if force:
+        if force or (stub_map and _has_stubbed_section(payload, stub_map)):
             return False
         return (
             declaration.verified_sig is not None
@@ -1992,7 +1997,6 @@ def verify(
         stub_map: dict[str, frozenset[str] | None] = {}
         if sorry:
             stub_map, stub_origin = _build_stub_map(sorry, config, manifest)
-            signature_options = {**signature_options, "sorry": " ".join(sorted(sorry))}
         user_permitted = _resolve_permitted_sorries(
             permitted_sorries, config, manifest
         )
@@ -2311,7 +2315,11 @@ def verify(
                             response.negation is not None and response.negation.okay
                         )
                         if response.okay and not vacuous:
-                            if not refined and not user_permitted and scope.stamp:
+                            if (
+                                not _has_stubbed_section(payload, refined)
+                                and not user_permitted
+                                and scope.stamp
+                            ):
                                 now = datetime.now(timezone.utc)
                                 for name in scope.to_verify:
                                     node_name = None
@@ -2417,8 +2425,8 @@ def verify(
 
     if stub_map:
         try:
-            for _, selection, payload, _, _, _ in items:
-                if payload is None:
+            for _, selection, payload, refined, _, _ in items:
+                if payload is None or not _has_stubbed_section(payload, refined):
                     continue
 
                 out = compiled_payload_dir(project_root)

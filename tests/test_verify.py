@@ -1411,3 +1411,64 @@ modules:
 
         assert result.exit_code == 0, result.output
         assert "Verified 2 selection(s): all OK" in result.output
+
+
+class TestSorryCacheIsolation:
+    CONFIG = """\
+project:
+  name: proj
+modules:
+  M:
+    targets:
+      - A.t1
+      - B.t2
+      - C.t3
+"""
+    FILES = {
+        "M/A.lean": "theorem t1 : 1 = 1 := rfl\n",
+        "M/B.lean": "import A\ntheorem t2 : 1 = 1 := rfl\n",
+        "M/C.lean": "import B\ntheorem t3 : 1 = 1 := rfl\n",
+    }
+    DOCS = {
+        "theorem t1 : 1 = 1": {
+            "t1": make_document("t1", kind="theorem", line_pos=1, end_line_pos=1)
+        },
+        "theorem t2 : 1 = 1": {
+            "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+        },
+        "theorem t3 : 1 = 1": {
+            "t3": make_document("t3", kind="theorem", line_pos=5, end_line_pos=5)
+        },
+    }
+
+    def test_sorry_stamps_upstream_canonically_and_uses_cache(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(tmp_path, self.CONFIG, self.FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = self.DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        first = runner.invoke(main, ["verify", "--sorry", "M.B"])
+        assert first.exit_code == 0, first.output
+        assert status_line(first.output, "M.A") == "M.A OK"
+        assert status_line(first.output, "M.B") == "M.B SKIP"
+        assert status_line(first.output, "M.C") == "M.C OK"
+        manifest = load_manifest(root)
+        assert verified_stamp_of(manifest, "t1").verified_sig is not None
+        assert verified_stamp_of(manifest, "t3").verified_sig is None
+        compiled = root / ".axbt" / "compiled"
+        assert not (compiled / "M_A_stubbed.lean").exists()
+        assert (compiled / "M_C_stubbed.lean").exists()
+        fake_axle.calls.clear()
+
+        bare = runner.invoke(main, ["verify"])
+        assert bare.exit_code == 0, bare.output
+        assert status_line(bare.output, "M.A") == "M.A OK (cached)"
+        fake_axle.calls.clear()
+
+        second_sorry = runner.invoke(main, ["verify", "--sorry", "M.B"])
+        assert second_sorry.exit_code == 0, second_sorry.output
+        assert status_line(second_sorry.output, "M.A") == "M.A OK (cached)"
+        assert len(verify_calls(fake_axle)) == 1
