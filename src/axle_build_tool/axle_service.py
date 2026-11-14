@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -45,6 +46,11 @@ from axle.types import (
 from axle_build_tool.config import AxleConfig, FALLBACK_ENVIRONMENT
 
 logger = logging.getLogger(__name__)
+
+#: Default max concurrent API requests when `AXLE_MAX_CONCURRENCY` is not
+#: set. The SDK's own default (20) saturates custom-environment worker
+#: pools on multi-file bursts, causing massive tail latency.
+DEFAULT_MAX_CONCURRENCY = 4
 
 #: Factory signature so tests can substitute a fake client.
 ClientFactory = Callable[[], Any]
@@ -125,8 +131,18 @@ class AxleService:
 
     @property
     def max_concurrency(self) -> int:
-        """Max concurrent in-flight requests (from the client; default 4)."""
-        return int(getattr(self.client, "max_concurrency", 4))
+        """Max concurrent in-flight requests.
+
+        Caps the SDK's default (20) at `DEFAULT_MAX_CONCURRENCY` unless
+        `AXLE_MAX_CONCURRENCY` is explicitly set in the environment,
+        while honoring smaller client limits (such as test fakes).
+        """
+        client_limit = int(
+            getattr(self.client, "max_concurrency", DEFAULT_MAX_CONCURRENCY)
+        )
+        if os.environ.get("AXLE_MAX_CONCURRENCY"):
+            return max(1, client_limit)
+        return max(1, min(client_limit, DEFAULT_MAX_CONCURRENCY))
 
     async def resolve_environment(self) -> str:
         """Resolve the environment for an API call.

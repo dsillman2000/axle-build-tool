@@ -115,6 +115,7 @@ class TestTargetsDefault:
         assert result.exit_code == 0, result.output
         # One theorem2sorry + one verify_proof per target.
         assert len(theorem2sorry_calls(fake_axle)) == 2
+        assert all(call["reparse"] is False for call in theorem2sorry_calls(fake_axle))
         assert len(verify_calls(fake_axle)) == 2
         # Submissions stream in completion order, so identify calls by
         # their formal statement rather than by log position.

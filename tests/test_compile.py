@@ -1058,3 +1058,184 @@ class TestExtractionProgress:
         assert [p.name for p in pairs]
         for pair in pairs:
             assert jsonlib.loads(pair.read_text(encoding="utf-8"))["tier"] == "extract"
+
+
+class TestElaborateProofsCompile:
+    """Extraction passes `elaborate_proofs=False` and supplements theorem
+    `is_sorry` and proof-body dependencies locally from source (issue #63)."""
+
+    def test_compile_passes_elaborate_proofs_false_in_single_pass(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        files = {
+            "M/A.lean": "def x := 1\ntheorem ax : x = 1 := rfl\n",
+            "M/B.lean": "import A\ntheorem bx : x = 1 := by exact ax\n",
+        }
+        fake_axle._extract_documents_by_marker = {
+            "theorem ax": {
+                "x": make_document("x", kind="def", line_pos=1, end_line_pos=1),
+                "ax": make_document("ax", kind="theorem", line_pos=2, end_line_pos=2),
+            },
+            "theorem bx": {
+                "x": make_document("x", kind="def", line_pos=1, end_line_pos=1),
+                "ax": make_document("ax", kind="theorem", line_pos=2, end_line_pos=2),
+                "bx": make_document("bx", kind="theorem", line_pos=4, end_line_pos=4),
+            },
+        }
+        root = make_project(tmp_path, SIMPLE_CONFIG, files)
+        monkeypatch.chdir(root)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        extracts = [kw for method, kw in fake_axle.calls if method == "extract_decls"]
+        assert len(extracts) == 2
+        assert all(kw["elaborate_proofs"] is False for kw in extracts)
+        assert all(kw["ignore_imports"] is False for kw in extracts)
+        assert all("names" not in kw for kw in extracts)
+        assert all("dependencies_only" not in kw for kw in extracts)
+
+    def test_local_sorry_detection_ignores_comments_strings_and_substrings(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        source = (
+            "def sorry_helper : Nat := 1\n"
+            "theorem comment_ok : sorry_helper = 1 := by\n"
+            "  -- sorry in a line comment\n"
+            "  /- /- sorry -/ admit -/\n"
+            "  rfl\n"
+            "theorem string_char_ok : \"sorry\" = \"sorry\" ∧ '\"' = '\"' := by rfl\n"
+            "theorem real_sorry : True := by sorry\n"
+            "theorem real_admit : True := by admit\n"
+            "def def_sorry : Nat := sorry\n"
+        )
+        root = make_project(tmp_path, SIMPLE_CONFIG, {"M/A.lean": source})
+        monkeypatch.chdir(root)
+        fake_axle.simulate_unelaborated_proofs = True
+        fake_axle._extract_documents_by_marker = {
+            "def def_sorry": {
+                "sorry_helper": make_document("sorry_helper", kind="def", line_pos=1, end_line_pos=1),
+                "comment_ok": make_document("comment_ok", kind="theorem", line_pos=2, end_line_pos=5),
+                "string_char_ok": make_document("string_char_ok", kind="theorem", line_pos=6, end_line_pos=6),
+                "real_sorry": make_document("real_sorry", kind="theorem", line_pos=7, end_line_pos=7),
+                "real_admit": make_document("real_admit", kind="theorem", line_pos=8, end_line_pos=8),
+                "def_sorry": make_document("def_sorry", kind="def", line_pos=9, end_line_pos=9, is_sorry=True),
+            }
+        }
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        by_decl = {d.name: d for d in load_manifest(root).by_name()["M.A"].declarations}
+        assert by_decl["sorry_helper"].is_sorry is False
+        assert by_decl["comment_ok"].is_sorry is False
+        assert by_decl["string_char_ok"].is_sorry is False
+        assert by_decl["real_sorry"].is_sorry is True
+        assert by_decl["real_admit"].is_sorry is True
+        assert by_decl["def_sorry"].is_sorry is True
+
+        # Recovered `is_sorry` still triggers verify's local sorry reject.
+        fake_axle.calls.clear()
+        verify_gap = runner.invoke(main, ["verify", "--no-compile", "--select", "M.A.real_sorry"])
+        assert verify_gap.exit_code != 0
+        assert not [m for m, _ in fake_axle.calls if m == "verify_proof"]
+
+    def test_proof_body_dependencies_are_supplemented_across_files_and_projections(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        upstream = (
+            "def u_0 : Nat := 0\n"
+            "namespace Foo\n"
+            "theorem up_thm : u_0 = 0 := rfl\n"
+            "end Foo\n"
+            "theorem unused_thm : u_0 = 0 := rfl\n"
+        )
+        downstream = (
+            "import A\n"
+            "open Foo\n"
+            "theorem local_helper : u_0 = 0 := rfl\n"
+            "theorem derived_thm (h : u_0 = 0 := rfl) : 0 = u_0 := by\n"
+            "  have _ := local_helper\n"
+            "  -- unused_thm mentioned in comment only\n"
+            "  exact up_thm.symm\n"
+            "theorem gap_thm : u_0 = 1 := by sorry\n"
+        )
+        root = make_project(
+            tmp_path,
+            "modules:\n  M:\n    targets:\n      - B.derived_thm\n",
+            {"M/A.lean": upstream, "M/B.lean": downstream},
+        )
+        monkeypatch.chdir(root)
+        fake_axle.simulate_unelaborated_proofs = True
+        fake_axle._extract_documents_by_marker = {
+            "theorem unused_thm": {
+                "u_0": make_document("u_0", kind="def", line_pos=1, end_line_pos=1),
+                "Foo.up_thm": make_document("Foo.up_thm", kind="theorem", line_pos=3, end_line_pos=3),
+                "unused_thm": make_document("unused_thm", kind="theorem", line_pos=5, end_line_pos=5),
+            },
+            "theorem gap_thm": {
+                "u_0": make_document("u_0", kind="def", line_pos=1, end_line_pos=1),
+                "Foo.up_thm": make_document("Foo.up_thm", kind="theorem", line_pos=3, end_line_pos=3),
+                "unused_thm": make_document("unused_thm", kind="theorem", line_pos=5, end_line_pos=5),
+                "local_helper": make_document("local_helper", kind="theorem", line_pos=8, end_line_pos=8),
+                "derived_thm": make_document(
+                    "derived_thm",
+                    kind="theorem",
+                    line_pos=9,
+                    end_line_pos=12,
+                    local_type_dependencies=["u_0"],
+                    # Local value deps intentionally dropped by
+                    # simulate_unelaborated_proofs so local scanner recovers them.
+                    local_value_dependencies=["Foo.up_thm", "local_helper"],
+                ),
+                "gap_thm": make_document("gap_thm", kind="theorem", line_pos=13, end_line_pos=13, is_sorry=True),
+            },
+        }
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        by_decl = {d.name: d for d in load_manifest(root).by_name()["M.B"].declarations}
+        assert by_decl["derived_thm"].dependencies == [
+            "Foo.up_thm",
+            "local_helper",
+            "u_0",
+        ]
+        assert by_decl["gap_thm"].is_sorry is True
+        assert "unused_thm" not in by_decl["derived_thm"].dependencies
+
+        # Pattern-matching theorem without `:=` also scans proof alternatives.
+        (root / "M/C.lean").write_text(
+            "import A\ntheorem pm : Nat → True\n  | 0 => by exact (fun _ => trivial) Foo.up_thm\n  | _ => trivial\n",
+            encoding="utf-8",
+        )
+        fake_axle._extract_documents_by_marker["theorem pm"] = {
+            "Foo.up_thm": make_document("Foo.up_thm", kind="theorem", line_pos=3, end_line_pos=3),
+            "pm": make_document("pm", kind="theorem", line_pos=7, end_line_pos=9),
+        }
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        c_decls = {d.name: d for d in load_manifest(root).by_name()["M.C"].declarations}
+        assert c_decls["pm"].dependencies == ["Foo.up_thm"]
+
+    def test_compile_still_fails_on_statement_or_def_errors(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {"M/Bad.lean": "theorem bad : UnknownType := sorry\n"},
+        )
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = {
+            "theorem bad": {
+                "bad": make_document("bad", kind="theorem", line_pos=1, end_line_pos=1)
+            }
+        }
+        fake_axle._extract_lean_errors = ["-:1:14: error: unknown identifier 'UnknownType'"]
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 1
+        assert "UnknownType" in result.output
+        assert ".axbt/failed/" in result.output
+
