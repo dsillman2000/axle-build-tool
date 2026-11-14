@@ -775,7 +775,7 @@ class TestPermittedSorry:
         (t1,) = [d for n in manifest.nodes for d in n.declarations if d.name == "t1"]
         (t2,) = [d for n in manifest.nodes for d in n.declarations if d.name == "t2"]
         assert t1.verified_sig is None
-        assert t2.verified_sig is not None
+        assert t2.verified_sig is None
 
     def test_unexcused_sorried_declaration_still_fails(
         self, make_project, tmp_path: Path, monkeypatch, fake_axle
@@ -815,6 +815,80 @@ class TestPermittedSorry:
 
         assert result.exit_code == 1
         assert "not part of 'M.A''s payload" in result.output
+
+    def test_permitted_sorries_does_not_cache_subsequent_runs(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """A `--permitted-sorries` run never populates `verified_sig`, so
+        neither a bare `verify` nor a declaration-level `--select` gets
+        served `OK (cached)` afterward."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        sorried_docs = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = sorried_docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        excused = runner.invoke(main, ["verify", "--permitted-sorries", "M.A.t1"])
+        assert excused.exit_code == 0, excused.output
+        fake_axle.calls.clear()
+
+        bare = runner.invoke(main, ["verify"])
+        assert bare.exit_code == 1
+        assert "OK (cached)" not in bare.output
+        assert "M.A FAIL" in " ".join(bare.output.split())
+        fake_axle.calls.clear()
+
+        decl = runner.invoke(main, ["verify", "--select", "M.B.t2"])
+        assert decl.exit_code == 0, decl.output
+        assert "OK (cached)" not in decl.output
+        assert len(verify_calls(fake_axle)) == 1
+        manifest = load_manifest(root)
+        assert verified_stamp_of(manifest, "t2").verified_sig is None
+
+    def test_declaration_select_does_not_stamp_with_sorried_upstream(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Declaration-level `--select` auto-excuses upstream theorems to
+        isolate the target, so it must not write `verified_sig` when an
+        upstream theorem in its closure carries a `sorry`."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        sorried_docs = {
+            "theorem t1 : 1 = 1": {
+                "t1": make_document(
+                    "t1", kind="theorem", line_pos=1, end_line_pos=1, is_sorry=True
+                )
+            },
+            "theorem t2 : 1 = 1": {
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+            },
+        }
+        fake_axle._extract_documents_by_marker = sorried_docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        result = runner.invoke(main, ["verify", "--select", "M.B.t2"])
+        assert result.exit_code == 0, result.output
+        verify = verify_calls(fake_axle)[0]
+        assert "t1" in verify["permitted_sorries"]
+        manifest = load_manifest(root)
+        assert verified_stamp_of(manifest, "t2").verified_sig is None
+
+        fake_axle.calls.clear()
+        followup = runner.invoke(main, ["verify", "--select", "M.B.t2"])
+        assert followup.exit_code == 0, followup.output
+        assert "OK (cached)" not in followup.output
+        assert len(verify_calls(fake_axle)) == 1
 
 
 class TestRitual:
