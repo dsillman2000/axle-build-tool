@@ -1,0 +1,16 @@
+tests/test_live.py
+  h_4cc74772b10fd4 698-699,706-716
+tests/test_verify.py
+  h_4cc74772b10fd4 519-520
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4130b8c8adc9759dff086a26742c0ed666caa2d3",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
