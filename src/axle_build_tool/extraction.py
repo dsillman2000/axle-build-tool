@@ -648,20 +648,46 @@ async def apply_extraction(
 
     semaphore = asyncio.Semaphore(service.max_concurrency)
     if submitted:
-        submitted_results = await asyncio.gather(
-            *(
-                _extract_node(
+        # Gate each pending node on its pending parents so downstream
+        # payloads see freshly extracted upstream declarations and
+        # `stub_dependencies=True` actually stubs upstream proof bodies
+        # on initial compile, upstream edits, and `--full-refresh` (#51).
+        live_nodes: dict[str, ManifestNode] = {
+            node.name: node for node in manifest.nodes
+        }
+        for skipped_node, _ in results:
+            live_nodes[skipped_node.name] = skipped_node
+        done_events: dict[str, asyncio.Event] = {
+            node.name: asyncio.Event() for node in submitted
+        }
+
+        async def _run_node(node: ManifestNode) -> tuple[ManifestNode, str | None]:
+            for parent_name in node.parents:
+                parent_event = done_events.get(parent_name)
+                if parent_event is not None:
+                    await parent_event.wait()
+            try:
+                current_manifest = manifest.model_copy(
+                    update={"nodes": [live_nodes[n.name] for n in manifest.nodes]}
+                )
+                updated_node, failure = await _extract_node(
                     service,
                     node,
-                    manifest,
+                    current_manifest,
                     project_root,
                     semaphore,
                     label_width=label_width,
                     counter_position=headline[node.name],
                     counter_total=counter_total,
                 )
-                for node in submitted
-            )
+                if failure is None:
+                    live_nodes[node.name] = updated_node
+                return updated_node, failure
+            finally:
+                done_events[node.name].set()
+
+        submitted_results = await asyncio.gather(
+            *(_run_node(node) for node in submitted)
         )
         results = [*results, *submitted_results]
 
