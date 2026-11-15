@@ -1,0 +1,22 @@
+src/axle_build_tool/extraction.py
+  h_4cc74772b10fd4 353,355-383,385
+src/axle_build_tool/payloads.py
+  h_4cc74772b10fd4 26,370-397
+src/axle_build_tool/stubbing.py
+  h_4cc74772b10fd4 47-53,55-57,72-76,78-94
+tests/test_extraction.py
+  h_4cc74772b10fd4 150-213
+tests/test_stubbing.py
+  h_4cc74772b10fd4 662-703
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d10d4fe5dbeca30ca311e1dd9c1ffff60f1d8437",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
