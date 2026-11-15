@@ -1,0 +1,20 @@
+pyproject.toml
+  h_4cc74772b10fd4 3
+src/axle_build_tool/extraction.py
+  h_4cc74772b10fd4 651-673,676,683-690
+tests/test_compile_stub_dependencies.py
+  h_4cc74772b10fd4 1-114
+uv.lock
+  h_4cc74772b10fd4 203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "832afdee1c2ad7f9b81dd80e67997fd51fbe152d",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
