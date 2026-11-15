@@ -41,6 +41,7 @@ from axle_build_tool.manifest import (
     build_manifest,
     check_targets,
     closure_signature,
+    decl_closure_signature,
     load_manifest,
     save_manifest,
     topological_order,
@@ -186,7 +187,7 @@ def _run_compile(
             async with service:
                 if carried < len(manifest.nodes):
                     await service.validate_environment()
-                return await apply_extraction(service, manifest, project_root)
+                return await apply_extraction(service, manifest, project_root, previous=previous)
 
         manifest = asyncio.run(extract())
         payload_paths = write_compiled_payloads(
@@ -1297,6 +1298,14 @@ def check(
                     )
                 return sig_cache[node_name]
 
+            def decl_sig_of(node_name: str, decl: Any) -> str:
+                node = by_name[node_name]
+                if decl.body_hash is None or node.ambient_hash is None:
+                    return sig_of(node_name)
+                return decl_closure_signature(
+                    node, decl, manifest, environment, signature_options
+                )
+
             semaphore = asyncio.Semaphore(service.max_concurrency)
 
             async def submit(
@@ -1372,7 +1381,7 @@ def check(
                 for node_name, decl_name in judged:
                     node = by_name[node_name]
                     decl = next(d for d in node.declarations if d.name == decl_name)
-                    if decl.checked_sig != sig_of(node_name):
+                    if decl.checked_sig != decl_sig_of(node_name, decl):
                         all_cached = False
                         break
                 if all_cached:
@@ -1512,8 +1521,10 @@ def check(
                         )
                         now = datetime.now(timezone.utc)
                         for node_name, decl_name in judged:
+                            node = by_name[node_name]
+                            decl = next(d for d in node.declarations if d.name == decl_name)
                             checked_stamps[(node_name, decl_name)] = (
-                                sig_of(node_name),
+                                decl_sig_of(node_name, decl),
                                 now,
                                 rid,
                             )
@@ -1828,7 +1839,7 @@ def _verify_scope(
             return False
         return (
             declaration.verified_sig is not None
-            and declaration.verified_sig == sig_of(node_name)
+            and declaration.verified_sig == sig_of(node_name, declaration)
         )
 
     if selection.declaration is not None:
@@ -2114,6 +2125,14 @@ def verify(
             )
         return sig_cache[node_name]
 
+    def decl_sig_of(node_name: str, decl: Any) -> str:
+        node = by_name[node_name]
+        if decl.body_hash is None or node.ambient_hash is None:
+            return sig_of(node_name)
+        return decl_closure_signature(
+            node, decl, manifest, environment, signature_options
+        )
+
     try:
         items: list[tuple[str, Selection, Payload | None, dict, str | None, _VerifyScope | None]] = []
         for label, selection, explicit in plan:
@@ -2179,7 +2198,7 @@ def verify(
                         refined,
                         user_permitted=user_permitted,
                         force=force,
-                        sig_of=sig_of,
+                        sig_of=decl_sig_of,
                     ),
                 )
             )
@@ -2387,6 +2406,10 @@ def verify(
                                             break
                                     if node_name is None:
                                         node_name = node_of_decl.get(name)
+                                    decl_for_sig = next(
+                                        d for d in by_name[node_name].declarations
+                                        if d.name == name
+                                    )
                                     key = (node_name, name)
                                     is_direct = (
                                         (
@@ -2398,14 +2421,14 @@ def verify(
                                     )
                                     if is_direct:
                                         stamps[key] = (
-                                            sig_of(node_name),
+                                            decl_sig_of(node_name, decl_for_sig),
                                             now,
                                             rid,
                                         )
                                         direct_stamps.add(key)
                                     elif key not in direct_stamps and key not in stamps:
                                         stamps[key] = (
-                                            sig_of(node_name),
+                                            decl_sig_of(node_name, decl_for_sig),
                                             now,
                                             None,
                                         )

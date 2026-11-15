@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from axle_build_tool.config import CACHE_DIRNAME, ProjectConfig
-from axle_build_tool.imports import parse_imports
+from axle_build_tool.imports import parse_imports, strip_comments
 from axle_build_tool.scanner import scan_module
 
 MANIFEST_FILENAME = "manifest.json"
@@ -76,6 +76,8 @@ class ExtractedDecl(BaseModel):
     verified_sig: str | None = None
     verified_at: datetime | None = None
     verified_request_id: str | None = None
+    sig_hash: str | None = None
+    body_hash: str | None = None
 
 
 class ManifestNode(BaseModel):
@@ -107,6 +109,8 @@ class ManifestNode(BaseModel):
     checked_sig: str | None = None
     checked_at: datetime | None = None
     checked_request_id: str | None = None
+    #: Comment-stripped hash of non-declaration ambient lines + instances/@[simp].
+    ambient_hash: str | None = None
 
 
 class Manifest(BaseModel):
@@ -309,6 +313,7 @@ def build_manifest(
                 checked_sig=prior.checked_sig if carry else None,
                 checked_at=prior.checked_at if carry else None,
                 checked_request_id=prior.checked_request_id if carry else None,
+                ambient_hash=prior.ambient_hash if carry else None,
             )
         )
     return Manifest(version=MANIFEST_VERSION, generated_at=now, nodes=nodes)
@@ -393,6 +398,110 @@ def closure_signature(
     )
     options = "|".join(f"{k}={v}" for k, v in sorted(global_options.items()))
     material = f"{payload}#{environment}#{options}"
+    return hashlib.md5(material.encode("utf-8")).hexdigest()
+
+
+_PROOF_KINDS = frozenset({"theorem", "lemma", "example"})
+
+
+def _normalize_lean_text(text: str) -> str:
+    """Strip comments and normalize whitespace for content hashing."""
+    stripped = strip_comments(text)
+    return "\n".join(line.strip() for line in stripped.splitlines() if line.strip())
+
+
+def compute_decl_hashes(
+    source_lines: list[str], decl: ExtractedDecl
+) -> tuple[str, str]:
+    """Return `(sig_hash, body_hash)` for `decl` from its raw source lines."""
+    sig_material = _normalize_lean_text(decl.signature)
+    sig_hash = hashlib.md5(sig_material.encode("utf-8")).hexdigest()
+    span = "\n".join(source_lines[max(0, decl.line_pos - 1) : decl.end_line_pos])
+    body_material = _normalize_lean_text(span)
+    body_hash = hashlib.md5(body_material.encode("utf-8")).hexdigest()
+    return sig_hash, body_hash
+
+
+def compute_ambient_hash(
+    source_lines: list[str], declarations: list[ExtractedDecl]
+) -> str:
+    """Hash all non-declaration lines plus any ambient `instance` / `@[simp]` decls."""
+    covered: set[int] = set()
+    ambient_parts: list[str] = []
+    for d in declarations:
+        for ln in range(d.line_pos, d.end_line_pos + 1):
+            covered.add(ln)
+        prev_line = source_lines[d.line_pos - 2] if d.line_pos >= 2 else ""
+        if (
+            d.kind == "instance"
+            or "@[simp]" in d.signature
+            or "@[simp]" in prev_line
+        ):
+            ambient_parts.append(
+                "\n".join(source_lines[max(0, d.line_pos - 1) : d.end_line_pos])
+            )
+    non_decl = [
+        line for idx, line in enumerate(source_lines, start=1) if idx not in covered
+    ]
+    material = _normalize_lean_text("\n".join(non_decl + ambient_parts))
+    return hashlib.md5(material.encode("utf-8")).hexdigest()
+
+
+def decl_closure_signature(
+    node: ManifestNode,
+    decl: ExtractedDecl,
+    manifest: Manifest,
+    environment: str,
+    global_options: dict[str, bool | int | str],
+) -> str:
+    """Declaration-level incremental cache signature.
+
+    Hashes `decl.body_hash`, each transitive dependency's `sig_hash` (for
+    proof declarations, via proof irrelevance) or `body_hash` (for defs,
+    structures, inductives, etc.), and the `ambient_hash` of every file
+    containing `decl` or a reachable dependency. Falls back to file-level
+    `closure_signature` when reading an older v3 manifest without hashes.
+    """
+    if decl.body_hash is None or node.ambient_hash is None:
+        return closure_signature(node, manifest, environment, global_options)
+
+    owner_and_decl = {
+        d.name: (n, d) for n in manifest.nodes for d in n.declarations
+    }
+    deps = reachable_declarations(manifest, [decl.name]) - {decl.name}
+    touched_nodes: set[str] = {node.name}
+    dep_parts: list[str] = []
+    for dep_name in sorted(deps):
+        entry = owner_and_decl.get(dep_name)
+        if entry is None:
+            continue
+        owner, dep_decl = entry
+        if (
+            dep_decl.sig_hash is None
+            or dep_decl.body_hash is None
+            or owner.ambient_hash is None
+        ):
+            return closure_signature(node, manifest, environment, global_options)
+        touched_nodes.add(owner.name)
+        dep_hash = (
+            dep_decl.sig_hash
+            if dep_decl.kind in _PROOF_KINDS
+            else dep_decl.body_hash
+        )
+        dep_parts.append(f"{owner.name}:{dep_name}:{dep_hash}")
+
+    by_name = manifest.by_name()
+    ambient_parts = [
+        f"{n_name}:{by_name[n_name].ambient_hash}"
+        for n_name in sorted(touched_nodes)
+    ]
+    options = "|".join(f"{k}={v}" for k, v in sorted(global_options.items()))
+    material = (
+        f"decl:{node.name}:{decl.name}:{decl.body_hash}"
+        f"|deps:{'|'.join(dep_parts)}"
+        f"|ambient:{'|'.join(ambient_parts)}"
+        f"#{environment}#{options}"
+    )
     return hashlib.md5(material.encode("utf-8")).hexdigest()
 
 
