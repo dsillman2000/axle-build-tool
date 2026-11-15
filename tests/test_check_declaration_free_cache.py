@@ -83,7 +83,7 @@ def test_editing_aggregate_or_parent_invalidates_check_cache(
     fake_axle.calls.clear()
     after_parent = runner.invoke(main, ["check"])
     assert after_parent.exit_code == 0, after_parent.output
-    assert len(_check_calls(fake_axle)) == 2
+    assert len(_check_calls(fake_axle)) == 1
 
     # Editing M/Agg.lean itself invalidates M.Agg (while M.A stays cached).
     (root / "M/Agg.lean").write_text(

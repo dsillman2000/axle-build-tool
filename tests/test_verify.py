@@ -519,7 +519,7 @@ class TestVerificationCache:
         # A change anywhere in B's file (even a comment) changes B's md5
         # and therefore the closure signature of everything downstream.
         (root / "M/B.lean").write_text(
-            "import A\ntheorem t2 : 1 = 1 := rfl\n-- touched\n", encoding="utf-8"
+            "import A\ntheorem t2 : 1 = 1 := by\n  rfl\n-- touched\n", encoding="utf-8"
         )
 
         result = runner.invoke(main, ["verify"])

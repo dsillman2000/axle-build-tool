@@ -55,6 +55,8 @@ from axle_build_tool.manifest import (
     Manifest,
     ManifestNode,
     closure_nodes,
+    compute_ambient_hash,
+    compute_decl_hashes,
 )
 from axle_build_tool.payloads import (
     Payload,
@@ -579,11 +581,19 @@ async def _extract_node(
         )
         is not None
     ]
+    hashed_declarations = []
+    for decl in declarations:
+        sig_hash, body_hash = compute_decl_hashes(source_lines, decl)
+        hashed_declarations.append(
+            decl.model_copy(update={"sig_hash": sig_hash, "body_hash": body_hash})
+        )
+    ambient_hash = compute_ambient_hash(source_lines, hashed_declarations)
     return (
         node.model_copy(
             update={
-                "declarations": declarations,
+                "declarations": hashed_declarations,
                 "request_id": (response.info or {}).get("request_id"),
+                "ambient_hash": ambient_hash,
             }
         ),
         None,
@@ -594,6 +604,7 @@ async def apply_extraction(
     service: AxleService,
     manifest: Manifest,
     project_root: Path,
+    previous: Manifest | None = None,
 ) -> Manifest:
     """Extract declarations for every node that isn't carried over.
 
@@ -700,7 +711,36 @@ async def apply_extraction(
             )
         )
 
-    updated = {node.name: node for node, _ in results}
+    # Carry forward per-declaration stamps from `previous` for declarations
+    # whose name survived re-extraction unchanged (issue #51 follow-up /
+    # declaration-level caching): a `changed` file must not wipe the
+    # cache of its unchanged declarations.
+    prior_by_name = previous.by_name() if previous is not None else {}
+    carried_nodes = []
+    for updated_node, _ in results:
+        prior_node = prior_by_name.get(updated_node.name)
+        if prior_node is None:
+            carried_nodes.append(updated_node)
+            continue
+        prior_decl_by_name = {d.name: d for d in prior_node.declarations}
+        carried_decls = []
+        for decl in updated_node.declarations:
+            prior_decl = prior_decl_by_name.get(decl.name)
+            if prior_decl is not None:
+                decl = decl.model_copy(
+                    update={
+                        "checked_sig": prior_decl.checked_sig,
+                        "checked_at": prior_decl.checked_at,
+                        "checked_request_id": prior_decl.checked_request_id,
+                        "verified_sig": prior_decl.verified_sig,
+                        "verified_at": prior_decl.verified_at,
+                        "verified_request_id": prior_decl.verified_request_id,
+                    }
+                )
+            carried_decls.append(decl)
+        carried_nodes.append(updated_node.model_copy(update={"declarations": carried_decls}))
+
+    updated = {node.name: node for node in carried_nodes}
     nodes = [updated.get(node.name, node) for node in manifest.nodes]
     updated_manifest = manifest.model_copy(update={"nodes": nodes})
     return _supplement_proof_dependencies(

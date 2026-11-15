@@ -1826,14 +1826,21 @@ class TestCheckStamps:
         fake_axle.calls.clear()
         return root
 
-    def expected_sig(self, root: Path, node_name: str) -> str:
+    def expected_sig(self, root: Path, node_name: str, decl_name: str | None = None) -> str:
         """The closure signature a stamped declaration should carry."""
         from axle_build_tool.cli import _signature_options
-        from axle_build_tool.manifest import closure_signature
+        from axle_build_tool.manifest import decl_closure_signature, load_manifest
 
-        return closure_signature(
-            load_manifest(root).by_name()[node_name],
-            load_manifest(root),
+        manifest = load_manifest(root)
+        node = manifest.by_name()[node_name]
+        if decl_name is None:
+            decl = node.declarations[0]
+        else:
+            decl = next(d for d in node.declarations if d.name == decl_name)
+        return decl_closure_signature(
+            node,
+            decl,
+            manifest,
             "lean-4.35.0",
             # Default runs minify (config default); the marker rides in
             # the options material exactly as the run composes it.
@@ -1855,7 +1862,7 @@ class TestCheckStamps:
         assert status_line(result.output, "M.B.t2") == "M.B.t2 OK"
         t2 = checked_stamp_of(load_manifest(root), "t2")
         t1 = checked_stamp_of(load_manifest(root), "t1")
-        assert t2.checked_sig == self.expected_sig(root, "M.B")
+        assert t2.checked_sig == self.expected_sig(root, "M.B", "t2")
         assert t2.checked_at is not None
         assert t2.checked_request_id in fake_axle.request_ids
         # The inlined dependency stays unstamped.
@@ -1872,7 +1879,7 @@ class TestCheckStamps:
 
         assert result.exit_code == 0, result.output
         t2 = checked_stamp_of(load_manifest(root), "t2")
-        assert t2.checked_sig == self.expected_sig(root, "M.B")
+        assert t2.checked_sig == self.expected_sig(root, "M.B", "t2")
         assert t2.checked_request_id in fake_axle.request_ids
         assert checked_stamp_of(load_manifest(root), "t1").checked_sig is None
 
@@ -1887,7 +1894,7 @@ class TestCheckStamps:
         manifest = load_manifest(root)
         for name, node_name in (("t1", "M.A"), ("t2", "M.B")):
             decl = checked_stamp_of(manifest, name)
-            assert decl.checked_sig == self.expected_sig(root, node_name)
+            assert decl.checked_sig == self.expected_sig(root, node_name, name)
             assert decl.checked_request_id in fake_axle.request_ids
 
     def test_failing_payload_stamps_nothing(
