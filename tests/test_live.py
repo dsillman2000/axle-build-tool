@@ -695,9 +695,21 @@ class TestLiveVerifyCache:
         )
         assert runner.invoke(main, ["verify"]).exit_code == 0
 
-        # Touch Base (the dependency): the closure signature changes.
+        # A comment-only edit to Base (the dependency) no longer changes
+        # the declaration-level cache signature, so User stays cached.
         (root / "M" / "Base.lean").write_text(
             BASE_SOURCE + "\n-- touched\n", encoding="utf-8"
+        )
+
+        result = runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0, result.output
+        assert "(cached)" in result.output
+
+        # A real ambient edit to Base changes the cache signature, so
+        # User re-verifies.
+        (root / "M" / "Base.lean").write_text(
+            "open Nat\n" + BASE_SOURCE, encoding="utf-8"
         )
 
         result = runner.invoke(main, ["verify"])
