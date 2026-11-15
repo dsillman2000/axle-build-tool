@@ -1,0 +1,20 @@
+pyproject.toml
+  h_4cc74772b10fd4 3
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 2159,2328-2330,2342-2349,2351-2363,2474-2482
+tests/test_verify.py
+  h_4cc74772b10fd4 1476-1562
+uv.lock
+  h_4cc74772b10fd4 203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1d4de5b16f42006243a6af446bfcf728a40296cd",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
