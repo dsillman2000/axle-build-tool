@@ -39,6 +39,45 @@ _IMPORT_LINE = re.compile(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:--.*)?$"
 #: the trimmed content sees `set_option` as a standalone command).
 _SCOPED_OPTION_PREFIX_LINE = re.compile(r"^\s*set_option\s+.+\bin\s*$")
 
+#: A line opening a scoped `open ... in` prefix that Lean attaches to
+#: the next command/declaration (issue #52).
+_SCOPED_OPEN_PREFIX_LINE = re.compile(r"^\s*open\s+.+\bin\s*$")
+
+#: A standalone attribute line (`@[simp]`, `@[inline, simp]`, etc.)
+#: directly preceding a declaration (issue #52).
+_STANDALONE_ATTR_PREFIX_LINE = re.compile(r"^\s*@\[[^\]]*\]\s*$")
+
+
+def _is_attached_prefix_line(line: str) -> bool:
+    """Whether `line` is a standalone prefix Lean attaches to the next command."""
+    return bool(
+        _SCOPED_OPTION_PREFIX_LINE.match(line)
+        or _SCOPED_OPEN_PREFIX_LINE.match(line)
+        or _STANDALONE_ATTR_PREFIX_LINE.match(line)
+    )
+
+
+def _find_standalone_comment_start(
+    lines: list[str], probe: int, cursor: int
+) -> int | None:
+    """If `lines[probe]` closes a standalone `/- ... -/` block comment (with
+    no code before its opening `/-`), return its opening line index; else `None`."""
+    stripped = lines[probe].strip()
+    if not stripped.endswith("-/"):
+        return None
+    if "/-" in stripped[:-2]:
+        return probe if stripped.startswith("/-") else None
+    open_index = probe - 1
+    while open_index >= cursor:
+        candidate = lines[open_index].strip()
+        if "-/" in candidate:
+            return None
+        if "/-" in candidate:
+            return open_index if candidate.startswith("/-") else None
+        open_index -= 1
+    return None
+
+
 #: Subdirectory of the cache holding persisted payloads.
 COMPILED_DIRNAME = "compiled"
 
@@ -172,18 +211,11 @@ def _transform_member_source(
                 if lines[probe].strip() == "":
                     probe -= 1
                     continue
-                if _SCOPED_OPTION_PREFIX_LINE.match(lines[probe]):
+                if _is_attached_prefix_line(lines[probe]):
                     probe -= 1
                     continue
-                if lines[probe].strip().endswith("-/"):
-                    open_index = probe
-                    while (
-                        open_index >= cursor
-                        and not lines[open_index].strip().startswith("/-")
-                    ):
-                        open_index -= 1
-                    if open_index < cursor:
-                        break
+                open_index = _find_standalone_comment_start(lines, probe, cursor)
+                if open_index is not None:
                     probe = open_index - 1
                     continue
                 break
