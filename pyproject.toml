@@ -1,6 +1,6 @@
 [project]
 name = "axle-build-tool"
-version = "0.1.3"
+version = "0.1.4"
 description = "dbt-inspired build/orchestration tool for Lean 4 projects, executed via the Axle (Axiom Lean Engine) API"
 readme = "README.md"
 authors = [

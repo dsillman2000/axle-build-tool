@@ -103,6 +103,10 @@ class ManifestNode(BaseModel):
     #: over unchanged with the data itself; `None` for pending nodes.
     request_id: str | None = None
     last_checked: datetime | None = None
+    #: Node-level check stamp for declaration-free files (issue #54).
+    checked_sig: str | None = None
+    checked_at: datetime | None = None
+    checked_request_id: str | None = None
 
 
 class Manifest(BaseModel):
@@ -302,6 +306,9 @@ def build_manifest(
                 declarations=list(prior.declarations) if carry else [],
                 request_id=prior.request_id if carry else None,
                 last_checked=now,
+                checked_sig=prior.checked_sig if carry else None,
+                checked_at=prior.checked_at if carry else None,
+                checked_request_id=prior.checked_request_id if carry else None,
             )
         )
     return Manifest(version=MANIFEST_VERSION, generated_at=now, nodes=nodes)
