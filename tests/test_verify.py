@@ -1473,3 +1473,90 @@ modules:
         assert second_sorry.exit_code == 0, second_sorry.output
         assert status_line(second_sorry.output, "M.A") == "M.A OK (cached)"
         assert len(verify_calls(fake_axle)) == 1
+
+    def test_multi_file_verify_preserves_upstream_verified_request_id(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Downstream targets must not overwrite upstream declarations'
+        `verified_request_id` in `.axbt/manifest.json` (issue #67)."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        # Ensure downstream M.B finishes after upstream M.A.
+        fake_axle.verify_delays = {"theorem t2 : 1 = 1": 0.05}
+
+        result = runner.invoke(main, ["verify"])
+        assert result.exit_code == 0, result.output
+
+        manifest = load_manifest(root)
+        rid_a = verified_stamp_of(manifest, "t1").verified_request_id
+        rid_b = verified_stamp_of(manifest, "t2").verified_request_id
+        assert rid_a is not None
+        assert rid_b is not None
+        assert rid_a != rid_b
+
+        # Cached `--share -s <file_or_decl>` must return distinct,
+        # selection-accurate `verify_proof#r=...` links.
+        share_a = runner.invoke(main, ["verify", "--share", "-s", "M.A"])
+        share_b = runner.invoke(main, ["verify", "--share", "-s", "M.B"])
+        assert share_a.exit_code == 0, share_a.output
+        assert share_b.exit_code == 0, share_b.output
+        assert f"share: https://axle.test/verify_proof#r={rid_a}" in share_a.output
+        assert f"share: https://axle.test/verify_proof#r={rid_b}" in share_b.output
+        assert rid_b not in share_a.output
+
+        share_t1 = runner.invoke(main, ["verify", "--share", "-s", "M.A.t1"])
+        share_t2 = runner.invoke(main, ["verify", "--share", "-s", "M.B.t2"])
+        assert share_t1.exit_code == 0, share_t1.output
+        assert share_t2.exit_code == 0, share_t2.output
+        assert f"share: https://axle.test/verify_proof#r={rid_a}" in share_t1.output
+        assert f"share: https://axle.test/verify_proof#r={rid_b}" in share_t2.output
+
+    def test_multi_file_verify_preserves_request_ids_when_downstream_finishes_first(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Completion order must not affect per-target `verified_request_id`."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+        # Ensure upstream M.A finishes after downstream M.B.
+        fake_axle.verify_delays = {"theorem t1 : 1 = 1": 0.05}
+
+        result = runner.invoke(main, ["verify"])
+        assert result.exit_code == 0, result.output
+
+        manifest = load_manifest(root)
+        rid_a = verified_stamp_of(manifest, "t1").verified_request_id
+        rid_b = verified_stamp_of(manifest, "t2").verified_request_id
+        assert rid_a is not None
+        assert rid_b is not None
+        assert rid_a != rid_b
+
+    def test_force_verify_downstream_preserves_upstream_request_id(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """Re-verifying a downstream file with `--force` must not overwrite
+        an already-recorded upstream `verified_request_id`."""
+        root = make_project(tmp_path, TARGETS_CONFIG, THEOREM_FILES)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = THEOREM_DOCS
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        assert runner.invoke(main, ["verify", "-s", "M.A"]).exit_code == 0
+        rid_a = verified_stamp_of(load_manifest(root), "t1").verified_request_id
+        assert rid_a is not None
+
+        result = runner.invoke(main, ["verify", "-s", "M.B", "--force"])
+        assert result.exit_code == 0, result.output
+
+        manifest = load_manifest(root)
+        rid_a_after = verified_stamp_of(manifest, "t1").verified_request_id
+        rid_b = verified_stamp_of(manifest, "t2").verified_request_id
+        assert rid_a_after == rid_a
+        assert rid_b is not None
+        assert rid_b != rid_a
