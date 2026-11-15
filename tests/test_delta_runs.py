@@ -21,7 +21,7 @@ FILES = {"M/A.lean": "def t1 := 1\n", "M/B.lean": "import A\ndef t2 := t1\n"}
 
 DOCS = {
     "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
-    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2")},
+    "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2", local_value_dependencies=["t1"])},
 }
 
 
@@ -147,7 +147,7 @@ def test_sorry_short_alias_and_union(make_project, tmp_path, monkeypatch, fake_a
     monkeypatch.chdir(root)
     fake_axle._extract_documents_by_marker = {
         "def t1 := 1": {"t1": make_document("t1", kind="def", line_pos=1, end_line_pos=1, signature="def t1")},
-        "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2")},
+        "def t2 := t1": {"t2": make_document("t2", kind="def", line_pos=3, end_line_pos=3, signature="def t2", local_value_dependencies=["t1"])},
     }
     assert runner.invoke(main, ["compile"]).exit_code == 0
     fake_axle.calls.clear()

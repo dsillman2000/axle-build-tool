@@ -81,7 +81,7 @@ THEOREM_DOCS = {
         "t1": make_document("t1", kind="theorem", line_pos=1, end_line_pos=1)
     },
     "theorem t2 : 1 = 1": {
-        "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+        "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
     },
 }
 
@@ -301,7 +301,7 @@ class TestSkipsAndLocalFailures:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorry_doc
@@ -724,7 +724,7 @@ class TestStartLines:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorried_docs
@@ -757,7 +757,7 @@ class TestPermittedSorry:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorried_docs
@@ -790,7 +790,7 @@ class TestPermittedSorry:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorried_docs
@@ -832,7 +832,7 @@ class TestPermittedSorry:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorried_docs
@@ -871,7 +871,7 @@ class TestPermittedSorry:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorried_docs
@@ -974,6 +974,7 @@ class TestSorry:
                 line_pos=4,
                 end_line_pos=4,
                 signature="theorem middle : base = 1",
+                local_type_dependencies=["base", "base_holds"],
             ),
         },
     }
@@ -1007,7 +1008,10 @@ class TestSorry:
     ) -> None:
         """Without stubbing, A's sorried theorem fails the local guard;
         with `--sorry M.A` it is stubbed by construction and passes."""
-        self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        root = self.compile_chain(make_project, tmp_path, monkeypatch, fake_axle)
+        import json
+        m=json.load(open(root/".axbt/manifest.json"))
+        print("MANIFEST", [(n["name"], [(d["name"], d.get("dependencies")) for d in n["declarations"]]) for n in m["nodes"]], file=__import__("sys").stderr)
 
         without = runner.invoke(main, ["verify", "--select", "M.B"])
         assert without.exit_code == 1
@@ -1060,6 +1064,7 @@ class TestSorry:
                     line_pos=4,
                     end_line_pos=4,
                     signature="theorem middle : base = 1",
+                    local_type_dependencies=["base", "base_holds"],
                 ),
                 "sibling": make_document(
                     "sibling",
@@ -1228,7 +1233,7 @@ class TestShare:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         fake_axle._extract_documents_by_marker = sorried_docs
@@ -1378,7 +1383,7 @@ modules:
                 )
             },
             "theorem t2 : 1 = 1": {
-                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3)
+                "t2": make_document("t2", kind="theorem", line_pos=3, end_line_pos=3, local_type_dependencies=["t1"])
             },
         }
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -1560,3 +1565,75 @@ modules:
         assert rid_a_after == rid_a
         assert rid_b is not None
         assert rid_b != rid_a
+
+    def test_strict_closure_drops_zero_reachable_upstream_files_and_unifies_check_verify(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        """`-s <M.F.decl>` drops zero-reachable upstream files (preventing
+        dangling references to trimmed definitions) and submits identical
+        payloads for `check`, `verify`, and `build` (issue #65)."""
+        files = {
+            "M/KaratsubaCost.lean": (
+                "def KaratsubaCost := 0\n"
+                "def BurnikelZieglerCost := 1\n"
+                "def linearTerm := 2\n"
+            ),
+            "M/KarMul.lean": (
+                "import KaratsubaCost\n"
+                "theorem karatsubaCost_karK : KaratsubaCost = 0 := rfl\n"
+            ),
+            "M/BzCost.lean": (
+                "import KaratsubaCost\n"
+                "import KarMul\n"
+                "theorem not_bzCost_measured : BurnikelZieglerCost + linearTerm = 3 := rfl\n"
+                "theorem bzDivTimeCost_ge : 1 = 1 := rfl\n"
+            ),
+        }
+        docs = {
+            "def KaratsubaCost := 0": {
+                "KaratsubaCost": make_document("KaratsubaCost", kind="def", line_pos=1, end_line_pos=1),
+                "BurnikelZieglerCost": make_document("BurnikelZieglerCost", kind="def", line_pos=2, end_line_pos=2),
+                "linearTerm": make_document("linearTerm", kind="def", line_pos=3, end_line_pos=3),
+            },
+            "theorem karatsubaCost_karK": {
+                "karatsubaCost_karK": make_document(
+                    "karatsubaCost_karK",
+                    kind="theorem",
+                    line_pos=5,
+                    end_line_pos=5,
+                    local_type_dependencies=["KaratsubaCost"],
+                ),
+            },
+            "theorem not_bzCost_measured": {
+                "not_bzCost_measured": make_document(
+                    "not_bzCost_measured",
+                    kind="theorem",
+                    line_pos=7,
+                    end_line_pos=7,
+                    local_type_dependencies=["BurnikelZieglerCost", "linearTerm"],
+                ),
+                "bzDivTimeCost_ge": make_document(
+                    "bzDivTimeCost_ge", kind="theorem", line_pos=8, end_line_pos=8
+                ),
+            },
+        }
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, files)
+        monkeypatch.chdir(root)
+        fake_axle._extract_documents_by_marker = docs
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+        fake_axle.calls.clear()
+
+        check_res = runner.invoke(main, ["check", "-s", "M.BzCost.not_bzCost_measured"])
+        verify_res = runner.invoke(main, ["verify", "-s", "M.BzCost.not_bzCost_measured"])
+        assert check_res.exit_code == 0, check_res.output
+        assert verify_res.exit_code == 0, verify_res.output
+
+        check_content = [kw["content"] for m, kw in fake_axle.calls if m == "check"][0]
+        verify_content = verify_calls(fake_axle)[0]["content"]
+        assert check_content == verify_content
+        assert "karatsubaCost_karK" not in verify_content
+        assert "KaratsubaCost" not in verify_content
+        assert "bzDivTimeCost_ge" not in verify_content
+        assert "BurnikelZieglerCost" in verify_content
+        assert "linearTerm" in verify_content
+        assert "not_bzCost_measured" in verify_content

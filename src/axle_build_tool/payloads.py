@@ -123,12 +123,6 @@ def _transform_member_source(
     if not lines:
         return source, []
 
-    node_decl_names = {d.name for d in node.declarations}
-    if keep_names is not None and not (node_decl_names & keep_names):
-        # Conservative: no recorded dependency reaches this file, so
-        # keep it whole rather than risk dropping elaboration context.
-        keep_names = None
-
     # Fast path: nothing to do.
     if stubbed_only is _NOT_STUBBED and (keep_names is None or all(
         d.name in keep_names for d in node.declarations
@@ -286,7 +280,8 @@ def build_payload(
     keep_names: set[str] | None = None
     for _key in _ROOT_KEYS:
         if _key in kwargs and kwargs[_key] is not None:
-            keep_names = reachable_declarations(manifest, kwargs[_key])
+            resolved = reachable_declarations(manifest, kwargs[_key])
+            keep_names = resolved if resolved else None
             break
 
     selected_node_names = {node.name for node in nodes}
@@ -320,6 +315,11 @@ def build_payload(
     kept_map: dict[str, set[str]] = {}
     for member in order:
         raw_source = (project_root / member.path).read_text(encoding="utf-8")
+        internal_stems = {
+            dotted_stem_of(by_name[parent_name])
+            for parent_name in member.parents
+            if parent_name in by_name
+        }
         if stubbed and member.name in stubbed:
             stubbed_only = stubbed[member.name]
         else:
@@ -329,8 +329,34 @@ def build_payload(
             kept_for_member = {d.name for d in member.declarations}
         else:
             kept_for_member = set(member_keep) & {d.name for d in member.declarations}
-            if not kept_for_member:
-                kept_for_member = {d.name for d in member.declarations}
+            if (
+                member.name not in selected_node_names
+                and member.declarations
+                and not kept_for_member
+            ):
+                # Drop zero-reachable upstream files instead of keeping them
+                # whole (issue #65): keeping an unreached file whole can leave
+                # dangling references to declarations trimmed from its imports.
+                # Still hoist any external imports it re-exports.
+                raw_lines = raw_source.splitlines()
+                stripped_header = (
+                    strip_comments(raw_source).split("\n") if raw_lines else []
+                )
+                for line, stripped in zip(raw_lines, stripped_header):
+                    code = stripped.strip()
+                    if not code or code == "prelude":
+                        continue
+                    match = _IMPORT_LINE.match(stripped)
+                    if match is not None:
+                        if (
+                            match.group(1) not in internal_stems
+                            and match.group(1) not in hoisted_seen
+                        ):
+                            hoisted_seen.add(match.group(1))
+                            hoisted.append(line)
+                        continue
+                    break
+                continue
         kept_map[member.name] = kept_for_member
         if stubbed_only is not _NOT_STUBBED or member_keep is not None:
             source, orig_lines = _transform_member_source(
@@ -360,11 +386,6 @@ def build_payload(
                     tagged.append((_orig, _line))
             else:
                 tagged = list(enumerate(source.splitlines(), start=1))
-        internal_stems = {
-            dotted_stem_of(by_name[parent_name])
-            for parent_name in member.parents
-            if parent_name in by_name
-        }
         section: list[str] = []
         line_numbers: list[int] = []
         stripped_lines = (
