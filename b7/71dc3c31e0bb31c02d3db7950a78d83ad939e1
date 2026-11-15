@@ -1,0 +1,20 @@
+pyproject.toml
+  h_4cc74772b10fd4 3
+src/axle_build_tool/payloads.py
+  h_4cc74772b10fd4 42-80,214,217-218
+tests/test_payload_trimming.py
+  h_4cc74772b10fd4 1-109
+uv.lock
+  h_4cc74772b10fd4 203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b771dc3c31e0bb31c02d3db7950a78d83ad939e1",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
