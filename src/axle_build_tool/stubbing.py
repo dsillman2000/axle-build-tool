@@ -44,15 +44,17 @@ import re
 
 from axle_build_tool.manifest import ExtractedDecl, ManifestNode
 
-#: A declaration header line: optional `@[...]` attribute, optional Lean
-#: modifiers (`private`, `protected`, `noncomputable`, `unsafe`, `partial`),
-#: then the declaration kind keyword. Extraction's line snapping and the
-#: stub transforms' span-head checks share this single shape, so both key
-#: on the same notion of "this line starts a declaration of kind X".
+#: A declaration header line: optional repeated/interleaved `@[...]`
+#: attributes and Lean modifiers (`private`, `protected`, `noncomputable`,
+#: `unsafe`, `partial`, `scoped`, `local`), then the declaration kind
+#: keyword followed by whitespace or end-of-line. Extraction's line
+#: snapping and the stub transforms' span-head checks share this single
+#: shape, so both key on the same notion of "this line starts a
+#: declaration of kind X".
 DECLARATION_HEAD = re.compile(
-    r"^\s*(?:@\[[^\]]*\]\s*)?"
-    r"(?:(?:private|protected|noncomputable|unsafe|partial)\s+)*"
-    r"(?P<kind>theorem|lemma|example|def|abbrev|structure|class|inductive|instance)\b"
+    r"^\s*"
+    r"(?:@\[[^\]]*\]\s*|(?:private|protected|noncomputable|unsafe|partial|scoped|local)\s+)*"
+    r"(?P<kind>theorem|lemma|example|def|abbrev|structure|class|inductive|instance)(?=\s|$)"
 )
 
 #: Kinds whose bodies are proofs — stubbed with `:= by sorry`.
@@ -67,13 +69,29 @@ def _statement_of(signature: str) -> str:
     """The signature without a leading docstring, if it carries one.
 
     Docstrings appear when extraction prepends them to the signature
-    (observed with multi-line docstrings); the statement starts after
-    the last docstring close. Signatures without a docstring are
-    returned unchanged.
+    (observed with multi-line docstrings); strip only a leading
+    `/-- ... -/` comment from index 0 (respecting nested `/- ... -/`
+    block comments) so inline block comments later in the signature are
+    preserved. Signatures without a leading docstring are returned
+    unchanged.
     """
-    close = signature.rfind("-/")
-    if close != -1 and "/--" in signature[: close + 2]:
-        return signature[close + 2:].strip()
+    text = signature.lstrip()
+    if not text.startswith("/--"):
+        return signature.strip()
+    depth = 1
+    i = 3
+    n = len(text)
+    while i < n and depth > 0:
+        if text.startswith("/-", i):
+            depth += 1
+            i += 2
+        elif text.startswith("-/", i):
+            depth -= 1
+            i += 2
+        else:
+            i += 1
+    if depth == 0:
+        return text[i:].strip()
     return signature.strip()
 
 

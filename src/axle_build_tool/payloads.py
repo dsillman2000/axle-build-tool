@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from axle_build_tool.config import CACHE_DIRNAME
+from axle_build_tool.imports import strip_comments
 from axle_build_tool.manifest import Manifest, ManifestNode, reachable_declarations
 from axle_build_tool.minify import Minified, minify_lines
 from axle_build_tool import stubbing
@@ -366,18 +367,34 @@ def build_payload(
         }
         section: list[str] = []
         line_numbers: list[int] = []
-        for number, line in tagged:
-            match = _IMPORT_LINE.match(line)
-            if match is None:
-                section.append(line)
-                line_numbers.append(number)
-                continue
-            # Every import line leaves the section: intra-project imports
-            # are satisfied by the inlined content; external ones are
-            # hoisted into the payload's single header block.
-            if match.group(1) not in internal_stems and match.group(1) not in hoisted_seen:
-                hoisted_seen.add(match.group(1))
-                hoisted.append(line)
+        stripped_lines = (
+            strip_comments("\n".join(line for _, line in tagged)).split("\n")
+            if tagged
+            else []
+        )
+        in_import_header = True
+        for (number, line), stripped in zip(tagged, stripped_lines):
+            if in_import_header:
+                code = stripped.strip()
+                if not code or code == "prelude":
+                    section.append(line)
+                    line_numbers.append(number)
+                    continue
+                match = _IMPORT_LINE.match(stripped)
+                if match is not None:
+                    # Every import line leaves the section: intra-project
+                    # imports are satisfied by the inlined content; external
+                    # ones are hoisted into the payload's single header block.
+                    if (
+                        match.group(1) not in internal_stems
+                        and match.group(1) not in hoisted_seen
+                    ):
+                        hoisted_seen.add(match.group(1))
+                        hoisted.append(line)
+                    continue
+                in_import_header = False
+            section.append(line)
+            line_numbers.append(number)
         sections.append((member, section, line_numbers))
 
     lines: list[str] = []

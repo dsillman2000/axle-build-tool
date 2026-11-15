@@ -350,15 +350,39 @@ def _decl_from_document(
     start = doc.line_pos
     if not (section_start <= start <= section_end):
         return None
+    bound = min(section_end, doc.end_line_pos, start + 64)
     keyword_line = start
-    bound = min(section_end, keyword_line + 64)
-    scanned = 0
-    while scanned < 64 and keyword_line <= bound and not DECLARATION_HEAD.match(
-        payload.lines[keyword_line - 1]
-    ):
+    comment_depth = 0
+    found = False
+    while keyword_line <= bound:
+        line = payload.lines[keyword_line - 1]
+        i = 0
+        n = len(line)
+        while i < n:
+            if comment_depth > 0:
+                if line.startswith("/-", i):
+                    comment_depth += 1
+                    i += 2
+                elif line.startswith("-/", i):
+                    comment_depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            else:
+                while i < n and line[i].isspace():
+                    i += 1
+                if line.startswith("/-", i):
+                    comment_depth = 1
+                    i += 2
+                else:
+                    break
+        if comment_depth == 0:
+            match = DECLARATION_HEAD.match(line[i:])
+            if match is not None and match.group("kind") == doc.kind:
+                found = True
+                break
         keyword_line += 1
-        scanned += 1
-    if scanned > 64 or keyword_line > section_end:
+    if not found:
         keyword_line = start  # keep the reported position
     line_pos = line_map[keyword_line - section_start]
     end = doc.end_line_pos
