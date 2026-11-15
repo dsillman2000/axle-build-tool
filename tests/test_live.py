@@ -709,7 +709,7 @@ class TestLiveVerifyCache:
         # A real ambient edit to Base changes the cache signature, so
         # User re-verifies.
         (root / "M" / "Base.lean").write_text(
-            "open Nat\n" + BASE_SOURCE, encoding="utf-8"
+            BASE_SOURCE + "\nopen Nat\n", encoding="utf-8"
         )
 
         result = runner.invoke(main, ["verify"])
