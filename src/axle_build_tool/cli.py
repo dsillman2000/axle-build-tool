@@ -2156,6 +2156,7 @@ def verify(
     headline = {item[0]: index for index, item in enumerate(items, start=1)}
     share_links: dict[str, str | AxleServiceError] = {}
     stamps: dict[tuple[str, str], tuple[str, datetime, str | None]] = {}
+    direct_stamps: set[tuple[str, str]] = set()
 
     async def submit_all() -> None:
         async with service:
@@ -2324,6 +2325,9 @@ def verify(
                                 and scope.stamp
                             ):
                                 now = datetime.now(timezone.utc)
+                                selected_nodes = {
+                                    n.name for n in selection.payload_nodes(manifest)
+                                }
                                 for name in scope.to_verify:
                                     node_name = None
                                     for section_name in payload.sections:
@@ -2335,11 +2339,28 @@ def verify(
                                             break
                                     if node_name is None:
                                         node_name = node_of_decl.get(name)
-                                    stamps[(node_name, name)] = (
-                                        sig_of(node_name),
-                                        now,
-                                        rid,
+                                    key = (node_name, name)
+                                    is_direct = (
+                                        (
+                                            node_name == selection.node_name
+                                            and name == selection.declaration
+                                        )
+                                        if selection.declaration is not None
+                                        else node_name in selected_nodes
                                     )
+                                    if is_direct:
+                                        stamps[key] = (
+                                            sig_of(node_name),
+                                            now,
+                                            rid,
+                                        )
+                                        direct_stamps.add(key)
+                                    elif key not in direct_stamps and key not in stamps:
+                                        stamps[key] = (
+                                            sig_of(node_name),
+                                            now,
+                                            None,
+                                        )
                             cached_note = (
                                 f", {len(scope.cached)} cached" if scope.cached else ""
                             )
@@ -2450,15 +2471,15 @@ def verify(
                     declarations.append(d)
                     continue
                 sig, now, rid = stamp
-                declarations.append(
-                    d.model_copy(
-                        update={
-                            "verified_sig": sig,
-                            "verified_at": now,
-                            "verified_request_id": rid,
-                        }
-                    )
-                )
+                update: dict[str, Any] = {
+                    "verified_sig": sig,
+                    "verified_at": now,
+                }
+                if rid is not None:
+                    update["verified_request_id"] = rid
+                elif d.verified_sig != sig:
+                    update["verified_request_id"] = None
+                declarations.append(d.model_copy(update=update))
             nodes.append(node.model_copy(update={"declarations": declarations}))
         manifest = manifest.model_copy(update={"nodes": nodes})
         try:
