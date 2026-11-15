@@ -659,3 +659,45 @@ class TestTransformMemberSourcePartition:
             "private theorem twoPowSq : Nat.one = Nat.one := by sorry" in transformed
         )
         assert "  rw [Nat.one_def]" not in transformed
+
+
+class TestIssue53Regressions:
+    def test_statement_of_preserves_inline_block_comment(self) -> None:
+        from axle_build_tool.stubbing import _statement_of
+
+        sig = "/-- leading /- nested -/ doc -/\ntheorem t (x : Nat /- inline -/) : x = x"
+        assert _statement_of(sig) == "theorem t (x : Nat /- inline -/) : x = x"
+
+    def test_declaration_head_rejects_hyphenated_prose_and_allows_scoped_local(self) -> None:
+        from axle_build_tool.stubbing import _span_head_matches
+
+        assert not _span_head_matches("class-shaped `D`-slot bounds actual calls", "class")
+        assert _span_head_matches("scoped instance : Foo", "instance")
+        assert _span_head_matches("local instance : Foo", "instance")
+        assert _span_head_matches("@[simp] @[ext] private theorem foo : True", "theorem")
+
+    def test_unminified_build_payload_does_not_hoist_docstring_imports(self, tmp_path) -> None:
+        from axle_build_tool.manifest import Manifest
+        from axle_build_tool.payloads import build_payload
+
+        lean_file = tmp_path / "M" / "A.lean"
+        lean_file.parent.mkdir(parents=True)
+        lean_file.write_text(
+            "/-!\n"
+            "Module doc example:\n"
+            "  import FakeDocImport\n"
+            "-/\n"
+            "import Mathlib\n"
+            "\n"
+            "theorem t : True := trivial\n",
+            encoding="utf-8",
+        )
+        manifest = Manifest(
+            generated_at=datetime(2026, 10, 31, tzinfo=timezone.utc),
+            nodes=[NODE],
+        )
+        payload = build_payload([NODE], manifest, tmp_path, minify=False)
+
+        assert payload.lines[0] == "import Mathlib"
+        assert "import FakeDocImport" not in payload.lines[:2]
+        assert "  import FakeDocImport" in payload.content

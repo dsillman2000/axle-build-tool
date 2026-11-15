@@ -147,3 +147,67 @@ def test_documents_outside_the_sections_are_ignored() -> None:
     doc = document_for(0, 1)
 
     assert _decl_from_document(doc, payload, "M.F") is None
+
+
+def test_docstring_prose_keywords_do_not_snap_inside_docstring() -> None:
+    payload = payload_with(
+        [
+            "/-- This docstring mentions",                 # p1
+            "structure and example in prose,",             # p2
+            "class-shaped `D`-slot bounds actual calls,",  # p3
+            "theorem is also mentioned here -/",           # p4
+            "theorem bzDivTimeCost_ge : True := trivial",  # p5
+        ],
+    )
+    doc = document_for(1, 5, kind="theorem")
+
+    declaration = _decl_from_document(doc, payload, "M.F")
+
+    assert declaration is not None
+    assert declaration.line_pos == 45
+
+
+def test_over_64_docstring_lines_falls_back_to_start() -> None:
+    lines = (
+        ["/-- doc"]
+        + [f"line {i}" for i in range(66)]
+        + ["-/"]
+        + ["theorem far : True := trivial"]
+    )
+    payload = payload_with(lines)
+    doc = document_for(1, len(lines), kind="theorem")
+
+    declaration = _decl_from_document(doc, payload, "M.F")
+
+    assert declaration is not None
+    assert declaration.line_pos == 41
+
+
+def test_unrecognized_modifier_never_scans_past_doc_end() -> None:
+    payload = payload_with(
+        [
+            "weird_mod instance : Foo := bar",  # p1
+            "instance : Baz := qux",            # p2
+        ],
+    )
+    doc = document_for(1, 1, kind="instance")
+
+    declaration = _decl_from_document(doc, payload, "M.F")
+
+    assert declaration is not None
+    assert declaration.line_pos == 41
+    assert declaration.end_line_pos == 41
+
+
+def test_scoped_local_and_repeated_attributes_snap() -> None:
+    payload = payload_with(
+        [
+            "@[simp] @[ext] scoped instance : Foo := bar",  # p1
+        ],
+    )
+    doc = document_for(1, 1, kind="instance")
+
+    declaration = _decl_from_document(doc, payload, "M.F")
+
+    assert declaration is not None
+    assert declaration.line_pos == 41
