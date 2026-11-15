@@ -176,9 +176,9 @@ def status_line(output: str, label: str) -> str:
     for line in output.splitlines():
         body = _strip_prefixes(line)
         tokens = body.split()
-        if len(tokens) >= 2 and tokens[0].startswith(label) and tokens[1] == "START":
+        if len(tokens) >= 2 and tokens[0] == label and tokens[1] == "START":
             continue
-        if tokens and tokens[0].startswith(label):
+        if tokens and tokens[0] == label:
             return _ITEM_TIMING.sub("", " ".join(tokens))
     raise AssertionError(f"no report line for {label!r} in:\n{output}")
 
@@ -191,7 +191,7 @@ def start_line(output: str, label: str) -> str:
     """
     for body in stripped_lines(output):
         tokens = body.split()
-        if len(tokens) >= 3 and tokens[0].startswith(label) and tokens[1] == "START":
+        if len(tokens) >= 3 and tokens[0] == label and tokens[1] == "START":
             return body
     raise AssertionError(f"no START line for {label!r} in:\n{output}")
 

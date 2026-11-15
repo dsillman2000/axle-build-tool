@@ -1276,6 +1276,7 @@ def check(
     #: name -> (closure signature, timestamp, request id). Mirrors
     #: verify's `stamps` flow, without verify's cache short-circuits.
     checked_stamps: dict[tuple[str, str], tuple[str, datetime, str | None]] = {}
+    checked_node_stamps: dict[str, tuple[str, datetime, str | None]] = {}
 
     async def submit_all() -> None:
         async with service:
@@ -1356,6 +1357,16 @@ def check(
                         for d in node.declarations
                     ]
                 if not judged:
+                    selected_nodes = selection.payload_nodes(manifest)
+                    if (
+                        selection.declaration is None
+                        and selected_nodes
+                        and all(
+                            node.checked_sig == sig_of(node.name)
+                            for node in selected_nodes
+                        )
+                    ):
+                        cached_items.append(item)  # type: ignore[arg-type]
                     continue
                 all_cached = True
                 for node_name, decl_name in judged:
@@ -1391,6 +1402,17 @@ def check(
                         ]
                     )],
                 )
+                if rid is None and selection.declaration is None:
+                    best_node: tuple[datetime, str] | None = None
+                    for node in selection.payload_nodes(manifest):
+                        if (
+                            node.checked_request_id is not None
+                            and node.checked_at is not None
+                            and (best_node is None or node.checked_at > best_node[0])
+                        ):
+                            best_node = (node.checked_at, node.checked_request_id)
+                    if best_node is not None:
+                        rid = best_node[1]
                 await _mint_share_link(service, rid, share_links, enabled=share)
                 _print_share_line(share_links, rid, earlier_run=True)
 
@@ -1495,6 +1517,14 @@ def check(
                                 now,
                                 rid,
                             )
+                        if selection.declaration is None:
+                            for node in selection.payload_nodes(manifest):
+                                if not node.declarations:
+                                    checked_node_stamps[node.name] = (
+                                        sig_of(node.name),
+                                        now,
+                                        rid,
+                                    )
                     await _mint_share_link(service, rid, share_links, enabled=share)
                     _print_share_line(share_links, rid)
                     #: --fail-fast: the first failed selection cancels
@@ -1538,7 +1568,7 @@ def check(
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
 
-    if checked_stamps:
+    if checked_stamps or checked_node_stamps:
         nodes = []
         for node in manifest.nodes:
             declarations = []
@@ -1557,13 +1587,25 @@ def check(
                         }
                     )
                 )
-            nodes.append(node.model_copy(update={"declarations": declarations}))
+            node_update: dict[str, Any] = {"declarations": declarations}
+            node_stamp = checked_node_stamps.get(node.name)
+            if node_stamp is not None:
+                n_sig, n_now, n_rid = node_stamp
+                node_update.update(
+                    {
+                        "checked_sig": n_sig,
+                        "checked_at": n_now,
+                        "checked_request_id": n_rid,
+                    }
+                )
+            nodes.append(node.model_copy(update=node_update))
         manifest = manifest.model_copy(update={"nodes": nodes})
         try:
             save_manifest(manifest, project_root)
         except OSError as exc:
             raise click.ClickException(str(exc)) from exc
-        click.secho(f"{_clock()} Recorded {len(checked_stamps)} check stamp(s) in the manifest", dim=True)
+        total_stamps = len(checked_stamps) + len(checked_node_stamps)
+        click.secho(f"{_clock()} Recorded {total_stamps} check stamp(s) in the manifest", dim=True)
 
     total = len(checks)
     total_timing = _timing_text(time.monotonic() - started)
