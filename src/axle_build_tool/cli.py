@@ -934,6 +934,43 @@ def _latest_checked_request_id(manifest: Manifest, names: list[str]) -> str | No
     return best[1] if best else None
 
 
+def _selection_trim_roots(
+    selection: Selection, manifest: Manifest
+) -> list[str] | None:
+    """Per-selection declaration roots for strict dependency-closure trimming."""
+    if selection.declaration is not None:
+        return [selection.declaration]
+    roots = [
+        d.name
+        for node in selection.payload_nodes(manifest)
+        for d in node.declarations
+    ]
+    return roots or None
+
+
+def _build_scoped_payload(
+    selection: Selection,
+    manifest: Manifest,
+    project_root: Path,
+    *,
+    stubbed: dict[str, frozenset[str] | None] | None = None,
+    warnings: list[str] | None = None,
+    minify: bool = False,
+    scoped: bool = False,
+) -> Payload:
+    """Single shared payload builder for `check`, `verify`, and `build` (issue #65)."""
+    trim_roots = _selection_trim_roots(selection, manifest) if scoped else None
+    return build_payload(
+        selection.payload_nodes(manifest),
+        manifest,
+        project_root,
+        stubbed=stubbed,
+        warnings=warnings,
+        minify=minify,
+        selected_declarations=trim_roots,
+    )
+
+
 def _rewrite_message_position(
     message: str,
     payload: Payload,
@@ -1175,23 +1212,6 @@ def check(
             stub_map = {}
         stub_warnings: list[str] = []
         applied: set[str] = set()
-        #: Declaration-level trimming for `--select` runs: keep the
-        #: selected declaration(s) plus their transitive dependency
-        #: closure; unrelated declarations in the same file are dropped.
-        trim_roots: list[str] | None = None
-        if select is not None:
-            _trim: list[str] = []
-            for _token in select.split() or [select]:
-                _sel = resolve_selection(_token, config, manifest)
-                if _sel.declaration is not None:
-                    _trim.append(_sel.declaration)
-                else:
-                    _trim.extend(
-                        d.name
-                        for node in _sel.payload_nodes(manifest)
-                        for d in node.declarations
-                    )
-            trim_roots = _trim or None
         checks: list[tuple[str, Selection, Payload | None, dict, str | None]] = []
         for label, selection, explicit in plan:
             refined = _refine_stub_map(
@@ -1203,14 +1223,14 @@ def check(
                 checks.append((label, selection, None, refined, granted))
                 applied |= set(refined)
                 continue
-            payload = build_payload(
-                selection.payload_nodes(manifest),
+            payload = _build_scoped_payload(
+                selection,
                 manifest,
                 project_root,
                 stubbed=refined or None,
                 warnings=stub_warnings,
                 minify=minified,
-                selected_declarations=trim_roots,
+                scoped=select is not None,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
@@ -2005,20 +2025,6 @@ def verify(
                 **signature_options,
                 "permitted_sorries": " ".join(sorted(permitted_sorries)),
             }
-        trim_roots: list[str] | None = None
-        if select is not None:
-            _trim: list[str] = []
-            for _token in select.split() or [select]:
-                _sel = resolve_selection(_token, config, manifest)
-                if _sel.declaration is not None:
-                    _trim.append(_sel.declaration)
-                else:
-                    _trim.extend(
-                        d.name
-                        for node in _sel.payload_nodes(manifest)
-                        for d in node.declarations
-                    )
-            trim_roots = _trim or None
         stub_warnings: list[str] = []
         applied: set[str] = set()
         if _build_state is not None and _build_state.stub_applied:
@@ -2092,14 +2098,14 @@ def verify(
                 items.append((label, selection, None, refined, granted, None))
                 applied |= set(refined)
                 continue
-            payload = build_payload(
-                selection.payload_nodes(manifest),
+            payload = _build_scoped_payload(
+                selection,
                 manifest,
                 project_root,
                 stubbed=refined or None,
                 warnings=stub_warnings,
                 minify=minified,
-                selected_declarations=trim_roots,
+                scoped=select is not None,
             )
             if _validate_stub_closure(refined, label, payload):
                 applied |= set(refined)
