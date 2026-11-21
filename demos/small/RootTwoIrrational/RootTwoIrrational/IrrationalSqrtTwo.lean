@@ -1,6 +1,6 @@
 import Mathlib
-import Divisibility
-import EuclidLemma
+import RootTwoIrrational.Divisibility
+import RootTwoIrrational.EuclidLemma
 
 /-!
 # Irrationality of √2

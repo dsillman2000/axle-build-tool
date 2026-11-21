@@ -1,5 +1,5 @@
 import Mathlib
-import Divisibility
+import RootTwoIrrational.Divisibility
 
 /-!
 # Euclid's lemma
