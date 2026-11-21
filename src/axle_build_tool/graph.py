@@ -829,6 +829,13 @@ _SHAPES_LEGEND = (
     "other declarations (defs, structures, &hellip;) &mdash; never verifiable (rectangle)</div>"
 )
 
+_HIGHLIGHTS_LEGEND = (
+    '<div class="item highlights"><span class="swatch upstream"></span>'
+    "upstream — dependencies / imports (light blue)"
+    '<br><span class="swatch downstream"></span>'
+    "downstream — dependents / used by (light pink)</div>"
+)
+
 
 def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
     items = "".join(
@@ -857,7 +864,8 @@ def _legend_markup(legend: list[dict[str, str]], star: str) -> str:
         "reset layout</button>"
     )
     return (
-        f'{search}<div class="title">color = outcome stamps only</div>{items}{_SHAPES_LEGEND}'
+        f'{search}<div class="title">color = outcome stamps only</div>{items}'
+        f'{_SHAPES_LEGEND}{_HIGHLIGHTS_LEGEND}'
         f'{decl_checkbox}{trans_checkbox}{reset}<div class="note">{note}</div>'
         '<div id="inspector" style="display:none;"></div>'
     )
@@ -954,6 +962,11 @@ _HTML_TEMPLATE = """<!doctype html>
   .glyph.round { border-radius: 50%; }
   .glyph.square { border-radius: 0; }
   .shapes { margin: 4px 0; padding: 3px 0; border-top: 1px solid #223250; border-bottom: 1px solid #223250; }
+  .highlights { margin: 4px 0; padding: 3px 0; border-bottom: 1px solid #223250; }
+  .swatch { display: inline-block; width: 12px; height: 10px; border-radius: 3px; margin: 0 6px 0 1px;
+            vertical-align: -1px; border: 2px solid transparent; }
+  .swatch.upstream { border-color: #7dd3fc; background: rgba(56, 189, 248, 0.22); }
+  .swatch.downstream { border-color: #f9a8d4; background: rgba(244, 114, 182, 0.22); }
   #inspector { border-top: 1px solid #263859; margin-top: 8px; padding-top: 8px; font-size: 12px; line-height: 1.5; }
   #inspector .insp-title { font-weight: 700; font-family: ui-monospace, monospace; font-size: 12.5px;
                            color: #f0f6fc; overflow-wrap: anywhere; margin-bottom: 4px; }
@@ -963,10 +976,16 @@ _HTML_TEMPLATE = """<!doctype html>
                             color: #bae6fd; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere;
                             max-height: 120px; overflow-y: auto; }
   #inspector .insp-sec { font-weight: 600; color: #8499bc; margin-top: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+  #inspector .insp-sec.upstream { color: #7dd3fc; }
+  #inspector .insp-sec.downstream { color: #f9a8d4; }
   #inspector .insp-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
   #inspector .insp-chip { font-family: ui-monospace, monospace; font-size: 11px; background: #16233b;
                           border: 1px solid #2d436b; border-radius: 4px; padding: 1px 6px; cursor: pointer; color: #d0def2; }
   #inspector .insp-chip:hover { background: #1d3557; border-color: #38bdf8; color: #7dd3fc; }
+  #inspector .insp-chip.upstream { border-color: rgba(125, 211, 252, 0.45); color: #bae6fd; }
+  #inspector .insp-chip.upstream:hover { background: #163052; border-color: #7dd3fc; color: #e0f2fe; }
+  #inspector .insp-chip.downstream { border-color: rgba(249, 168, 212, 0.45); color: #fbcfe8; }
+  #inspector .insp-chip.downstream:hover { background: #3b1c36; border-color: #f9a8d4; color: #fce7f3; }
   #tooltip { position: fixed; z-index: 20; display: none; max-width: 390px; background: #0f172a;
              border: 1px solid #2e4369; border-radius: 8px; padding: 8px 11px; font-size: 12px; line-height: 1.55;
              color: #e2ecf8; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); pointer-events: none; }
@@ -1054,8 +1073,12 @@ __AXBT_LEGEND__
       { selector: "node:parent[group='file'][state='empty']", style: {
         "background-color": "#162136", "background-opacity": 0.45, "border-color": "#4a5f85" } },
       { selector: ".highlighted", style: { "border-color": "#38bdf8", "border-width": 2.5 } },
-      { selector: ".selected-node", style: { "border-color": "#7dd3fc", "border-width": 3 } },
+      { selector: "node.upstream", style: { "border-color": "#7dd3fc", "border-width": 2.6 } },
+      { selector: "node.downstream", style: { "border-color": "#f9a8d4", "border-width": 2.6 } },
+      { selector: ".selected-node", style: { "border-color": "#f8fafc", "border-width": 3 } },
       { selector: "edge.highlighted", style: { width: 2.4, "line-color": "#38bdf8", "target-arrow-color": "#38bdf8", opacity: 1 } },
+      { selector: "edge.upstream", style: { width: 2.5, "line-color": "#7dd3fc", "target-arrow-color": "#7dd3fc", opacity: 1 } },
+      { selector: "edge.downstream", style: { width: 2.5, "line-color": "#f9a8d4", "target-arrow-color": "#f9a8d4", opacity: 1 } },
       { selector: ".dimmed", style: { opacity: 0.2 } },
       { selector: "edge.hidden", style: { display: "none" } }
     ],
@@ -1102,7 +1125,7 @@ __AXBT_LEGEND__
 
   function clearMark() {
     cy.batch(function () {
-      cy.elements().removeClass("highlighted selected-node dimmed");
+      cy.elements().removeClass("highlighted upstream downstream selected-node dimmed");
     });
     marked = [];
     if (inspector) { inspector.style.display = "none"; inspector.innerHTML = ""; }
@@ -1110,42 +1133,64 @@ __AXBT_LEGEND__
   }
 
   function transitiveCone(seed, edgeKind) {
-    var coneNodes = {};
-    var coneEdges = [];
-    coneNodes[seed.id()] = seed;
+    var upNodes = {};
+    var upEdges = [];
+    var upEdgeSeen = {};
+    upNodes[seed.id()] = seed;
 
     // Upstream walk (predecessors along edgeKind)
     var upQueue = [seed];
     while (upQueue.length > 0) {
       var curr = upQueue.pop();
       curr.incomers('edge[kind = "' + edgeKind + '"]').forEach(function (edge) {
-        coneEdges.push(edge);
+        if (!upEdgeSeen[edge.id()]) {
+          upEdgeSeen[edge.id()] = true;
+          upEdges.push(edge);
+        }
         var src = edge.source();
-        if (!coneNodes[src.id()]) {
-          coneNodes[src.id()] = src;
+        if (!upNodes[src.id()]) {
+          upNodes[src.id()] = src;
           upQueue.push(src);
         }
       });
     }
+
+    var downNodes = {};
+    var downEdges = [];
+    var downEdgeSeen = {};
+    downNodes[seed.id()] = seed;
 
     // Downstream walk (successors along edgeKind)
     var downQueue = [seed];
     while (downQueue.length > 0) {
       var currDown = downQueue.pop();
       currDown.outgoers('edge[kind = "' + edgeKind + '"]').forEach(function (edge) {
-        coneEdges.push(edge);
+        if (!downEdgeSeen[edge.id()]) {
+          downEdgeSeen[edge.id()] = true;
+          downEdges.push(edge);
+        }
         var tgt = edge.target();
-        if (!coneNodes[tgt.id()]) {
-          coneNodes[tgt.id()] = tgt;
+        if (!downNodes[tgt.id()]) {
+          downNodes[tgt.id()] = tgt;
           downQueue.push(tgt);
         }
       });
     }
 
-    var result = [];
-    Object.keys(coneNodes).forEach(function (id) { result.push(coneNodes[id]); });
-    for (var i = 0; i < coneEdges.length; i++) { result.push(coneEdges[i]); }
-    return result;
+    var upstream = [];
+    Object.keys(upNodes).forEach(function (id) {
+      if (id !== seed.id()) { upstream.push(upNodes[id]); }
+    });
+    for (var i = 0; i < upEdges.length; i++) { upstream.push(upEdges[i]); }
+
+    var downstream = [];
+    Object.keys(downNodes).forEach(function (id) {
+      if (id !== seed.id()) { downstream.push(downNodes[id]); }
+    });
+    for (var j = 0; j < downEdges.length; j++) { downstream.push(downEdges[j]); }
+
+    var all = [seed].concat(upstream, downstream);
+    return { upstream: upstream, downstream: downstream, all: all };
   }
 
   function escapeHtml(str) {
@@ -1176,16 +1221,16 @@ __AXBT_LEGEND__
       var upDecls = node.incomers('edge[kind = "depends"]').sources();
       var downDecls = node.outgoers('edge[kind = "depends"]').targets();
       if (upDecls.length > 0) {
-        htmlParts.push('<div class="insp-sec">Depends on (' + upDecls.length + ')</div><div class="insp-chips">');
+        htmlParts.push('<div class="insp-sec upstream">Depends on (' + upDecls.length + ')</div><div class="insp-chips">');
         upDecls.forEach(function (u) {
-          htmlParts.push('<span class="insp-chip" data-target-id="' + escapeHtml(u.id()) + '">' + escapeHtml(u.data("label")) + '</span>');
+          htmlParts.push('<span class="insp-chip upstream" data-target-id="' + escapeHtml(u.id()) + '">' + escapeHtml(u.data("label")) + '</span>');
         });
         htmlParts.push('</div>');
       }
       if (downDecls.length > 0) {
-        htmlParts.push('<div class="insp-sec">Used by (' + downDecls.length + ')</div><div class="insp-chips">');
+        htmlParts.push('<div class="insp-sec downstream">Used by (' + downDecls.length + ')</div><div class="insp-chips">');
         downDecls.forEach(function (dn) {
-          htmlParts.push('<span class="insp-chip" data-target-id="' + escapeHtml(dn.id()) + '">' + escapeHtml(dn.data("label")) + '</span>');
+          htmlParts.push('<span class="insp-chip downstream" data-target-id="' + escapeHtml(dn.id()) + '">' + escapeHtml(dn.data("label")) + '</span>');
         });
         htmlParts.push('</div>');
       }
@@ -1199,16 +1244,16 @@ __AXBT_LEGEND__
       var upFiles = node.incomers('edge[kind = "import"]').sources();
       var downFiles = node.outgoers('edge[kind = "import"]').targets();
       if (upFiles.length > 0) {
-        htmlParts.push('<div class="insp-sec">Imports (' + upFiles.length + ')</div><div class="insp-chips">');
+        htmlParts.push('<div class="insp-sec upstream">Imports (' + upFiles.length + ')</div><div class="insp-chips">');
         upFiles.forEach(function (u) {
-          htmlParts.push('<span class="insp-chip" data-target-id="' + escapeHtml(u.id()) + '">' + escapeHtml(u.data("label")) + '</span>');
+          htmlParts.push('<span class="insp-chip upstream" data-target-id="' + escapeHtml(u.id()) + '">' + escapeHtml(u.data("label")) + '</span>');
         });
         htmlParts.push('</div>');
       }
       if (downFiles.length > 0) {
-        htmlParts.push('<div class="insp-sec">Imported by (' + downFiles.length + ')</div><div class="insp-chips">');
+        htmlParts.push('<div class="insp-sec downstream">Imported by (' + downFiles.length + ')</div><div class="insp-chips">');
         downFiles.forEach(function (dn) {
-          htmlParts.push('<span class="insp-chip" data-target-id="' + escapeHtml(dn.id()) + '">' + escapeHtml(dn.data("label")) + '</span>');
+          htmlParts.push('<span class="insp-chip downstream" data-target-id="' + escapeHtml(dn.id()) + '">' + escapeHtml(dn.data("label")) + '</span>');
         });
         htmlParts.push('</div>');
       }
@@ -1234,22 +1279,41 @@ __AXBT_LEGEND__
     clearMark();
     if (!target || target === cy) { return; }
     var group = target.data && target.data("group");
-    if (group === "declaration") {
-      marked = transitiveCone(target, "depends");
-    } else if (group === "file") {
-      marked = transitiveCone(target, "import");
+    if (group === "declaration" || group === "file") {
+      var edgeKind = group === "declaration" ? "depends" : "import";
+      var cone = transitiveCone(target, edgeKind);
+      marked = cone.all;
+      cy.batch(function () {
+        for (var i = 0; i < cone.upstream.length; i++) {
+          cone.upstream[i].addClass("highlighted upstream");
+        }
+        for (var j = 0; j < cone.downstream.length; j++) {
+          cone.downstream[j].addClass("highlighted downstream");
+        }
+        target.addClass("highlighted selected-node");
+        renderInspector(target);
+      });
+    } else if (target.isEdge && target.isEdge()) {
+      var src = target.source();
+      var tgt = target.target();
+      marked = [target, src, tgt];
+      cy.batch(function () {
+        target.addClass("highlighted");
+        src.addClass("highlighted upstream");
+        tgt.addClass("highlighted downstream");
+      });
     } else {
       marked = target.closedNeighborhood().toArray();
+      cy.batch(function () {
+        for (var k = 0; k < marked.length; k++) {
+          marked[k].addClass("highlighted");
+        }
+        if (target.isNode && target.isNode()) {
+          target.addClass("selected-node");
+          renderInspector(target);
+        }
+      });
     }
-    cy.batch(function () {
-      for (var i = 0; i < marked.length; i++) {
-        marked[i].addClass("highlighted");
-      }
-      if (target.isNode && target.isNode()) {
-        target.addClass("selected-node");
-        renderInspector(target);
-      }
-    });
     refreshEdgeVisibility();
   }
 
@@ -1289,7 +1353,7 @@ __AXBT_LEGEND__
         }
       });
       cy.batch(function () {
-        cy.elements().removeClass("highlighted selected-node dimmed");
+        cy.elements().removeClass("highlighted upstream downstream selected-node dimmed");
         if (matches.length > 0) {
           cy.nodes('[group = "declaration"]').addClass("dimmed");
           for (var i = 0; i < matches.length; i++) {

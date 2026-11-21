@@ -645,6 +645,39 @@ class TestGraphEdges:
         assert 'id="search-nodes"' in html_text
         assert 'id="inspector"' in html_text
 
+    def test_upstream_and_downstream_highlighting_are_distinct(
+        self, graph_project: Path
+    ) -> None:
+        """Selecting a node highlights upstream dependencies in light blue
+        and downstream dependents in light pink across the graph, legend,
+        and inspector."""
+        _output, html_text = run_graph(graph_project)
+
+        # Cytoscape stylesheet styles upstream (light blue) vs downstream
+        # (light pink) separately for both nodes and edges, with a white
+        # border on the selected focal node.
+        assert '{ selector: "node.upstream", style: { "border-color": "#7dd3fc"' in html_text
+        assert '{ selector: "edge.upstream", style: { width: 2.5, "line-color": "#7dd3fc"' in html_text
+        assert '{ selector: "node.downstream", style: { "border-color": "#f9a8d4"' in html_text
+        assert '{ selector: "edge.downstream", style: { width: 2.5, "line-color": "#f9a8d4"' in html_text
+        assert '{ selector: ".selected-node", style: { "border-color": "#f8fafc"' in html_text
+
+        # Cone traversal and selection apply directional classes.
+        assert "return { upstream: upstream, downstream: downstream, all: all };" in html_text
+        assert 'addClass("highlighted upstream")' in html_text
+        assert 'addClass("highlighted downstream")' in html_text
+        assert 'addClass("highlighted selected-node")' in html_text
+
+        # Legend and inspector match the upstream/downstream color coding.
+        assert "swatch upstream" in html_text
+        assert "swatch downstream" in html_text
+        assert "upstream — dependencies / imports (light blue)" in html_text
+        assert "downstream — dependents / used by (light pink)" in html_text
+        assert "insp-sec upstream" in html_text
+        assert "insp-sec downstream" in html_text
+        assert "insp-chip upstream" in html_text
+        assert "insp-chip downstream" in html_text
+
 
 class TestRollup:
     """The container rollup rule (weakest constituent state wins)."""
