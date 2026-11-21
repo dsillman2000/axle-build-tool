@@ -1149,9 +1149,12 @@ __AXBT_LEGEND__
   }
 
   function escapeHtml(str) {
-    var div = document.createElement("div");
-    div.appendChild(document.createTextNode(str || ""));
-    return div.innerHTML;
+    return String(str == null ? "" : str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function renderInspector(node) {
