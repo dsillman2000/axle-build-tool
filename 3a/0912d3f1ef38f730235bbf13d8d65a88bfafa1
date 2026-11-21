@@ -1,0 +1,18 @@
+demos/small/GaussIntSum/axbt_project.yml
+  h_4cc74772b10fd4 6
+demos/small/RootTwoIrrational/RootTwoIrrational/EuclidLemma.lean
+  h_4cc74772b10fd4 2
+demos/small/RootTwoIrrational/RootTwoIrrational/IrrationalSqrtTwo.lean
+  h_4cc74772b10fd4 2-3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "3a0912d3f1ef38f730235bbf13d8d65a88bfafa1",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
