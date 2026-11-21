@@ -1,0 +1,18 @@
+src/axle_build_tool/graph.py
+  h_4cc74772b10fd4 1152-1157
+tests/graph_runtime_harness.js
+  h_4cc74772b10fd4 8-14,19,21,42-61,73-80,86,119-120,122,125,128-132,141-142,145,148,150-151,153-155,159,161-163,165-167,169-172,174-175,177,181-182,184-185,187-188,191-203,205-208,210-221,225,234,244,249,259
+tests/test_live.py
+  h_4cc74772b10fd4 877,879-886,935-945,949
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "7fc900db77ebf75f8873554226d9be29d80e84c4",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
