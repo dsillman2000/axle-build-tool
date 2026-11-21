@@ -1,0 +1,30 @@
+pyproject.toml
+  h_4cc74772b10fd4 3
+src/axle_build_tool/config.py
+  h_4cc74772b10fd4 119-126
+src/axle_build_tool/extraction.py
+  h_4cc74772b10fd4 662-663
+src/axle_build_tool/manifest.py
+  h_4cc74772b10fd4 273
+src/axle_build_tool/payloads.py
+  h_4cc74772b10fd4 351,354
+tests/test_compile.py
+  h_4cc74772b10fd4 1242-1297
+tests/test_config.py
+  h_4cc74772b10fd4 33-39
+tests/test_manifest.py
+  h_4cc74772b10fd4 146-190
+uv.lock
+  h_4cc74772b10fd4 203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "1f9a9cb6b07f87df3cc17378145dacd9d80bcbc7",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
