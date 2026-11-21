@@ -154,9 +154,14 @@ The two tiers are distinct facts: a `sorry` passes check and fails verify, so `c
 ### Visualizing the manifest
 
 `axbt graph [--select SELECTOR] [-o PATH]` renders `.axbt/manifest.json` as a single-file
-Cytoscape.js HTML visualization — pan/zoom, hover tooltips, click to highlight a node's
-neighborhood. Declaration level: every declaration is a node under its file, under its module,
-with file import edges and declaration-to-declaration edges from the extracted dependency lists.
+Cytoscape.js HTML visualization — pan/zoom, hover tooltips, live search, click to highlight a
+node's transitive upstream/downstream dependency cone and inspect its signature and metadata in
+the side panel. Declaration level: every declaration is a compact pill (for verifiable theorems,
+lemmas, and examples) or rectangular badge (for definitions, structures, and instances) inside its
+file card and module container, laid out deterministically left-to-right across dependency rank
+columns and ordered within each file by intra-file dependency depth and source line order. Direct
+file import edges form the primary DAG backbone, with transitively redundant shortcut imports and
+declaration-to-declaration dependency arrows toggleable on demand.
 
 ```bash
 axbt graph                              # whole manifest -> .axbt/graph.html

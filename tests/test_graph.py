@@ -206,34 +206,18 @@ class TestGraphRender:
     ) -> None:
         output, html_text = run_graph(graph_project)
 
-        # The only external references: the pinned, SRI-hashed CDN
-        # scripts (Cytoscape core + the fcose dependency chain).
+        # The single external reference: the pinned, SRI-hashed Cytoscape CDN script.
         assert (
             "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.31.0/cytoscape.min.js"
             in html_text
         )
-        assert (
-            "https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"
-            in html_text
-        )
-        assert (
-            "https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"
-            in html_text
-        )
-        assert (
-            "https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"
-            in html_text
-        )
+        assert "cytoscape-fcose" not in html_text
+        assert "layout-base" not in html_text
+        assert "cose-base" not in html_text
         assert 'integrity="' in html_text and 'crossorigin="anonymous"' in html_text
         # No other network references anywhere in the page.
-        urls = re.findall(r"https?://[^\s\"']+ ", html_text)
-        allowed = (
-            "https://cdnjs.cloudflare.com",
-            "https://cdn.jsdelivr.net/npm/layout-base",
-            "https://cdn.jsdelivr.net/npm/cose-base",
-            "https://cdn.jsdelivr.net/npm/cytoscape-fcose",
-        )
-        assert urls == [] or all(url.startswith(allowed) for url in urls)
+        urls = re.findall(r"https?://[^\s\"']+", html_text)
+        assert all(url.startswith("https://cdnjs.cloudflare.com") for url in urls)
 
         data = graph_data(html_text)
         ids = [node["id"] for node in data["nodes"]]
@@ -329,9 +313,10 @@ class TestGraphRender:
         # The legend explains the shape split.
         assert "verifiable" in html_text
         assert "never verifiable" in html_text
-        # The style sheet drives the split (round default -> circles for
-        # the proof kinds via data-kind selectors).
-        assert 'shape: "roundrectangle" } }' in html_text
+        # The style sheet drives the split: solid rectangles by default
+        # for defs/structures, ellipses for the proof kinds via kind selectors.
+        assert 'shape: "rectangle" } }' in html_text
+        assert 'shape: "ellipse" } }' in html_text
         assert "node[kind='theorem'], node[kind='lemma'], node[kind='example']" in html_text
 
     def test_dragging_is_enabled_with_a_reset_control(
@@ -421,10 +406,9 @@ class TestGraphRender:
 
         output, html_text = run_graph(root)
 
-        # Exactly six script elements: the four pinned CDN scripts
-        # (Cytoscape + its fcose dependency chain), the data block, and
-        # the application script.
-        assert html_text.count("</script>") == 6
+        # Exactly three script elements: the single pinned Cytoscape CDN
+        # script, the JSON data block, and the application script.
+        assert html_text.count("</script>") == 3
         data = graph_data(html_text)
         (declaration,) = [n for n in data["nodes"] if n["group"] == "declaration"]
         assert declaration["id"].endswith("evil</script><img>")
@@ -580,6 +564,35 @@ class TestGraphColors:
         assert state_of(bare_def) == "unchecked"
         assert state_of(bare_def.model_copy(update={"checked_sig": "c", "checked_at": checked.checked_at})) == "done"
 
+    def test_defs_in_verified_file_or_verified_closure_render_done_green(
+        self, graph_project: Path
+    ) -> None:
+        """When `axbt verify` verifies a theorem without a separate
+        `axbt check` run, `verified_sig` is stamped only on theorems even
+        though Lean's kernel checked the definitions in the file/closure.
+        Those definitions render as `done` (green) rather than `unchecked`."""
+        manifest = load_manifest(graph_project)
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        nodes = []
+        for node in manifest.nodes:
+            decls = []
+            for d in node.declarations:
+                if d.name == "base_thm":
+                    d = d.model_copy(
+                        update={"verified_sig": "v" * 32, "verified_at": now}
+                    )
+                decls.append(d)
+            nodes.append(node.model_copy(update={"declarations": decls}))
+        from axle_build_tool.manifest import save_manifest
+
+        save_manifest(manifest.model_copy(update={"nodes": nodes}), graph_project)
+
+        _output, html_text = run_graph(graph_project)
+        data = graph_data(html_text)
+        assert by_id(data, "decl:M.A:base")["state"] == "done"
+        assert by_id(data, "decl:M.A:base_thm")["state"] == "verified"
+        assert by_id(data, "file:M.A")["state"] == "verified"
+
 
 class TestGraphEdges:
     def test_import_and_dependency_edges_are_directed(self, graph_project: Path) -> None:
@@ -602,6 +615,35 @@ class TestGraphEdges:
         depended = [e for e in graph_data(html_text)["edges"] if e["kind"] == "depends"]
         assert len(depended) == 2
         assert all("not_a_project_decl" not in edge["id"] for edge in depended)
+
+    def test_transitive_import_edges_are_flagged_and_toggled(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        root = make_project(
+            tmp_path,
+            NO_TARGETS_CONFIG,
+            {
+                "M/A.lean": "def a := 1\n",
+                "M/B.lean": "import A\ndef b := a\n",
+                "M/C.lean": "import A\nimport B\ndef c := b\n",
+            },
+        )
+        fake_axle._extract_documents_by_marker = {
+            "def a := 1": {"a": make_document("a", kind="def", line_pos=1, end_line_pos=1)},
+            "def b := a": {"b": make_document("b", kind="def", line_pos=3, end_line_pos=3)},
+            "def c := b": {"c": make_document("c", kind="def", line_pos=5, end_line_pos=5)},
+        }
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        _output, html_text = run_graph(root)
+        edges = {edge["id"]: edge for edge in graph_data(html_text)["edges"]}
+        assert edges["import:M.A->M.B"]["transitive"] is False
+        assert edges["import:M.B->M.C"]["transitive"] is False
+        assert edges["import:M.A->M.C"]["transitive"] is True
+        assert 'id="toggle-transitive-edges"' in html_text
+        assert 'id="search-nodes"' in html_text
+        assert 'id="inspector"' in html_text
 
 
 class TestRollup:
@@ -663,21 +705,87 @@ class TestLayout:
         assert core_x < app_x and core_x < zoom_x
         assert [app_x, zoom_x] == sorted([app_x, zoom_x])
 
-    def test_declarations_stack_top_to_bottom_inside_their_file(self) -> None:
+    def test_declarations_stack_by_intra_file_dep_depth_then_source_line(self) -> None:
+        # Independent declarations keep their source line order (beta at
+        # line 2 precedes alpha at line 3).
         files = [self.node("Core.CoreFile", (), ["beta", "alpha"])]
         positions, _cells = _layout_positions(files)
         alpha, beta = positions["decl:Core.CoreFile:alpha"], positions["decl:Core.CoreFile:beta"]
-        assert alpha["y"] < beta["y"]  # sorted by declaration name
-        assert alpha["x"] == beta["x"]  # one aligned dot-list
+        assert beta["y"] < alpha["y"]
+        assert alpha["x"] == beta["x"]
 
-    def test_cluster_stacking_leaves_declaration_free_files_in_place(
+        # When an earlier-line declaration depends on a later-line
+        # declaration in the same file, intra-file dependency depth places
+        # the dependency first.
+        with_intra_dep = ManifestNode(
+            name="Core.DepFile",
+            module="Core",
+            path="Core/DepFile.lean",
+            md5="0" * 32,
+            status="clean",
+            parents=[],
+            declarations=[
+                ExtractedDecl(
+                    name="derived",
+                    kind="theorem",
+                    is_sorry=False,
+                    line_pos=2,
+                    end_line_pos=2,
+                    dependencies=["helper"],
+                ),
+                ExtractedDecl(
+                    name="helper",
+                    kind="lemma",
+                    is_sorry=False,
+                    line_pos=5,
+                    end_line_pos=5,
+                    dependencies=[],
+                ),
+            ],
+        )
+        pos2, _ = _layout_positions([with_intra_dep])
+        assert pos2["decl:Core.DepFile:helper"]["y"] < pos2["decl:Core.DepFile:derived"]["y"]
+
+    def test_cluster_stacking_places_dependent_files_right_and_siblings_below(
         self,
     ) -> None:
-        files = [self.node("Core.CoreFile", ()), self.node("Core.Empty", ("Core.CoreFile",))]
+        # Dependent files within a module advance left-to-right across
+        # rank columns; same-rank sibling files stack top-to-bottom.
+        files = [
+            self.node("Core.CoreFile", ()),
+            self.node("Core.Sibling", ()),
+            self.node("Core.Empty", ("Core.CoreFile",)),
+        ]
         positions, _cells = _layout_positions(files)
-        # Both files share their module column; the declaration-free one
-        # is placed below its importing sibling without overlapping it.
-        assert positions["file:Core.Empty"]["y"] > positions["file:Core.CoreFile"]["y"]
+        assert positions["file:Core.Sibling"]["x"] == positions["file:Core.CoreFile"]["x"]
+        assert positions["file:Core.Sibling"]["y"] > positions["file:Core.CoreFile"]["y"]
+        assert positions["file:Core.Empty"]["x"] > positions["file:Core.CoreFile"]["x"]
+
+    def test_large_file_wraps_into_non_overlapping_pill_subcolumns(self) -> None:
+        from axle_build_tool.graph import _PILL_H, _pill_width
+
+        decls = [f"theorem_name_{i:02d}_long" for i in range(60)]
+        node = self.node("Core.Big", (), decls)
+        positions, cells = _layout_positions([node])
+        cell = cells["file:Core.Big"]
+
+        boxes = []
+        for d in decls:
+            pos = positions[f"decl:Core.Big:{d}"]
+            w = _pill_width(d)
+            boxes.append((pos["x"] - w / 2, pos["y"] - _PILL_H / 2, pos["x"] + w / 2, pos["y"] + _PILL_H / 2))
+            assert cell["x1"] <= pos["x"] - w / 2 and pos["x"] + w / 2 <= cell["x2"]
+            assert cell["y1"] <= pos["y"] - _PILL_H / 2 and pos["y"] + _PILL_H / 2 <= cell["y2"]
+
+        # Multiple sub-columns used (4 sub-columns for 60 declarations)
+        assert len({positions[f"decl:Core.Big:{d}"]["x"] for d in decls}) == 4
+        # Zero pairwise pill bounding-box overlap
+        for i in range(len(boxes)):
+            x1a, y1a, x2a, y2a = boxes[i]
+            for j in range(i + 1, len(boxes)):
+                x1b, y1b, x2b, y2b = boxes[j]
+                separated = x2a < x1b or x2b < x1a or y2a < y1b or y2b < y1a
+                assert separated, f"pill {i} and pill {j} overlap"
 
     def test_positions_cover_every_element(self) -> None:
         files = [
@@ -786,9 +894,12 @@ class TestLayout:
         positions, _cells = _layout_positions(files)
         elapsed = time.monotonic() - started
         assert elapsed < 1.0
-        ys = [positions[f"file:M.F{i:02d}"]["y"] for i in range(30)]
-        assert ys == sorted(ys)
-        assert len(set(ys)) == 30
+        coords = [
+            (positions[f"file:M.F{i:02d}"]["x"], positions[f"file:M.F{i:02d}"]["y"])
+            for i in range(30)
+        ]
+        assert coords == sorted(coords)
+        assert len(set(coords)) == 30
 
     def test_deep_chain_exceeding_recursion_limit_does_not_overflow(self) -> None:
         depth = sys.getrecursionlimit() + 200
@@ -804,9 +915,12 @@ class TestLayout:
         assert len(closure) == depth
 
         positions, _cells = _layout_positions(closure)
-        ys = [positions[f"file:M.F{i:04d}"]["y"] for i in range(depth)]
-        assert ys == sorted(ys)
-        assert len(set(ys)) == depth
+        coords = [
+            (positions[f"file:M.F{i:04d}"]["x"], positions[f"file:M.F{i:04d}"]["y"])
+            for i in range(depth)
+        ]
+        assert coords == sorted(coords)
+        assert len(set(coords)) == depth
 
     def test_cyclic_manifest_terminates_cleanly(self) -> None:
         nodes = [

@@ -863,14 +863,8 @@ class TestLiveGraphPage:
         from datetime import datetime, timezone
 
         from axle_build_tool.graph import (
-            COSE_BASE_INTEGRITY,
-            COSE_BASE_URL,
             CYTOSCAPE_INTEGRITY,
             CYTOSCAPE_URL,
-            FCOSE_INTEGRITY,
-            FCOSE_URL,
-            LAYOUT_BASE_INTEGRITY,
-            LAYOUT_BASE_URL,
             graph_html,
         )
         from axle_build_tool.manifest import (
@@ -880,23 +874,16 @@ class TestLiveGraphPage:
             save_manifest,
         )
 
-        # Each pinned script's digest must equal the embedded SRI hash
+        # The pinned script's digest must equal the embedded SRI hash
         # (the supply-chain pin, checked on every live run).
-        pins = {
-            "cytoscape": (CYTOSCAPE_URL, CYTOSCAPE_INTEGRITY, "cytoscape.min.js"),
-            "layout-base": (LAYOUT_BASE_URL, LAYOUT_BASE_INTEGRITY, "layout-base.js"),
-            "cose-base": (COSE_BASE_URL, COSE_BASE_INTEGRITY, "cose-base.js"),
-            "cytoscape-fcose": (FCOSE_URL, FCOSE_INTEGRITY, "cytoscape-fcose.js"),
-        }
-        downloaded: dict[str, bytes] = {}
-        for name, (url, integrity, filename) in pins.items():
-            body = urllib.request.urlopen(url, timeout=60).read()
-            digest = "sha512-" + base64.b64encode(hashlib.sha512(body).digest()).decode()
-            assert digest == integrity, (
-                f"the pinned {name} script's digest no longer matches the SRI "
-                f"hash embedded in graph pages: {digest} vs {integrity}"
-            )
-            downloaded[name] = bytes(body)
+        body = urllib.request.urlopen(CYTOSCAPE_URL, timeout=60).read()
+        digest = "sha512-" + base64.b64encode(hashlib.sha512(body).digest()).decode()
+        assert digest == CYTOSCAPE_INTEGRITY, (
+            "the pinned cytoscape script's digest no longer matches the SRI "
+            f"hash embedded in graph pages: {digest} vs {CYTOSCAPE_INTEGRITY}"
+        )
+        cytoscape_path = tmp_path / "cytoscape.min.js"
+        cytoscape_path.write_bytes(bytes(body))
 
         # A manifest with the three stamp states; no API calls at all.
         now = datetime.now(timezone.utc)
@@ -945,46 +932,21 @@ class TestLiveGraphPage:
         page_path = Path.cwd() / ".axbt" / "graph.html"
         page_path.write_text(graph_html(manifest, manifest.nodes), encoding="utf-8")
 
-        # Lay the downloaded CDN files out as a module tree so the
-        # harness can require the real fcose (whose runtime deps bind
-        # to sibling node_modules) without an npm install.
-        modules_dir = tmp_path / "node_modules"
-        for name, (_, _, filename) in pins.items():
-            package = modules_dir / name
-            package.mkdir(parents=True)
-            (package / filename).write_bytes(downloaded[name])
-            (package / "package.json").write_text(
-                    json.dumps({"name": name, "main": filename}), encoding="utf-8"
-            )
-
-        def run_harness(*extra: str) -> subprocess.CompletedProcess:
-            return subprocess.run(
-                [
-                    "node",
-                    str(Path(__file__).parent / "graph_runtime_harness.js"),
-                    str(page_path),
-                    str(modules_dir / "cytoscape" / "cytoscape.min.js"),
-                    *extra,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-
-        # Full replay: fcose registered, every cluster force-spread.
-        result = run_harness(str(modules_dir / "cytoscape-fcose"))
+        result = subprocess.run(
+            [
+                "node",
+                str(Path(__file__).parent / "graph_runtime_harness.js"),
+                str(page_path),
+                str(cytoscape_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
         assert result.returncode == 0, (
             f"the generated page failed real Cytoscape ingestion:\n{result.stdout}\n{result.stderr}"
         )
-        assert "fcose replayed" in result.stdout
-
-        # Degradation path: a missing fcose CDN script must leave a
-        # page that still renders (preset stacks), not a blank canvas.
-        degraded = run_harness()
-        assert degraded.returncode == 0, (
-            f"the page's no-fcose degradation broke:\n{degraded.stdout}\n{degraded.stderr}"
-        )
-        assert "degraded preset" in degraded.stdout
+        assert "static layout replayed" in result.stdout
 
 
 class TestLiveTrimming:
