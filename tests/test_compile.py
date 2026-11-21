@@ -1239,3 +1239,59 @@ class TestElaborateProofsCompile:
         assert "UnknownType" in result.output
         assert ".axbt/failed/" in result.output
 
+
+class TestCompileEnvironmentResolution:
+    """Issue #57: compile resolves an unpinned environment once before
+    spawning concurrent extraction workers, and makes zero API calls when
+    all non-clean files are declaration-free."""
+
+    def test_unpinned_environment_resolves_once_across_concurrent_extractions(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        import asyncio
+
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {
+                "M/A.lean": "def a := 1\n",
+                "M/B.lean": "def b := 2\n",
+                "M/C.lean": "def c := 3\n",
+            },
+        )
+        monkeypatch.chdir(root)
+        orig_get_latest = fake_axle.get_latest_environment
+
+        async def slow_get_latest(**kwargs):
+            await asyncio.sleep(0.02)
+            return await orig_get_latest(**kwargs)
+
+        monkeypatch.setattr(fake_axle, "get_latest_environment", slow_get_latest)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        latest_calls = [m for m, _ in fake_axle.calls if m == "get_latest_environment"]
+        assert len(latest_calls) == 1
+
+    def test_declaration_free_only_compile_makes_zero_api_calls(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        pinned_config = (
+            "project:\n  name: proj\n"
+            "modules:\n  M: {}\n"
+            "axle:\n  environment: lean-4.35.0\n"
+        )
+        root = make_project(
+            tmp_path,
+            pinned_config,
+            {"M/Agg.lean": "/-! # Aggregate only -/\n"},
+        )
+        monkeypatch.chdir(root)
+
+        result = runner.invoke(main, ["compile"])
+
+        assert result.exit_code == 0, result.output
+        assert fake_axle.calls == []
+
+

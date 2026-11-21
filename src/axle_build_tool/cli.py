@@ -185,8 +185,6 @@ def _run_compile(
 
         async def extract() -> Manifest:
             async with service:
-                if carried < len(manifest.nodes):
-                    await service.validate_environment()
                 return await apply_extraction(service, manifest, project_root, previous=previous)
 
         manifest = asyncio.run(extract())

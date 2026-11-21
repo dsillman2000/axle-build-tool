@@ -30,6 +30,13 @@ class TestModuleConfig:
         assert config.modules["Foo"].dir == "Foo"
         assert config.modules["Foo"].targets == ()
 
+    def test_null_module_mapping_loads_like_empty_dict(self, tmp_path: Path) -> None:
+        write_config(tmp_path, "modules:\n  my_mod: {}\n")
+        expected = load_config(tmp_path)
+        write_config(tmp_path, "modules:\n  my_mod:\n")
+        actual = load_config(tmp_path)
+        assert actual == expected
+
     def test_explicit_dir_is_honored(self, tmp_path: Path) -> None:
         write_config(tmp_path, "modules:\n  Foo:\n    dir: sources/foo\n")
         config = load_config(tmp_path)

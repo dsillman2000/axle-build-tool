@@ -116,10 +116,14 @@ class _Document(BaseModel):
         # In YAML the module name is the mapping key, not a field of the
         # module config; lift it into the model before validation.
         if isinstance(value, dict):
-            return {
-                key: {"name": key, **cfg} if isinstance(cfg, dict) else cfg
-                for key, cfg in value.items()
-            }
+            normalized = {}
+            for key, cfg in value.items():
+                if cfg is None:
+                    cfg = {}
+                normalized[key] = (
+                    {"name": key, **cfg} if isinstance(cfg, dict) else cfg
+                )
+            return normalized
         return value
 
 
