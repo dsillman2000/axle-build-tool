@@ -270,6 +270,7 @@ def build_manifest(
                 imports=parse_imports(data.decode("utf-8", errors="replace")),
             )
             stem_index.setdefault(_dotted_stem(relative), []).append(node_name)
+            stem_index.setdefault(node_name, []).append(node_name)
 
     parents: dict[str, set[str]] = {name: set() for name in scanned}
     for node in scanned.values():

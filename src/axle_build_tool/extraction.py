@@ -659,6 +659,8 @@ async def apply_extraction(
 
     semaphore = asyncio.Semaphore(service.max_concurrency)
     if submitted:
+        await service.validate_environment()
+        await service.resolve_environment()
         # Gate each pending node on its pending parents so downstream
         # payloads see freshly extracted upstream declarations and
         # `stub_dependencies=True` actually stubs upstream proof bodies

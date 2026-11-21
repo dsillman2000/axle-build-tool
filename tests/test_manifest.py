@@ -143,6 +143,51 @@ class TestBuildManifest:
         # `import A` from M/B must resolve within M, not N.
         assert manifest.by_name()["M.B"].parents == ["M.A"]
 
+    def test_module_qualified_import_resolves_and_is_stripped_in_payload(
+        self, make_project, tmp_path: Path
+    ) -> None:
+        from axle_build_tool.payloads import build_payload
+
+        root = make_project(
+            tmp_path,
+            SIMPLE_CONFIG,
+            {
+                "M/Utils/Basic.lean": "def base := 1\n",
+                "M/Main.lean": "import Mathlib\nimport M.Utils.Basic\ndef top := base\n",
+            },
+        )
+        manifest = build_manifest(root, config_of(root))
+        by_name = manifest.by_name()
+        assert by_name["M.Main"].parents == ["M.Utils.Basic"]
+
+        payload = build_payload([by_name["M.Main"]], manifest, root)
+        assert "import M.Utils.Basic" not in payload.content
+        assert "import Mathlib" in payload.content
+        assert payload.content.index("def base := 1") < payload.content.index("def top := base")
+
+    def test_cross_module_qualified_import_resolves_unambiguously(
+        self, make_project, tmp_path: Path
+    ) -> None:
+        from axle_build_tool.payloads import build_payload
+
+        root = make_project(
+            tmp_path,
+            "modules:\n  ModA: {}\n  ModB: {}\n",
+            {
+                "ModA/Basic.lean": "def a_base := 1\n",
+                "ModB/Basic.lean": "def b_base := 2\n",
+                "ModA/Main.lean": "import ModB.Basic\ndef main_val := b_base\n",
+            },
+        )
+        manifest = build_manifest(root, config_of(root))
+        by_name = manifest.by_name()
+        assert by_name["ModA.Main"].parents == ["ModB.Basic"]
+
+        payload = build_payload([by_name["ModA.Main"]], manifest, root)
+        assert "import ModB.Basic" not in payload.content
+        assert "def b_base := 2" in payload.content
+        assert "def a_base := 1" not in payload.content
+
 
 class TestStatusTracking:
     def test_first_run_marks_all_nodes_new(self, simple_project: Path) -> None:

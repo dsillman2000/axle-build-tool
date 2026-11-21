@@ -348,9 +348,10 @@ def build_payload(
     for member in order:
         raw_source = (project_root / member.path).read_text(encoding="utf-8")
         internal_stems = {
-            dotted_stem_of(by_name[parent_name])
+            stem
             for parent_name in member.parents
             if parent_name in by_name
+            for stem in (dotted_stem_of(by_name[parent_name]), parent_name)
         }
         if stubbed and member.name in stubbed:
             stubbed_only = stubbed[member.name]
