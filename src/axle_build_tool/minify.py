@@ -27,8 +27,10 @@ The scan is a small state machine: string literals are tracked (a `--`
 or `/-` inside a string is text, not a comment), and char literals are
 consumed wholesale so a raw quote inside (`'"'`) cannot be mistaken for
 a string boundary; identifier-tailed apostrophes (`x'`) are plain
-characters. Newlines inside comments still advance the line accounting,
-so comment removal never joins lines — attribution stays exact.
+characters. Lean quoted identifiers (`«…»`) are consumed wholesale too,
+so comment markers inside a quoted name stay part of the token. Newlines
+inside comments still advance the line accounting, so comment removal
+never joins lines — attribution stays exact.
 
 Best-effort discipline: when the text does not track cleanly (an
 unterminated string or comment at end of input), `minify_lines` returns
@@ -49,7 +51,7 @@ from dataclasses import dataclass
 #: options material (via `signature_marker`), so a behavior change here
 #: invalidates stamps and the verify cache exactly once, instead of
 #: silently covering submissions shaped differently.
-MINIFIER_VERSION = 4
+MINIFIER_VERSION = 5
 
 
 def signature_marker(enabled: bool) -> str:
@@ -164,6 +166,21 @@ def minify_lines(source: str) -> Minified | None:
                 comment_had_newline = True
                 current += 1
             i += 1
+            continue
+
+        if c == "«":
+            # Lean quoted identifier: consume through its closing » as
+            # one token, so a comment marker inside a quoted name is
+            # never read as syntax. Quoted identifiers are single-line;
+            # an unterminated one falls back to the original source.
+            closing = source.find("»", i + 1)
+            newline = source.find("\n", i + 1)
+            if closing == -1 or (newline != -1 and closing > newline):
+                return None
+            end = closing + 1
+            text.append(source[i:end])
+            at_line_start = False
+            i = end
             continue
 
         if source.startswith("/-", i):

@@ -35,7 +35,9 @@ the replaced span and re-attach to the stub naturally.
 
 Limitation: spans come from the manifest, so a source edited after a
 compile (the `--no-compile` path) can make them misaligned; spans that
-fall outside the current source are skipped defensively.
+fall outside the current source, start on anything but a declaration
+head (or its docstring), or end in the middle of a body are skipped
+defensively with a warning.
 """
 
 from __future__ import annotations
@@ -111,7 +113,10 @@ def _span_head_matches(line: str, kind: str) -> bool:
     means the manifest is out of date with the source.
     """
     stripped = line.lstrip()
-    if stripped.startswith("/-"):
+    if stripped.startswith("/--"):
+        # Snap fallback: extraction recorded the declaration's docstring
+        # line. Only a docstring opener is plausible here — an arbitrary
+        # block comment (`/- Section -/`) is not a declaration head.
         return True
     match = DECLARATION_HEAD.match(stripped)
     return match is not None and match.group("kind") == kind
@@ -143,6 +148,33 @@ def bare_name(declaration: ExtractedDecl) -> str:
     return declaration.name.rsplit(".", 1)[-1]
 
 
+def _span_end_matches(lines: list[str], start: int, end: int) -> bool:
+    """Whether `[start:end)` ends at a plausible declaration boundary.
+
+    Extraction reports one-based inclusive line numbers; the caller uses
+    them as a half-open 0-based slice. An end that drifted one line short
+    leaves the final proof line behind the stub, and an end that drifted
+    too far swallows the next declaration's header. Both are stale-manifest
+    tells, so the span must be skipped rather than submitted half-stubbed.
+    """
+    if end >= len(lines):
+        return True  # end of file is a clean boundary
+    if end - 1 > start and DECLARATION_HEAD.match(lines[end - 1].lstrip()):
+        return False  # span swallows a following declaration's header
+    following = lines[end].lstrip()
+    if not following or following.startswith(("--", "/-", "-/")):
+        return True
+    if DECLARATION_HEAD.match(following) or re.match(
+        r"^(?:end|namespace|section|open|variable|attribute|set_option|axiom)\b",
+        following,
+    ):
+        return True
+    # An indented line that is not a new command is an orphaned proof
+    # body: the manifest's end line has drifted. Unindented continuation
+    # lines are left alone to keep this check conservative.
+    return not lines[end][:1].isspace()
+
+
 def stubbed_source(
     node: ManifestNode,
     source: str,
@@ -154,10 +186,11 @@ def stubbed_source(
     `only` restricts stubbing to those declaration names; by default
     every proof declaration (`PROOF_KINDS`) in the node is stubbed —
     def/abbrev grants keep their real bodies. Spans that overlap, are
-    inverted, fall outside the current source, or don't start where the
-    declaration's keyword should be are left in place (defensive
-    against stale manifests) — when `warnings` is given, each skip
-    appends a message there naming the file and the prescription.
+    inverted, fall outside the current source, don't start where the
+    declaration's keyword should be, or end in the middle of its body
+    are left in place (defensive against stale manifests) — when
+    `warnings` is given, each skip appends a message there naming the
+    file and the prescription.
     """
     lines = source.splitlines()
     out: list[str] = []
@@ -175,6 +208,7 @@ def stubbed_source(
             or start >= end
             or end > len(lines)
             or not _span_head_matches(lines[start], declaration.kind)
+            or not _span_end_matches(lines, start, end)
         )
         if stale:
             if warnings is not None:
