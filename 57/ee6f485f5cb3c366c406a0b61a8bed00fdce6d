@@ -1,0 +1,23 @@
+src/axle_build_tool/minify.py
+  s_0f546aacc38806::t_928b753a56b9ed 171-185
+  s_0f546aacc38806::t_0caaa054799f06 54
+  s_0f546aacc38806::t_50b6719285c467 30-33
+tests/test_minify.py
+  s_0f546aacc38806::t_d104f3a47ba022 83-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "57ee6f485f5cb3c366c406a0b61a8bed00fdce6d",
+  "prompts": {},
+  "sessions": {
+    "s_0f546aacc38806": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_def9d39ffffeUvyCWh9TpQc509",
+        "model": "hy4-flash-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
