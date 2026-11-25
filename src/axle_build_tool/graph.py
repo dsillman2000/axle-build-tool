@@ -1251,6 +1251,9 @@ def build_graph_data(
             "group": "module",
             "id": f"module:{module}",
             "label": module,
+            "module": module,
+            "file_count": len(files_of_module[module]),
+            "decl_count": len(module_states[module]),
             "parent": None,
             "state": rollup_state(module_states[module]),
             "changed": False,
@@ -1791,6 +1794,34 @@ _HTML_TEMPLATE = """<!doctype html>
     #legend.dock-side:not(.full), #legend.dock-side.has-selection:not(.full), #legend.dock-bottom:not(.full) {
       left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 52vh; border-radius: 12px 12px 0 0; }
   }
+  #module-filter { position: fixed; top: 12px; right: 12px; z-index: 31; background: rgba(15, 23, 42, 0.96);
+                   border: 1px solid #263859; border-radius: 10px; padding: 8px 12px 10px; font-family: var(--serif-font);
+                   font-size: 13.5px; line-height: 1.45; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.54);
+                   backdrop-filter: blur(8px); min-width: 210px; max-width: 310px; box-sizing: border-box; }
+  #module-filter.collapsed { padding-bottom: 8px; min-width: 0; }
+  #module-filter.collapsed .mf-body { display: none; }
+  #module-filter .mf-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #module-filter .mf-title-wrap { display: flex; align-items: baseline; gap: 6px; }
+  #module-filter .mf-title { font-weight: 700; font-size: 14px; color: #f8fafc; }
+  #module-filter .mf-count { font-size: 11.5px; color: #8aa0c4; font-family: ui-monospace, monospace; }
+  #module-filter .mf-actions { display: flex; align-items: center; gap: 4px; }
+  #module-filter .mf-btn { font: 500 11.5px/1.3 ui-sans-serif, system-ui, sans-serif; color: #cbd8ec;
+                           background: #16233b; border: 1px solid #2e4369; border-radius: 4px;
+                           padding: 2px 7px; cursor: pointer; white-space: nowrap; }
+  #module-filter .mf-btn:hover { border-color: #38bdf8; color: #ffffff; background: #1d3254; }
+  #module-filter .mf-list { margin-top: 7px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+  #module-filter .mf-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+                            padding: 4px 7px; border-radius: 5px; background: #131d31; border: 1px solid #223454;
+                            cursor: pointer; user-select: none; }
+  #module-filter .mf-item:hover { border-color: #38bdf8; background: #172540; }
+  #module-filter .mf-item.off { opacity: 0.48; background: #0e1626; border-color: #1a2740; }
+  #module-filter .mf-item.off .mf-name { text-decoration: line-through; }
+  #module-filter .mf-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  #module-filter .mf-left input { margin: 0; accent-color: #38bdf8; cursor: pointer; }
+  #module-filter .mf-left .chip { margin-right: 0; }
+  #module-filter .mf-name { font-family: ui-monospace, monospace; font-size: 12.5px; font-weight: 600; color: #f0f6fc;
+                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #module-filter .mf-meta { font-family: ui-monospace, monospace; font-size: 11px; color: #7e95ba; flex-shrink: 0; }
   #tooltip { position: fixed; z-index: 8; display: none; max-width: 420px; background: #0f172a;
              border: 1px solid #2e4369; border-radius: 8px; padding: 9px 12px; font-family: var(--serif-font);
              font-size: 13.5px; line-height: 1.6; color: #e2ecf8; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); pointer-events: none; }
@@ -1803,6 +1834,22 @@ _HTML_TEMPLATE = """<!doctype html>
 <body>
 <div id="graph"></div>
 <div id="tooltip"></div>
+<div id="module-filter">
+  <div class="mf-head">
+    <div class="mf-title-wrap">
+      <span class="mf-title">Modules</span>
+      <span id="module-filter-count" class="mf-count"></span>
+    </div>
+    <div class="mf-actions">
+      <button type="button" class="mf-btn" id="module-filter-all" title="Show all modules">All</button>
+      <button type="button" class="mf-btn" id="module-filter-none" title="Hide all modules">None</button>
+      <button type="button" class="mf-btn" id="module-filter-toggle" title="Collapse or expand module selector">Hide</button>
+    </div>
+  </div>
+  <div class="mf-body">
+    <div id="module-filter-list" class="mf-list"></div>
+  </div>
+</div>
 <div id="legend" class="drawer dock-bottom">
 __AXBT_LEGEND__
 </div>
@@ -1897,9 +1944,11 @@ __AXBT_LEGEND__
 
   // Copy initial preset positions so reset restores the exact build-time layout.
   var initialPositions = {};
+  var currentPositions = {};
   cy.nodes().forEach(function (node) {
     if (!node.isParent()) {
       initialPositions[node.id()] = { x: node.position("x"), y: node.position("y") };
+      currentPositions[node.id()] = { x: node.position("x"), y: node.position("y") };
     }
   });
 
@@ -1921,6 +1970,8 @@ __AXBT_LEGEND__
   var hasSelection = false;
   var acMatches = [];
   var activeAcIndex = -1;
+  var hiddenModules = {};
+  var moduleFilterCollapsed = false;
   var drawer = document.getElementById("legend");
   var drawerResizer = document.getElementById("drawer-resizer");
   var toggleDockBtn = document.getElementById("toggle-dock");
@@ -1931,6 +1982,13 @@ __AXBT_LEGEND__
   var searchInput = document.getElementById("search-nodes");
   var searchCount = document.getElementById("search-count");
   var searchAutocomplete = document.getElementById("search-autocomplete");
+  var moduleFilter = document.getElementById("module-filter");
+  var moduleFilterList = document.getElementById("module-filter-list");
+  var moduleFilterCount = document.getElementById("module-filter-count");
+  var moduleFilterAllBtn = document.getElementById("module-filter-all");
+  var moduleFilterNoneBtn = document.getElementById("module-filter-none");
+  var moduleFilterToggleBtn = document.getElementById("module-filter-toggle");
+  var sidebarCountsEl = drawer && drawer.querySelector ? drawer.querySelector(".sidebar-counts") : null;
   var depsHidden = declToggle ? !declToggle.checked : true;
   var transHidden = transToggle ? !transToggle.checked : true;
 
@@ -2926,6 +2984,9 @@ __AXBT_LEGEND__
       hideAutocomplete();
       if (searchCount) { searchCount.textContent = ""; }
       clearMark();
+      Object.keys(initialPositions).forEach(function (id) {
+        currentPositions[id] = { x: initialPositions[id].x, y: initialPositions[id].y };
+      });
       cy.batch(function () {
         cy.nodes().forEach(function (node) {
           var preset = initialPositions[node.id()];
@@ -2935,6 +2996,172 @@ __AXBT_LEGEND__
       spreadFileClusters();
       cy.fit(undefined, 40);
     });
+  }
+
+  // -- top-right module multiselect filter -------------------------------
+  var moduleSpecs = payload.nodes.filter(function (n) { return n.group === "module"; });
+
+  function updateModuleFilterUI() {
+    var totalMods = moduleSpecs.length;
+    var activeMods = 0;
+    for (var i = 0; i < totalMods; i++) {
+      if (!hiddenModules[moduleSpecs[i].module || moduleSpecs[i].label]) {
+        activeMods++;
+      }
+    }
+    if (moduleFilterCount) {
+      moduleFilterCount.textContent = activeMods + "/" + totalMods;
+    }
+    if (moduleFilter) {
+      moduleFilter.className = moduleFilterCollapsed ? "collapsed" : "";
+    }
+    if (moduleFilterToggleBtn) {
+      moduleFilterToggleBtn.textContent = moduleFilterCollapsed ? "Show" : "Hide";
+    }
+    if (moduleFilterList && moduleFilterList.querySelectorAll) {
+      var rows = moduleFilterList.querySelectorAll(".mf-item");
+      for (var r = 0; r < rows.length; r++) {
+        var rowMod = rows[r].getAttribute("data-module");
+        var isOff = !!hiddenModules[rowMod];
+        if (isOff) { rows[r].classList.add("off"); } else { rows[r].classList.remove("off"); }
+        var cb = rows[r].querySelector("input.mf-checkbox");
+        if (cb) { cb.checked = !isOff; }
+      }
+    }
+    if (sidebarCountsEl) {
+      var visFiles = cy.nodes('[group = "file"]').length;
+      var visDecls = cy.nodes('[group = "declaration"]').length;
+      sidebarCountsEl.textContent = visFiles + " files \u00b7 " + visDecls + " decls";
+    }
+  }
+
+  function syncVisibleModules() {
+    // Save current positions of any active leaf nodes before removing modules.
+    cy.nodes().forEach(function (node) {
+      if (!node.isParent()) {
+        currentPositions[node.id()] = { x: node.position("x"), y: node.position("y") };
+      }
+    });
+    var prevTargetId = currentTarget && currentTarget.id ? currentTarget.id() : null;
+
+    cy.batch(function () {
+      // Remove nodes (and incident edges) belonging to turned-off modules so
+      // Cytoscape skips them completely during rendering and hit-testing.
+      var toRemove = cy.nodes().filter(function (node) {
+        var mod = node.data("module") || node.data("label");
+        return !!hiddenModules[mod];
+      });
+      if (toRemove.length > 0) {
+        toRemove.remove();
+      }
+
+      // Restore nodes of active modules in payload order (module -> file -> decl).
+      for (var i = 0; i < payload.nodes.length; i++) {
+        var nData = payload.nodes[i];
+        var nMod = nData.module || nData.label;
+        if (hiddenModules[nMod]) { continue; }
+        if (cy.getElementById(nData.id).length === 0) {
+          var pos = currentPositions[nData.id] || nData.position;
+          cy.add({
+            group: "nodes",
+            data: Object.assign({}, nData),
+            classes: nData.state,
+            position: pos ? { x: pos.x, y: pos.y } : undefined
+          });
+        }
+      }
+
+      // Restore edges whose endpoints are both present in the active graph.
+      for (var j = 0; j < payload.edges.length; j++) {
+        var eData = payload.edges[j];
+        if (cy.getElementById(eData.id).length === 0 &&
+            cy.getElementById(eData.source).length > 0 &&
+            cy.getElementById(eData.target).length > 0) {
+          var eCls = eData.kind + (eData.transitive ? " transitive" : "");
+          cy.add({
+            group: "edges",
+            data: Object.assign({}, eData),
+            classes: eCls
+          });
+        }
+      }
+    });
+
+    updateModuleFilterUI();
+
+    if (prevTargetId) {
+      var restoredTarget = cy.getElementById(prevTargetId);
+      if (restoredTarget && restoredTarget.length > 0) {
+        selectElement(restoredTarget);
+      } else {
+        clearMark();
+      }
+    } else {
+      refreshEdgeVisibility();
+    }
+  }
+
+  function buildModuleFilterList() {
+    if (!moduleFilterList) { return; }
+    var htmlRows = [];
+    for (var i = 0; i < moduleSpecs.length; i++) {
+      var m = moduleSpecs[i];
+      var modName = m.module || m.label;
+      var fCount = typeof m.file_count === "number" ? m.file_count : 0;
+      var dCount = typeof m.decl_count === "number" ? m.decl_count : 0;
+      htmlRows.push(
+        '<label class="mf-item" data-module="' + escapeHtml(modName) + '">' +
+        '<span class="mf-left">' +
+        '<input type="checkbox" class="mf-checkbox" data-module="' + escapeHtml(modName) + '" checked>' +
+        '<span class="chip ' + escapeHtml(m.state) + '"></span>' +
+        '<span class="mf-name">' + escapeHtml(modName) + '</span>' +
+        '</span>' +
+        '<span class="mf-meta">' + fCount + 'f \u00b7 ' + dCount + 'd</span>' +
+        '</label>'
+      );
+    }
+    moduleFilterList.innerHTML = htmlRows.join("");
+    if (moduleFilterList.querySelectorAll) {
+      var boxes = moduleFilterList.querySelectorAll("input.mf-checkbox");
+      for (var k = 0; k < boxes.length; k++) {
+        boxes[k].addEventListener("change", function () {
+          var mod = this.getAttribute("data-module");
+          if (this.checked) {
+            delete hiddenModules[mod];
+          } else {
+            hiddenModules[mod] = true;
+          }
+          syncVisibleModules();
+        });
+      }
+    }
+    updateModuleFilterUI();
+  }
+
+  buildModuleFilterList();
+  if (moduleFilterAllBtn && moduleFilterAllBtn.addEventListener) {
+    moduleFilterAllBtn.addEventListener("click", function () {
+      hiddenModules = {};
+      syncVisibleModules();
+    });
+  }
+  if (moduleFilterNoneBtn && moduleFilterNoneBtn.addEventListener) {
+    moduleFilterNoneBtn.addEventListener("click", function () {
+      for (var i = 0; i < moduleSpecs.length; i++) {
+        var modName = moduleSpecs[i].module || moduleSpecs[i].label;
+        hiddenModules[modName] = true;
+      }
+      syncVisibleModules();
+    });
+  }
+  if (moduleFilterToggleBtn && moduleFilterToggleBtn.addEventListener) {
+    moduleFilterToggleBtn.addEventListener("click", function () {
+      moduleFilterCollapsed = !moduleFilterCollapsed;
+      updateModuleFilterUI();
+    });
+  }
+  if (moduleFilter && moduleFilter.addEventListener) {
+    moduleFilter.addEventListener("mouseenter", function () { tooltip.style.display = "none"; });
   }
 
   if (toggleDockBtn && toggleDockBtn.addEventListener) {

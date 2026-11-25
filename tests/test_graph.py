@@ -1140,6 +1140,18 @@ class TestSearchInspectorAndDocs:
         assert "#legend.dock-side { top: 0; left: 0; bottom: 0;" in html_text
         assert "#legend.dock-side > .drawer-resizer { cursor: ew-resize; width: 8px; top: 0; bottom: 0; right: 0; }" in html_text
         assert "dock-bottom" in html_text
+        assert "#module-filter { position: fixed; top: 12px; right: 12px;" in html_text
+        assert 'id="module-filter"' in html_text
+        assert 'id="module-filter-list"' in html_text
+        assert 'id="module-filter-all"' in html_text
+        assert 'id="module-filter-none"' in html_text
+        assert 'id="module-filter-toggle"' in html_text
+        assert "syncVisibleModules" in html_text
+        assert "buildModuleFilterList" in html_text
+        mod_node = by_id(data, "module:M")
+        assert mod_node["module"] == "M"
+        assert mod_node["file_count"] == 1
+        assert mod_node["decl_count"] == 2
         assert "insp-subgraph-view" in html_text
         assert "subgraph-canvas" in html_text
         assert "insp-doc" in html_text
