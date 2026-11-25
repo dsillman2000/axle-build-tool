@@ -1,0 +1,21 @@
+.github/workflows/demo.yml
+  s_ba1fbe0817b138::t_fe9ad538ba7c1a 22-24,28
+AGENTS.md
+  s_ba1fbe0817b138::t_a202e4a6b27b79 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "6db8235c10b09bbb5bf25672272b2a7fe4b01130",
+  "prompts": {},
+  "sessions": {
+    "s_ba1fbe0817b138": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_debe99987ffeXuc3yXP6MLDZnH",
+        "model": "hy4-flash-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
