@@ -1,0 +1,26 @@
+tests/test_stubbing.py
+  s_0f546aacc38806::t_a997f8e448b18e 456-504
+  s_0f546aacc38806::t_ec3b6817363df1 569-570,572-573
+src/axle_build_tool/stubbing.py
+  s_0f546aacc38806::t_f6d1b26e1e55fe 211
+  s_0f546aacc38806::t_3e7b86788846de 189-193
+  s_0f546aacc38806::t_8a85319eda723c 38-40
+  s_0f546aacc38806::t_fd489748983213 151-177
+  s_0f546aacc38806::t_5d08ef470ce89b 116-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "7929352ed74fc93f279ab652819cdb54bbf26a31",
+  "prompts": {},
+  "sessions": {
+    "s_0f546aacc38806": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_def9d39ffffeUvyCWh9TpQc509",
+        "model": "hy4-flash-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
