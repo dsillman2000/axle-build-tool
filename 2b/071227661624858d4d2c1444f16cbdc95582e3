@@ -1,0 +1,20 @@
+README.md
+  h_4cc74772b10fd4 79,156,171-172
+src/axle_build_tool/cli.py
+  h_4cc74772b10fd4 34-42,2867-2890,2905,2929-2954
+src/axle_build_tool/graph.py
+  h_4cc74772b10fd4 42-43,47-48,51,573-576,1501-1614,1638-1639,1648,1656,2968
+tests/test_graph.py
+  h_4cc74772b10fd4 1140-1141,1220-1407
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "2b071227661624858d4d2c1444f16cbdc95582e3",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
