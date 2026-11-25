@@ -453,6 +453,55 @@ class TestUnderStubbingWarnings:
         assert "'t' could not be stubbed" in warnings[0]
         assert "run `axbt compile`" in warnings[0]
 
+    def test_arbitrary_block_comment_head_warns_and_is_skipped(self) -> None:
+        """A `/- Section -/` header is not a declaration head; accepting
+        it would stub the comment and orphan the real declaration."""
+        node = stubbed_node([decl("t", "theorem", 1, 2, "theorem t : 1 = 1")])
+        source = "/- Section -/\ntheorem t : 1 = 1 := rfl\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert result == source
+        assert len(warnings) == 1
+        assert "'t' could not be stubbed" in warnings[0]
+        assert "run `axbt compile`" in warnings[0]
+
+    def test_end_drift_leaving_orphan_line_warns_and_is_skipped(self) -> None:
+        """The manifest's end line is one short: stubbing would leave the
+        last proof line behind the stub instead of replacing it."""
+        node = stubbed_node([decl("t", "theorem", 1, 2, "theorem t : True")])
+        source = "theorem t : True := by\n  simp\n  trivial\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert result == source
+        assert len(warnings) == 1
+        assert "'t' could not be stubbed" in warnings[0]
+
+    def test_span_swallowing_next_declaration_is_skipped(self) -> None:
+        """An end line one too long would erase the next declaration's
+        header along with the intended proof body."""
+        node = stubbed_node([decl("t", "theorem", 1, 3, "theorem t : True")])
+        source = "theorem t : True := by\n  trivial\ntheorem u : True := by\n  trivial\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert result == source
+        assert len(warnings) == 1
+
+    def test_span_ending_before_another_declaration_still_stubs(self) -> None:
+        node = stubbed_node([decl("t", "theorem", 1, 2, "theorem t : True")])
+        source = "theorem t : True := by\n  trivial\ntheorem u : True := by\n  trivial\n"
+        warnings: list[str] = []
+
+        result = stubbed_source(node, source, warnings=warnings)
+
+        assert result == "theorem t : True := by sorry\ntheorem u : True := by\n  trivial\n"
+        assert warnings == []
+
     def test_out_of_range_span_warns(self) -> None:
         node = stubbed_node([decl("t", "theorem", 9, 10, "theorem t : 1 = 1")])
         warnings: list[str] = []
@@ -517,8 +566,11 @@ class TestSpanHeadMatches:
         assert not _span_head_matches("private theorem twoPowSq : …", "def")
         assert not _span_head_matches("rw [twoPow]", "theorem")
         assert not _span_head_matches("end KaratsubaSqrt", "theorem")
-        # The docstring fallback stays accepted (extraction's own record).
+        # Only the docstring fallback stays accepted (extraction's own
+        # record); an arbitrary block comment is not a declaration head.
         assert _span_head_matches("  /-- docstring -/", "theorem")
+        assert not _span_head_matches("/- Section -/", "theorem")
+        assert not _span_head_matches("/-! header -/", "theorem")
 
 
 class TestTransformMemberSourcePartition:
