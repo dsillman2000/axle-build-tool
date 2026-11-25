@@ -1,0 +1,13 @@
+project:
+  name: "NewtonRaphsonCC"
+  version: "0.1.0"
+
+modules:
+  NewtonRaphsonCC:
+    dir: "NewtonRaphsonCC"
+
+axle:
+  environment: "cslib"
+  timeout_seconds: 300
+  global_options:
+    maxHeartbeats: 400000
