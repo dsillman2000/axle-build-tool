@@ -15,7 +15,7 @@
 - `src/axle_build_tool/selection.py` — `--select` grammar: `module[.file-stem[.declaration]]` (greedy stem, unique-suffix decl match).
 - `src/axle_build_tool/graph.py` — offline Cytoscape.js `graph.html` generation (outcome-stamp-keyed colors; the only external asset is a pinned CDN script). `--select`/closure reuse mirrors `axbt list`.
 - `tests/` — pytest suite; `tests/conftest.py` has `FakeAxleClient` (the offline API fake) and assertion helpers (`status_line`, `normalized_lines`).
-- `demos/small/` — integration-only demo projects (`RootTwoIrrational`, `GaussIntSum`); exercised by `.github/workflows/demo.yml`.
+- `demos/small/`, `demos/medium/` — integration-only demo projects (`small/RootTwoIrrational`, `small/GaussIntSum`, `medium/NewtonRaphsonCC`); exercised by `.github/workflows/demo.yml`.
 
 ## Commands
 
