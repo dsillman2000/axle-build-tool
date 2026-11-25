@@ -80,6 +80,29 @@ class TestStringAndCharLiterals:
         assert text(source) == source
 
 
+class TestQuotedIdentifiers:
+    def test_comment_markers_inside_quoted_identifiers_survive(self) -> None:
+        # «foo--bar» and «a /- b» are Lean identifiers, not comments:
+        # the whole token must reach the payload unchanged.
+        assert text("def «foo--bar» : Nat := 1\n") == "def «foo--bar» : Nat := 1\n"
+        assert text("def «a /- b» : Nat := 1\n") == "def «a /- b» : Nat := 1\n"
+
+    def test_quoted_identifier_keeps_internal_whitespace(self) -> None:
+        source = "theorem t : «a   b» = «a   b» := rfl\n"
+        assert text(source) == source
+
+    def test_real_comments_after_quoted_identifiers_are_still_stripped(self) -> None:
+        source = "def «foo--bar» : Nat := 1 -- note /- not a comment -/\nfoo := 2\n"
+        assert text(source) == "def «foo--bar» : Nat := 1\nfoo := 2\n"
+
+    def test_unterminated_quoted_identifier_returns_none(self) -> None:
+        assert minify_lines("def «foo : Nat := 1\n") is None
+
+    def test_quoted_identifier_inside_a_string_is_untouched(self) -> None:
+        source = 'x := "«foo--bar»" -- note\nfoo := 1\n'
+        assert text(source) == 'x := "«foo--bar»"\nfoo := 1\n'
+
+
 class TestDocstrings:
     def test_declaration_docstrings_are_stripped(self) -> None:
         source = (
