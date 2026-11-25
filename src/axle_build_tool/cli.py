@@ -31,7 +31,15 @@ from axle_build_tool.config import (
     scaffold_config,
 )
 from axle_build_tool.extraction import ExtractionError, apply_extraction
-from axle_build_tool.graph import build_graph_data, rendered_nodes, write_graph
+from axle_build_tool.graph import (
+    DEFAULT_GRAPH_HOST,
+    DEFAULT_GRAPH_PORT,
+    build_graph_data,
+    create_graph_server,
+    detect_network_ips,
+    rendered_nodes,
+    write_graph,
+)
 from axle_build_tool.manifest import (
     MANIFEST_VERSION,
     ExtractedDecl,
@@ -2856,7 +2864,30 @@ def list_declarations(select: str | None) -> None:
     default=None,
     help="Write the graph HTML to PATH instead of .axbt/graph.html.",
 )
-def graph(select: str | None, output: Path | None) -> None:
+@click.option(
+    "--serve",
+    "serve",
+    is_flag=True,
+    default=False,
+    help=(
+        f"Host the generated graph HTML over HTTP on "
+        f"{DEFAULT_GRAPH_HOST}:<port> after writing it."
+    ),
+)
+@click.option(
+    "--port",
+    "port",
+    type=click.IntRange(1, 65535),
+    default=DEFAULT_GRAPH_PORT,
+    show_default=True,
+    help="Port to bind when --serve is passed.",
+)
+def graph(
+    select: str | None,
+    output: Path | None,
+    serve: bool = False,
+    port: int = DEFAULT_GRAPH_PORT,
+) -> None:
     """Render the manifest as an offline, interactive HTML graph (Cytoscape.js).
 
     A read-only visualization of .axbt/manifest.json, exactly like
@@ -2871,6 +2902,7 @@ def graph(select: str | None, output: Path | None) -> None:
     and no API calls are made.
 
     The output defaults to .axbt/graph.html; pass -o to write anywhere.
+    Pass --serve to host the generated HTML on 0.0.0.0:4099 (or --port).
     """
     project_root = _project_root()
     try:
@@ -2894,3 +2926,29 @@ def graph(select: str | None, output: Path | None) -> None:
         f"{counts['files']} file(s), {counts['declarations']} declaration(s), "
         f"{counts['edges']} edge(s))"
     )
+
+    if not serve:
+        return
+
+    try:
+        server = create_graph_server(out, host=DEFAULT_GRAPH_HOST, port=port)
+    except OSError as exc:
+        raise click.ClickException(
+            f"Could not start graph server on {DEFAULT_GRAPH_HOST}:{port}: {exc}"
+        ) from exc
+
+    bound_port = int(server.server_address[1])
+    network_ips = detect_network_ips()
+    click.echo(
+        f"Serving graph on {DEFAULT_GRAPH_HOST}:{bound_port} (Press Ctrl+C to stop)"
+    )
+    click.echo(f"  Local:   http://127.0.0.1:{bound_port}")
+    for ip in network_ips:
+        click.echo(f"  Network: http://{ip}:{bound_port}")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nStopped graph server.")
+    finally:
+        server.server_close()

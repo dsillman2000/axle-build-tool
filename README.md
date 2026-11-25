@@ -76,7 +76,7 @@ axle:
 | `axbt verify` | Kernel-level tier: the same machinery, but proofs are checked rigorously against formal statements (theorems only); rejects `sorry` and axiom-based proofs. A fully cached selection skips submission (`OK (cached)`). For final validation, release gates, and CI. Successful verifications are recorded separately from check outcomes. |
 | `axbt build` | Both tiers in one run, dbt-style: the check tier streams first, then the verify tier — skipping the selections whose check failed — and the run exits nonzero if either tier failed. Verdict rows carry a `[check]`/`[verify]` tier suffix so the two passes tell apart. |
 | `axbt list` | Print the parsed declaration tree — kinds, file-accurate positions, `sorry` markers — dependencies first. Offline and read-only. |
-| `axbt graph` | Render the manifest as an offline, interactive Cytoscape.js HTML graph (default `.axbt/graph.html`; `--select` filters the subgraph). Colors key on outcome stamps only. No API calls. |
+| `axbt graph` | Render the manifest as an offline, interactive Cytoscape.js HTML graph (default `.axbt/graph.html`; `--select` filters the subgraph; `--serve` hosts it on `0.0.0.0:4099` or `--port`). Colors key on outcome stamps only. No API calls. |
 | `axbt debug` | Verify `AXLE_API_KEY` is set and accepted by the API; print the project's configuration and `.axbt/` cache state. |
 
 Run modes (shared by `compile`, `check`, `verify`, `build`):
@@ -153,7 +153,7 @@ The two tiers are distinct facts: a `sorry` passes check and fails verify, so `c
 
 ### Visualizing the manifest
 
-`axbt graph [--select SELECTOR] [-o PATH]` renders `.axbt/manifest.json` as a single-file
+`axbt graph [--select SELECTOR] [-o PATH] [--serve] [--port PORT]` renders `.axbt/manifest.json` as a single-file
 Cytoscape.js HTML visualization — pan/zoom, hover tooltips, live auto-complete search across files,
 declarations, signatures, and comments, and click to highlight a node's transitive upstream (light blue)
 and downstream (light pink) dependency cone while opening a dockable side/bottom detail panel with
@@ -168,6 +168,8 @@ declaration-to-declaration dependency arrows toggleable on demand.
 ```bash
 axbt graph                              # whole manifest -> .axbt/graph.html
 axbt graph --select my-project.Utils    # one file + its dependency closure
+axbt graph --serve                      # generate and host on 0.0.0.0:4099 (prints 127.0.0.1 and LAN URLs)
+axbt graph --serve --port 8080          # generate and host on 0.0.0.0:8080
 ```
 
 Colors are read straight from the manifest's per-declaration outcome stamps — nothing is inferred:

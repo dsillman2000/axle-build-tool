@@ -39,11 +39,16 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 import html
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 from pathlib import Path
 import re
+import socket
+import subprocess
 import textwrap
 from typing import Any
+from urllib.parse import urlsplit
 
 from axle_build_tool.config import CACHE_DIRNAME
 from axle_build_tool.manifest import Manifest, ManifestNode, closure_nodes
@@ -564,6 +569,10 @@ def render_markdown_latex(text: str) -> str:
 
 #: Generated graph artifacts live in the cache alongside the payloads.
 GRAPH_FILENAME = "graph.html"
+
+#: Default bind host and port for `axbt graph --serve`.
+DEFAULT_GRAPH_HOST = "0.0.0.0"
+DEFAULT_GRAPH_PORT = 4099
 
 #: The page's single external script from a CDN (pinned version; SRI
 #: hash computed from the served bytes) — never bundled into axbt,
@@ -1489,6 +1498,120 @@ def write_graph(
     return out, data["counts"]
 
 
+def detect_network_ips() -> list[str]:
+    """Discover non-loopback IPv4 LAN addresses for this machine.
+
+    Uses UDP routing-table probes (which send no packets on the wire),
+    hostname address resolution, and `ifconfig` interface inspection so
+    private LAN addresses such as `10.0.0.x` are found reliably without
+    external traffic.
+    """
+    candidates: list[str] = []
+    for target in ("10.255.255.255", "192.168.255.255", "172.16.255.255", "8.8.8.8"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect((target, 1))
+                ip = sock.getsockname()[0]
+                if ip:
+                    candidates.append(ip)
+        except OSError:
+            continue
+
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, family=socket.AF_INET):
+            ip = info[4][0]
+            if ip:
+                candidates.append(ip)
+    except OSError:
+        pass
+
+    try:
+        proc = subprocess.run(
+            ["ifconfig"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout:
+            candidates.extend(
+                re.findall(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b", proc.stdout)
+            )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    seen: set[str] = set()
+    private_ten: list[str] = []
+    other_private: list[str] = []
+    other_valid: list[str] = []
+    for raw in candidates:
+        if raw in seen:
+            continue
+        seen.add(raw)
+        try:
+            addr = ipaddress.IPv4Address(raw)
+        except ipaddress.AddressValueError:
+            continue
+        if addr.is_loopback or addr.is_unspecified or addr.is_link_local or addr.is_multicast:
+            continue
+        if raw.startswith("10."):
+            private_ten.append(raw)
+        elif addr.is_private:
+            other_private.append(raw)
+        else:
+            other_valid.append(raw)
+    return [*private_ten, *other_private, *other_valid]
+
+
+class _ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def create_graph_server(
+    graph_file: Path,
+    host: str = DEFAULT_GRAPH_HOST,
+    port: int = DEFAULT_GRAPH_PORT,
+    *,
+    bind_and_activate: bool = True,
+) -> ThreadingHTTPServer:
+    """Create a static HTTP server hosting the rendered `graph_file` HTML."""
+    body = graph_file.read_bytes()
+    allowed_paths = {"/", "/index.html", f"/{graph_file.name}"}
+
+    class _GraphRequestHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self._handle_request(send_body=True)
+
+        def do_HEAD(self) -> None:
+            self._handle_request(send_body=False)
+
+        def _handle_request(self, *, send_body: bool) -> None:
+            req_path = urlsplit(self.path).path or "/"
+            if req_path not in allowed_paths:
+                self.send_response(404)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", "9")
+                self.end_headers()
+                if send_body:
+                    self.wfile.write(b"Not Found")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if send_body:
+                self.wfile.write(body)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            return
+
+    return _ReusableThreadingHTTPServer(
+        (host, port), _GraphRequestHandler, bind_and_activate=bind_and_activate
+    )
+
+
 # --- The page template ---------------------------------------------------
 # Plain string with token placeholders (no f-string): the HTML/CSS/JS
 # braces are content, and the only interpolated pieces are the escaped
@@ -1512,8 +1635,8 @@ _HTML_TEMPLATE = """<!doctype html>
             font-size: 14.5px; line-height: 1.65;
             box-shadow: 0 12px 36px rgba(0, 0, 0, 0.56); backdrop-filter: blur(8px);
             box-sizing: border-box; overflow-y: auto; }
-  #legend.dock-side { top: 0; right: 0; bottom: 0; width: 420px; max-width: 100vw;
-                      border-right: none; border-top: none; border-bottom: none; border-radius: 12px 0 0 12px; }
+  #legend.dock-side { top: 0; left: 0; bottom: 0; width: 420px; max-width: 100vw;
+                      border-left: none; border-top: none; border-bottom: none; border-radius: 0 12px 12px 0; }
   #legend.dock-side.has-selection { width: 480px; }
   #legend.dock-bottom { left: 0; right: 0; bottom: 0; max-height: 48vh;
                         border-left: none; border-right: none; border-bottom: none; border-radius: 12px 12px 0 0; }
@@ -1522,7 +1645,7 @@ _HTML_TEMPLATE = """<!doctype html>
                  width: 100vw !important; height: 100vh !important; max-width: 100vw !important;
                  max-height: 100vh !important; border-radius: 0 !important; }
   #legend.collapsed { overflow: hidden; }
-  #legend.dock-side.collapsed { bottom: auto; width: 360px !important; border-bottom: 1px solid #263859; border-radius: 0 0 0 12px; }
+  #legend.dock-side.collapsed { bottom: auto; width: 360px !important; border-bottom: 1px solid #263859; border-radius: 0 0 12px 0; }
   #legend.dock-bottom.collapsed { height: auto !important; max-height: none !important; }
   #legend.collapsed .search-wrap,
   #legend.collapsed .drawer-controls,
@@ -1530,7 +1653,7 @@ _HTML_TEMPLATE = """<!doctype html>
   #legend.collapsed .drawer-resizer { display: none; }
   .drawer-resizer { position: absolute; z-index: 4; background: transparent; transition: background .15s; }
   .drawer-resizer:hover, #legend.resizing .drawer-resizer { background: rgba(56, 189, 248, 0.35); }
-  #legend.dock-side > .drawer-resizer { cursor: ew-resize; width: 8px; top: 0; bottom: 0; left: 0; }
+  #legend.dock-side > .drawer-resizer { cursor: ew-resize; width: 8px; top: 0; bottom: 0; right: 0; }
   #legend.dock-bottom > .drawer-resizer { cursor: ns-resize; height: 8px; top: 0; left: 0; right: 0; }
   #legend .sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
   #legend .sidebar-title-wrap { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -2842,7 +2965,7 @@ __AXBT_LEGEND__
       var vh = typeof window !== "undefined" && window.innerHeight ? window.innerHeight : 800;
       drawerCollapsed = false;
       if (dockMode === "side") {
-        var nextW = Math.max(280, Math.min(vw, Math.round(vw - clientX)));
+        var nextW = Math.max(280, Math.min(vw, Math.round(clientX)));
         if (nextW >= vw - 16) {
           drawerFull = true;
           customSideWidth = vw;

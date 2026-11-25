@@ -1137,6 +1137,8 @@ class TestSearchInspectorAndDocs:
         assert 'id="search-autocomplete"' in html_text
         assert 'id="search-count"' in html_text
         assert "dock-side" in html_text
+        assert "#legend.dock-side { top: 0; left: 0; bottom: 0;" in html_text
+        assert "#legend.dock-side > .drawer-resizer { cursor: ew-resize; width: 8px; top: 0; bottom: 0; right: 0; }" in html_text
         assert "dock-bottom" in html_text
         assert "insp-subgraph-view" in html_text
         assert "subgraph-canvas" in html_text
@@ -1215,3 +1217,191 @@ class TestSearchInspectorAndDocs:
         assert "//axle.axiommath.ai/" in html_text
         assert '"verify_proof"' in html_text
         assert '"check"' in html_text
+
+
+class TestGraphServe:
+    """Tests for `axbt graph --serve [--port PORT]`."""
+
+    def test_port_without_serve_does_not_start_server(
+        self, graph_project: Path, monkeypatch
+    ) -> None:
+        import axle_build_tool.cli as cli_mod
+
+        called = False
+
+        def fail_if_called(*args, **kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("create_graph_server should not be called without --serve")
+
+        monkeypatch.setattr(cli_mod, "create_graph_server", fail_if_called)
+        result = runner.invoke(main, ["graph", "--port", "4199"])
+        assert result.exit_code == 0, result.output
+        assert not called
+        assert "Wrote graph to" in result.output
+        assert "Serving graph" not in result.output
+
+    def test_serve_prints_local_and_network_urls_and_handles_keyboard_interrupt(
+        self, graph_project: Path, monkeypatch
+    ) -> None:
+        import axle_build_tool.cli as cli_mod
+        from axle_build_tool.graph import DEFAULT_GRAPH_HOST, DEFAULT_GRAPH_PORT
+
+        captured: dict[str, object] = {}
+
+        class FakeServer:
+            def __init__(self, graph_file: Path, host: str, port: int) -> None:
+                captured["graph_file"] = graph_file
+                captured["host"] = host
+                captured["port"] = port
+                self.server_address = (host, port)
+                self.closed = False
+
+            def serve_forever(self) -> None:
+                captured["served"] = True
+                raise KeyboardInterrupt
+
+            def server_close(self) -> None:
+                self.closed = True
+                captured["closed"] = True
+
+        monkeypatch.setattr(cli_mod, "create_graph_server", FakeServer)
+        monkeypatch.setattr(cli_mod, "detect_network_ips", lambda: ["10.0.0.42"])
+
+        result = runner.invoke(main, ["graph", "--serve"])
+        assert result.exit_code == 0, result.output
+        assert captured["host"] == DEFAULT_GRAPH_HOST
+        assert captured["port"] == DEFAULT_GRAPH_PORT
+        assert captured["graph_file"] == graph_project / ".axbt" / "graph.html"
+        assert captured.get("served") is True
+        assert captured.get("closed") is True
+        assert "Wrote graph to" in result.output
+        assert "Serving graph on 0.0.0.0:4099" in result.output
+        assert "http://127.0.0.1:4099" in result.output
+        assert "http://10.0.0.42:4099" in result.output
+        assert "Stopped graph server." in result.output
+
+    def test_serve_custom_port(self, graph_project: Path, monkeypatch) -> None:
+        import axle_build_tool.cli as cli_mod
+
+        class FakeServer:
+            def __init__(self, graph_file: Path, host: str, port: int) -> None:
+                self.server_address = (host, port)
+
+            def serve_forever(self) -> None:
+                raise KeyboardInterrupt
+
+            def server_close(self) -> None:
+                pass
+
+        monkeypatch.setattr(cli_mod, "create_graph_server", FakeServer)
+        monkeypatch.setattr(cli_mod, "detect_network_ips", lambda: ["10.0.0.77"])
+
+        result = runner.invoke(main, ["graph", "--serve", "--port", "4567"])
+        assert result.exit_code == 0, result.output
+        assert "Serving graph on 0.0.0.0:4567" in result.output
+        assert "http://127.0.0.1:4567" in result.output
+        assert "http://10.0.0.77:4567" in result.output
+
+    def test_create_graph_server_serves_generated_html_and_404s_other_paths(
+        self, graph_project: Path
+    ) -> None:
+        import io
+        from axle_build_tool.graph import create_graph_server
+
+        class _InMemorySocket:
+            def __init__(self, request_bytes: bytes) -> None:
+                self._rfile = io.BytesIO(request_bytes)
+                self.wfile = io.BytesIO()
+
+            def makefile(self, mode: str, *args, **kwargs):
+                if "r" in mode:
+                    return self._rfile
+                return self.wfile
+
+            def sendall(self, data: bytes) -> None:
+                self.wfile.write(data)
+
+        def dispatch(server, method: str, path: str) -> tuple[str, bytes]:
+            raw_req = f"{method} {path} HTTP/1.1\r\nHost: localhost\r\n\r\n".encode("ascii")
+            sock = _InMemorySocket(raw_req)
+            server.RequestHandlerClass(sock, ("127.0.0.1", 50000), server)
+            raw_resp = sock.wfile.getvalue()
+            header_bytes, _, body_bytes = raw_resp.partition(b"\r\n\r\n")
+            return header_bytes.decode("iso-8859-1"), body_bytes
+
+        _output, expected_html = run_graph(graph_project)
+        graph_file = graph_project / ".axbt" / "graph.html"
+        server = create_graph_server(
+            graph_file, host="127.0.0.1", port=4099, bind_and_activate=False
+        )
+
+        for path in ("/", "/graph.html", "/index.html", "/?q=base"):
+            headers, body = dispatch(server, "GET", path)
+            assert headers.startswith("HTTP/1.0 200 OK")
+            assert "Content-Type: text/html; charset=utf-8" in headers
+            assert body.decode("utf-8") == expected_html
+
+        headers, head_body = dispatch(server, "HEAD", "/")
+        assert headers.startswith("HTTP/1.0 200 OK")
+        assert head_body == b""
+
+        headers, not_found_body = dispatch(server, "GET", "/manifest.json")
+        assert headers.startswith("HTTP/1.0 404 Not Found")
+        assert not_found_body == b"Not Found"
+
+    def test_detect_network_ips_prefers_10_dot_private_and_excludes_loopback(
+        self, monkeypatch
+    ) -> None:
+        import socket
+        import subprocess
+        import axle_build_tool.graph as graph_mod
+
+        class FakeUdpSocket:
+            def __init__(self, target_ip: str) -> None:
+                self._ip = target_ip
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def connect(self, addr):
+                target, _port = addr
+                if target.startswith("10."):
+                    self._ip = "10.0.0.19"
+                elif target.startswith("192.168."):
+                    self._ip = "192.168.1.5"
+                else:
+                    self._ip = "127.0.0.1"
+
+            def getsockname(self):
+                return (self._ip, 12345)
+
+        monkeypatch.setattr(
+            socket,
+            "socket",
+            lambda *args, **kwargs: FakeUdpSocket("127.0.0.1"),
+        )
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *args, **kwargs: [
+                (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.1.2", 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("10.0.0.19", 0)),
+            ],
+        )
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *args, **kwargs: subprocess.CompletedProcess(
+                args=["ifconfig"],
+                returncode=0,
+                stdout="lo0:\n\tinet 127.0.0.1\nen0:\n\tinet 10.0.0.88 netmask 0xffffff00\n",
+                stderr="",
+            ),
+        )
+        ips = graph_mod.detect_network_ips()
+        assert ips == ["10.0.0.19", "10.0.0.88", "192.168.1.5"]
