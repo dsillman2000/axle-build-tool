@@ -1,0 +1,16 @@
+src/axle_build_tool/graph.py
+  h_4cc74772b10fd4 1254-1256,1797-1824,1837-1852,1947,1951,1973-1974,1985-1991,2987-2989,3001-3166
+tests/test_graph.py
+  h_4cc74772b10fd4 1143-1154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "ebef9b756fce3408d5e4ae4c59eaeb4ddc98afc6",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
