@@ -406,9 +406,9 @@ class TestGraphRender:
 
         output, html_text = run_graph(root)
 
-        # Exactly three script elements: the single pinned Cytoscape CDN
-        # script, the JSON data block, and the application script.
-        assert html_text.count("</script>") == 3
+        # Exactly four script elements: Cytoscape CDN, KaTeX CDN, the JSON
+        # data block, and the application script.
+        assert html_text.count("</script>") == 4
         data = graph_data(html_text)
         (declaration,) = [n for n in data["nodes"] if n["group"] == "declaration"]
         assert declaration["id"].endswith("evil</script><img>")
@@ -421,7 +421,7 @@ class TestGraphRender:
         output, html_text = run_graph(graph_project)
         data = graph_data(html_text)
         assert all(node["changed"] for node in data["nodes"] if node["group"] == "file")
-        assert "✱" in html_text
+        assert all("✱" in node["label"] for node in data["nodes"] if node["group"] == "file")
 
         # A clean re-compile: not a star anywhere...
         assert runner.invoke(main, ["compile"]).exit_code == 0
@@ -539,10 +539,15 @@ class TestGraphColors:
     def test_legend_is_rendered_in_page(self, graph_project: Path) -> None:
         output, html_text = run_graph(graph_project)
 
-        for state in ("verified", "checked", "done", "unchecked", "empty"):
-            assert f"chip {state}" in html_text
-        assert "outcome stamps" in html_text
-        assert "never verifiable" in html_text
+        assert 'id="legend-panel"' not in html_text
+        assert "color = outcome stamps only" not in html_text
+        drawer_top = html_text.split('<div class="drawer-top">', 1)[1].split(
+            '<div class="drawer-body"', 1
+        )[0]
+        assert 'id="search-nodes"' in drawer_top
+        assert 'id="toggle-decl-edges"' in drawer_top
+        assert 'id="toggle-transitive-edges"' in drawer_top
+        assert 'id="reset-positions"' in drawer_top
 
     def test_state_of_keys_only_on_stamps(self, graph_project: Path) -> None:
         bare_theorem = ExtractedDecl(
@@ -668,11 +673,9 @@ class TestGraphEdges:
         assert 'addClass("highlighted downstream")' in html_text
         assert 'addClass("highlighted selected-node")' in html_text
 
-        # Legend and inspector match the upstream/downstream color coding.
-        assert "swatch upstream" in html_text
-        assert "swatch downstream" in html_text
-        assert "upstream — dependencies / imports (light blue)" in html_text
-        assert "downstream — dependents / used by (light pink)" in html_text
+        # Inspector matches the upstream/downstream color coding.
+        assert "sg-pill upstream" in html_text
+        assert "sg-pill downstream" in html_text
         assert "insp-sec upstream" in html_text
         assert "insp-sec downstream" in html_text
         assert "insp-chip upstream" in html_text
@@ -987,3 +990,228 @@ class TestLayout:
         manifest = load_manifest(graph_project)
         write_graph(manifest, graph_project, manifest.nodes)
         assert calls == 1
+
+
+class TestSearchInspectorAndDocs:
+    """Comprehensive search auto-complete, dockable inspector, source viewer,
+    and Markdown + LaTeX docstring rendering."""
+
+    def test_markdown_and_latex_renderer_handles_math_and_escapes_html(self) -> None:
+        from axle_build_tool.graph import render_markdown_latex
+
+        md = (
+            "# Prime bound\n\n"
+            "For any $\\alpha \\in \\mathbb{N}$ with $\\alpha \\le n$, we have\n"
+            "$a \\bmod m = b \\pmod{p}$, $P \\longleftrightarrow Q \\Longleftrightarrow R$,\n"
+            "and $\\texttt{SqrtRemSpec}(N, s, r)$ via \\texttt{spec_sqrt_eq}:\n\n"
+            "$$\\texttt{SqrtRemSpec}\\left(N,\\ \\texttt{Nat.sqrt} N,\\ N - (\\texttt{Nat.sqrt} N)^2\\right)$$\n\n"
+            "$$\\frac{\\sqrt{x^2 + 1}}{2} \\to \\infty$$\n\n"
+            "\\begin{aligned}\n"
+            "a &\\equiv b \\pmod{m} \\\\\n"
+            "c &= d\n"
+            "\\end{aligned}\n\n"
+            "Uses **helper** (`prime_dvd_square`) and *descent*.\n"
+            "Also escapes <script>alert(1)</script> and [bad](javascript:alert(1)).\n\n"
+            "```lean\ntheorem demo : 1 = 1 := rfl\n```"
+        )
+        rendered = render_markdown_latex(md)
+        assert "<h1>Prime bound</h1>" in rendered
+        assert '<span class="math-inline" data-latex="\\alpha \\in \\mathbb{N}">' in rendered
+        assert '<span class="math-inline" data-latex="\\alpha \\le n">' in rendered
+        assert '<span class="math-inline" data-latex="a \\bmod m = b \\pmod{p}">' in rendered
+        assert '<span class="math-inline" data-latex="P \\longleftrightarrow Q \\Longleftrightarrow R">' in rendered
+        assert '<span class="math-inline" data-latex="\\texttt{SqrtRemSpec}(N, s, r)">' in rendered
+        assert (
+            '<div class="math-display" data-latex="\\texttt{SqrtRemSpec}\\left(N,\\ \\texttt{Nat.sqrt} N,\\ N - (\\texttt{Nat.sqrt} N)^2\\right)">'
+            in rendered
+        )
+        assert '<div class="math-display" data-latex="\\frac{\\sqrt{x^2 + 1}}{2} \\to \\infty">' in rendered
+        assert '<div class="math-display" data-latex="\\begin{aligned}\na &amp;\\equiv b \\pmod{m} \\\\\nc &amp;= d\n\\end{aligned}">' in rendered
+        assert '<code class="md-inline-code">spec_sqrt_eq</code>' in rendered
+        assert "<strong>helper</strong>" in rendered
+        assert '<code class="md-inline-code">prime_dvd_square</code>' in rendered
+        assert "<em>descent</em>" in rendered
+        assert '<pre class="md-code"><code>' in rendered
+        assert '<span class="hljs-keyword">theorem</span>' in rendered
+        assert '<span class="hljs-title">demo</span>' in rendered
+        assert '<span class="hljs-keyword">rfl</span>' in rendered
+        # Raw HTML and unsafe URI schemes are neutralized.
+        assert "<script>" not in rendered
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
+        assert "javascript:" not in rendered
+
+    def test_docs_code_and_search_autocomplete_ui_are_embedded(
+        self, make_project, tmp_path: Path, monkeypatch, fake_axle
+    ) -> None:
+        from axle_build_tool.graph import KATEX_CSS_URL, KATEX_JS_URL
+
+        files = {
+            "M/Base.lean": (
+                "import Mathlib\n\n"
+                "/-!\n"
+                "# Base module\n\n"
+                "Defines $f(n) = \\frac{n(n + 1)}{2}$.\n"
+                "-/\n\n"
+                "/-- Returns **twice** $x$, i.e. $2 \\cdot x$. -/\n"
+                "@[simp]\n"
+                "def dbl (x : Nat) : Nat :=\n"
+                "  x + x\n\n"
+                "-- Line comment doc for `dbl_zero`.\n"
+                "theorem dbl_zero : dbl 0 = 0 := rfl\n"
+            ),
+        }
+        fake_axle._extract_documents_by_marker = {
+            "def dbl": {
+                "dbl": make_document(
+                    "dbl",
+                    kind="def",
+                    line_pos=12,
+                    end_line_pos=13,
+                    signature="def dbl (x : Nat) : Nat",
+                ),
+                "dbl_zero": make_document(
+                    "dbl_zero",
+                    kind="theorem",
+                    line_pos=16,
+                    end_line_pos=16,
+                    signature="theorem dbl_zero : dbl 0 = 0 := rfl",
+                    local_type_dependencies=["dbl"],
+                ),
+            },
+        }
+        root = make_project(tmp_path, NO_TARGETS_CONFIG, files)
+        monkeypatch.chdir(root)
+        assert runner.invoke(main, ["compile"]).exit_code == 0
+
+        _output, html_text = run_graph(root)
+        assert html_text.count("</script>") == 4
+        assert KATEX_CSS_URL in html_text
+        assert KATEX_JS_URL in html_text
+        assert "window.katex.render" in html_text
+        assert "renderMathIn" in html_text
+        data = graph_data(html_text)
+
+        file_node = by_id(data, "file:M.Base")
+        assert "Base module" in file_node["doc"]
+        assert "<h1>Base module</h1>" in file_node["doc_html"]
+        assert '<span class="math-inline" data-latex="f(n) = \\frac{n(n + 1)}{2}">' in file_node["doc_html"]
+        assert "def dbl (x : Nat) : Nat :=" in file_node["code"]
+
+        dbl_node = by_id(data, "decl:M.Base:dbl")
+        assert dbl_node["module"] == "M"
+        assert "**twice**" in dbl_node["doc"]
+        assert "<strong>twice</strong>" in dbl_node["doc_html"]
+        assert '<span class="math-inline" data-latex="2 \\cdot x">' in dbl_node["doc_html"]
+        assert dbl_node["code"].startswith("@[simp]\ndef dbl")
+        assert dbl_node["code_start_line"] == 10
+
+        zero_node = by_id(data, "decl:M.Base:dbl_zero")
+        assert zero_node["module"] == "M"
+        assert zero_node["doc"] == "Line comment doc for `dbl_zero`."
+        assert '<code class="md-inline-code">dbl_zero</code>' in zero_node["doc_html"]
+        assert zero_node["code"] == "theorem dbl_zero : dbl 0 = 0 := rfl"
+        assert zero_node["code_start_line"] == 15
+
+        # UI controls for gradual scroll zoom, draggable/expandable drawer,
+        # compact top search, autocomplete, serif typography, subgraph
+        # isolation, doc rendering, unified Source section, and module-grouped chips.
+        assert "wheelSensitivity: 0.22" in html_text
+        assert '"Source Serif 4"' in html_text
+        assert "#legend { position: fixed; z-index: 30;" in html_text
+        assert "#tooltip { position: fixed; z-index: 8;" in html_text
+        assert '<div id="legend" class="drawer dock-bottom">' in html_text
+        assert 'var dockMode = "bottom";' in html_text
+        assert 'id="toggle-dock"' in html_text
+        assert 'id="toggle-full"' in html_text
+        assert 'id="toggle-drawer"' in html_text
+        drawer_chunk = html_text.split('<div id="legend" class="drawer dock-bottom">', 1)[1].split(
+            '<script type="application/json"', 1
+        )[0]
+        assert 'id="drawer-resizer"' in drawer_chunk
+        assert 'id="search-nodes"' in drawer_chunk
+        assert 'id="legend-panel"' not in drawer_chunk
+        assert 'id="inspector"' in drawer_chunk
+        assert "#legend.full" in html_text
+        assert "drawerFull" in html_text
+        assert "applyDragSize" in html_text
+        assert 'id="search-autocomplete"' in html_text
+        assert 'id="search-count"' in html_text
+        assert "dock-side" in html_text
+        assert "dock-bottom" in html_text
+        assert "insp-subgraph-view" in html_text
+        assert "subgraph-canvas" in html_text
+        assert "insp-doc" in html_text
+        assert "insp-code" in html_text
+        assert '<span class="insp-sec">Source</span>' in html_text
+        assert ">Source Code<" not in html_text
+        assert ">Signature<" not in html_text
+        render_insp_src = html_text.split("function renderInspector(node)", 1)[1].split(
+            "function selectElement(target)", 1
+        )[0]
+        assert render_insp_src.index('<span class="insp-sec">Source</span>') < render_insp_src.index(
+            '"Depends on"'
+        )
+        assert render_insp_src.index("Source (' + lineCount + ' lines)") < render_insp_src.index(
+            '"Imports"'
+        )
+        assert "nodeModuleOf" in html_text
+        assert "insp-mod-group" in html_text
+        assert "insp-mod-label" in html_text
+        assert "Transitive upstream" in html_text
+        assert "Transitive downstream" in html_text
+        for cls in (
+            ".hljs-keyword",
+            ".hljs-title",
+            ".hljs-built_in",
+            ".hljs-comment",
+            ".hljs-meta",
+            ".hljs-doctag",
+        ):
+            assert cls in html_text
+        assert "highlightLeanLines" in html_text
+        assert "highlightLeanInline" in html_text
+
+    def test_stamps_include_sigs_and_link_to_axle_share_urls(
+        self, graph_project: Path
+    ) -> None:
+        from axle_build_tool.manifest import save_manifest
+
+        manifest = load_manifest(graph_project)
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        nodes = []
+        for node in manifest.nodes:
+            decls = []
+            for decl in node.declarations:
+                if decl.name == "base_thm":
+                    decl = decl.model_copy(
+                        update={
+                            "checked_sig": "c" * 32,
+                            "checked_at": now,
+                            "checked_request_id": "req-chk-1",
+                            "verified_sig": "v" * 32,
+                            "verified_at": now,
+                            "verified_request_id": "req-ver-1",
+                        }
+                    )
+                decls.append(decl)
+            nodes.append(node.model_copy(update={"declarations": decls}))
+        save_manifest(manifest.model_copy(update={"nodes": nodes}), graph_project)
+
+        _output, html_text = run_graph(graph_project)
+        data = graph_data(html_text)
+        base_thm = by_id(data, "decl:M.A:base_thm")
+        assert base_thm["checked_sig"] == "c" * 32
+        assert base_thm["checked_request_id"] == "req-chk-1"
+        assert base_thm["verified_sig"] == "v" * 32
+        assert base_thm["verified_request_id"] == "req-ver-1"
+        assert "cccccccc" in base_thm["checked_stamp"]
+        assert "vvvvvvvv" in base_thm["verified_stamp"]
+
+        base_def = by_id(data, "decl:M.A:base")
+        assert base_def["closure_verified_request_id"] == "req-ver-1"
+
+        assert "stamp-link" in html_text
+        assert "axleShareUrl" in html_text
+        assert "//axle.axiommath.ai/" in html_text
+        assert '"verify_proof"' in html_text
+        assert '"check"' in html_text

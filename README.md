@@ -154,9 +154,11 @@ The two tiers are distinct facts: a `sorry` passes check and fails verify, so `c
 ### Visualizing the manifest
 
 `axbt graph [--select SELECTOR] [-o PATH]` renders `.axbt/manifest.json` as a single-file
-Cytoscape.js HTML visualization — pan/zoom, hover tooltips, live search, click to highlight a
-node's transitive upstream (light blue) and downstream (light pink) dependency cone and inspect its signature and metadata in
-the side panel. Declaration level: every declaration is a compact pill (for verifiable theorems,
+Cytoscape.js HTML visualization — pan/zoom, hover tooltips, live auto-complete search across files,
+declarations, signatures, and comments, and click to highlight a node's transitive upstream (light blue)
+and downstream (light pink) dependency cone while opening a dockable side/bottom detail panel with
+rendered Markdown + LaTeX docstrings, direct/transitive subgraph chips (with an on-demand "View subgraph" canvas with a fresh layered layout), and
+line-numbered Lean source code. Declaration level: every declaration is a compact pill (for verifiable theorems,
 lemmas, and examples) or rectangular badge (for definitions, structures, and instances) inside its
 file card and module container, laid out deterministically left-to-right across dependency rank
 columns and ordered within each file by intra-file dependency depth and source line order. Direct
