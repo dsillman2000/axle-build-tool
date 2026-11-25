@@ -1,0 +1,48 @@
+demos/medium/NewtonRaphsonCC/NewtonRaphsonCC/Convergence.lean
+  s_ba1fbe0817b138::t_d2ea85580397d8 122-145,153-166,170,172-173,183-230,241-264
+  s_ba1fbe0817b138::t_677c8ef0cf01ab 167-169
+  s_ba1fbe0817b138::t_234ea43bcfd4f7 171
+  s_ba1fbe0817b138::t_60096f15490c98 1-6,14
+  s_ba1fbe0817b138::t_bebe88fd28400e 59
+  s_ba1fbe0817b138::t_6c7df1fd6d002b 15-17,20,23-33,41-46,56-58,60-92,101-110,265
+  s_ba1fbe0817b138::t_01f45de28a2451 7-13,18-19,21-22,34-40,47-55,93-100,111-121,146-152,174-182,231-240
+demos/medium/NewtonRaphsonCC/NewtonRaphsonCC/CostModel.lean
+  s_ba1fbe0817b138::t_db0d81cfda4190 1-68,71-132
+  s_ba1fbe0817b138::t_05bb6debeac305 69-70
+demos/medium/NewtonRaphsonCC/NewtonRaphsonCC/Complexity.lean
+  s_ba1fbe0817b138::t_e8f0d2fe6747b9 3,15-19,24-26,32-35,44-52,61-83,92-102,225
+  s_ba1fbe0817b138::t_01f45de28a2451 7-13,20-23,27-31,36-43,53-60,84-91,103-107,111-114,119-125,142-151,205-212
+  s_ba1fbe0817b138::t_67ddb8e18b2bda 108-110,115-118,126-141,152-204,213-224
+  s_ba1fbe0817b138::t_414884ccbae98c 1-2,4-6,14
+demos/medium/NewtonRaphsonCC/NewtonRaphsonCC/Iteration.lean
+  s_ba1fbe0817b138::t_01f45de28a2451 5-11,18-19,21-23,27-28,30-32,41-42,44-45,52-62,70-81,89-93,97-98,100-102
+  s_ba1fbe0817b138::t_c9399cf6d94317 94-96,99,103-108
+  s_ba1fbe0817b138::t_8ccee9ed6a9ba4 1-4,12
+  s_ba1fbe0817b138::t_370ed4e0bf13e1 13-17,20,24-26,29,33-40,43,46-51,63-69,82-88,109
+demos/medium/NewtonRaphsonCC/axbt_project.yml
+  s_ba1fbe0817b138::t_2cd8cfd88d8927 1-13
+demos/medium/NewtonRaphsonCC/NewtonRaphsonCC/Correctness.lean
+  s_ba1fbe0817b138::t_806846ce043fe0 94,99-113,121-133,141-147,151,155-161
+  s_ba1fbe0817b138::t_58459770cf831f 32-33,39,41-42
+  s_ba1fbe0817b138::t_bf912fc78687b5 29-30,34-38,40,43
+  s_ba1fbe0817b138::t_77f1e76b43a3a7 69
+  s_ba1fbe0817b138::t_ed72af56d5b2e5 1-5,12
+  s_ba1fbe0817b138::t_01f45de28a2451 6-11,16-23,45-46,48-51,59-60,62-65,77-84,91-93,95-98,114-120,134-140,148-150,152-154
+  s_ba1fbe0817b138::t_e636c6c4603df3 13-15,24-28,31,44,47,52-58,61,66-68,70-76,85-90,162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "41bdffa3e79072d3a6072258a275e4ecbbf492b1",
+  "prompts": {},
+  "sessions": {
+    "s_ba1fbe0817b138": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_debe99987ffeXuc3yXP6MLDZnH",
+        "model": "hy4-flash-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
