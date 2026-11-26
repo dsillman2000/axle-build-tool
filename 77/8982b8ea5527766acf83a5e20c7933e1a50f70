@@ -1,0 +1,36 @@
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/LiftingCore.lean
+  s_e7a3924fabe171::t_588bc66eb43750 11-13,19-30
+  s_e7a3924fabe171::t_14a17238f8969b 179-192,194-238
+  s_e7a3924fabe171::t_8d5a1fb94f0cad 193
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_de82c4d4a41e39 74-80
+  s_e7a3924fabe171::t_cda7284c4f36e3 68-69
+demos/formalizations/CylindricalAlgDecomposition/README.md
+  s_e7a3924fabe171::t_725ea4fe9db4e3 11
+  s_e7a3924fabe171::t_0653b45b26770d 15
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Lifting.lean
+  s_e7a3924fabe171::t_8d2186b5938ab9 26-28,32-35
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/ZeroFiber.lean
+  s_e7a3924fabe171::t_16c8204d235b87 1-109
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Theorem4.lean
+  s_e7a3924fabe171::t_1f75057bc282eb 74
+  s_e7a3924fabe171::t_ab7a349930e277 153-155,164-165,174
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/SignInvariant.lean
+  s_e7a3924fabe171::t_b298d15729892d 7-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "778982b8ea5527766acf83a5e20c7933e1a50f70",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
