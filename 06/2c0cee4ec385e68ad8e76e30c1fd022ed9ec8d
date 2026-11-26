@@ -1,0 +1,156 @@
+demos/formalizations/CylindricalAlgDecomposition/README.md
+  s_e7a3924fabe171::t_6d937fbc68adb4 15
+  s_e7a3924fabe171::t_4a75ba9c0ad7e4 9
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/EffectiveFamily.lean
+  s_e7a3924fabe171::t_2aac8c1dd5374c 20
+  s_e7a3924fabe171::t_f6c4934df94298 1-19,21-68
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Theorem4.lean
+  s_e7a3924fabe171::t_be421b3e20509a 56-58
+  s_e7a3924fabe171::t_453f267333afca 1-5,7-13,88-117,122-123,126-127,208-209
+  s_e7a3924fabe171::t_c983354aa39472 54-55,59-60,65,75,140
+  s_e7a3924fabe171::t_37f314f1787a5c 24,37,45,138-139
+  s_e7a3924fabe171::t_2395a0aa28a4a6 29-30,64
+  s_e7a3924fabe171::t_a8a6740bbac1bf 6,130-137,141-154
+  s_e7a3924fabe171::t_00e506e9ff9888 14-23,25-28,31-36,38-44,46-53,63,66-74,76-87
+  s_e7a3924fabe171::t_98ffc88c328134 61-62
+  s_e7a3924fabe171::t_ebece74ed1161e 124-125,128-129,157
+  s_e7a3924fabe171::t_5174e06870dd49 118-121
+  s_e7a3924fabe171::t_f01becdd51eca6 155-156,158-207
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/JointGcdDegree.lean
+  s_e7a3924fabe171::t_abcaccca8f9221 38-42,50-54,59,64,71,73,83
+  s_e7a3924fabe171::t_b1947384a14e55 34,81,112,121-125
+  s_e7a3924fabe171::t_dc7409a6dda9fb 72
+  s_e7a3924fabe171::t_d0495ac1932811 74-77
+  s_e7a3924fabe171::t_7f1074b155fc92 117-118
+  s_e7a3924fabe171::t_5b80cbc1b25b4c 1-33,35-37,43-49,55-58,60-63,65-70,78-80,82,84-111,113-116,119-120,126-127
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/ProjectionDef.lean
+  s_e7a3924fabe171::t_b7f589698e0e86 136-143
+  s_e7a3924fabe171::t_49adc29c3b9f91 79-92,95-122
+  s_e7a3924fabe171::t_a795e32913c82c 53
+  s_e7a3924fabe171::t_8700719e3ad98e 123-135,144
+  s_e7a3924fabe171::t_e6c819503567db 5
+  s_e7a3924fabe171::t_8df9ecdb709e77 93-94
+  s_e7a3924fabe171::t_ed888ebeb141aa 1-4,6-14,16-20,22-25,27-30,32-36,38-43,45-52,54-78,145
+  s_e7a3924fabe171::t_9988027501453f 15,21,26,31,37,44
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/SignInvariant.lean
+  s_e7a3924fabe171::t_ecda6858a7b734 1-2,4-29,54
+  s_e7a3924fabe171::t_43ba54a72dac83 30-53
+  s_e7a3924fabe171::t_afca90075f560e 3
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/GcdDegreeConstancy.lean
+  s_e7a3924fabe171::t_cc6b5b86b35c0e 1-4,6-27,30-32,35-125
+  s_e7a3924fabe171::t_e35756b2c66afe 28-29,33-34
+  s_e7a3924fabe171::t_6a282b1f426b0d 5
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Derivative.lean
+  s_e7a3924fabe171::t_38315054aeb2c3 9
+  s_e7a3924fabe171::t_020f3cfd0b50eb 22-26
+  s_e7a3924fabe171::t_5414cddcedf449 1-8,10-21,27-28
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/LocalRootData.lean
+  s_e7a3924fabe171::t_209371d18f39b0 63-64
+  s_e7a3924fabe171::t_23b87cb42ebd2b 1-53,57,61-62,65-71,73-82,85-110,112-124,132-135
+  s_e7a3924fabe171::t_e466198928c5cf 54-56,58-60,72,111,125-131
+  s_e7a3924fabe171::t_ba7198793a6297 83-84
+demos/formalizations/CylindricalAlgDecomposition/axbt_project.yml
+  s_e7a3924fabe171::t_cdfa5dfc4596c5 10-11
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Pairwise.lean
+  s_e7a3924fabe171::t_af4c8e28547948 3,102-103,109-110,129-130,134-135
+  s_e7a3924fabe171::t_fe63dcbf009cd2 1-2,4-19,64-98,104-105,111-128,131-133,136-148,153-175,179-252
+  s_e7a3924fabe171::t_df115d1029080d 20-63,101,108
+  s_e7a3924fabe171::t_95dc6a6469b591 99-100,106-107
+  s_e7a3924fabe171::t_44c9d0867fdb1e 149-152
+  s_e7a3924fabe171::t_a5a009dd483021 176-178
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Lifting.lean
+  s_e7a3924fabe171::t_21bc7353e316af 38
+  s_e7a3924fabe171::t_c08304ceba83fe 1-37,39-57
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/RealDelineabilityData.lean
+  s_e7a3924fabe171::t_825307478c3d06 44-45
+  s_e7a3924fabe171::t_1721bc1729443b 1-2,5-43,46-62
+  s_e7a3924fabe171::t_f00ae91e99c330 3-4
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/MonicComplexFiber.lean
+  s_e7a3924fabe171::t_30265ba42a9a4d 1-29,31-83
+  s_e7a3924fabe171::t_541b914f39b8ca 30
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/RootBranchCoincidence.lean
+  s_e7a3924fabe171::t_b046190c39ddbd 1-34,36-39,42-48,50-57,72-92
+  s_e7a3924fabe171::t_46fc22d08670a6 35,40-41,49
+  s_e7a3924fabe171::t_6a8ab43456575b 58,60
+  s_e7a3924fabe171::t_8fc344ff96d913 59,67,69
+  s_e7a3924fabe171::t_ca8bcdfed16d1a 61-66,68,70-71
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/LiftingCore.lean
+  s_e7a3924fabe171::t_11a680f521c9c8 185
+  s_e7a3924fabe171::t_ebe482c9e131dd 164
+  s_e7a3924fabe171::t_bd1a7e58f24f52 13,20,27-28
+  s_e7a3924fabe171::t_db521573683d26 129
+  s_e7a3924fabe171::t_6a7d65a40bfd57 98
+  s_e7a3924fabe171::t_b995f5ff47a1c3 176-177,180
+  s_e7a3924fabe171::t_4c28c3a43acc7f 178-179
+  s_e7a3924fabe171::t_10cee649ef8b35 83-86,127-128,134-136,142,144-145
+  s_e7a3924fabe171::t_f7df3350ade31c 41
+  s_e7a3924fabe171::t_b6b8003cfd42e0 77,182
+  s_e7a3924fabe171::t_8a58c8ad753e7c 72-75,79,82,162-163,165-166
+  s_e7a3924fabe171::t_985518ff2c0980 141
+  s_e7a3924fabe171::t_6ab7d46346b406 154
+  s_e7a3924fabe171::t_7efc1713f6b467 1-12,15,17-19,21-26,29,33-35,37-40,42-44,46-49,52,54-68,76,78,88-89,93-97,100-104,106-110,112,114-118,123,126,130,138-140,146-147,150-151,156-158,161,167-169,171,173-175,181,183-184,186-187
+  s_e7a3924fabe171::t_c4af07affd3050 122,124-125,155
+  s_e7a3924fabe171::t_cbff013bf79527 133
+  s_e7a3924fabe171::t_dacda39f34dd19 143
+  s_e7a3924fabe171::t_dc9f9619075ef1 111
+  s_e7a3924fabe171::t_a461dd18f8bf95 14,16,30-32,36,45,87,91-92,99,105,120-121,131-132,137,148-149,152-153
+  s_e7a3924fabe171::t_97d3ff44239285 50-51,69-70,113
+  s_e7a3924fabe171::t_f5a2a29705e3cf 170,172
+  s_e7a3924fabe171::t_a5bdf31c2cbcb7 53,71,80-81,90,119
+  s_e7a3924fabe171::t_49218f717033df 159-160
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Fiber.lean
+  s_e7a3924fabe171::t_a771053e91acb2 59-60
+  s_e7a3924fabe171::t_ae009c11aaa83d 1-49,51-56,63-73,75-102
+  s_e7a3924fabe171::t_1ecaa88155934c 61
+  s_e7a3924fabe171::t_4276edfdd14ca9 62
+  s_e7a3924fabe171::t_ceadf115cc3e5f 50,57-58,74
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_bd874c09011f6b 25-27
+  s_e7a3924fabe171::t_a9ad691da3b5a2 34-35
+  s_e7a3924fabe171::t_b0b5c8d15e71eb 131
+  s_e7a3924fabe171::t_c3eefdab81cafe 54-76
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/JointRootData.lean
+  s_e7a3924fabe171::t_c0c72078a1da8d 1-53,56-72,74-79,82-89,93-97,100-107,111-115,118-150,153-170,175-176,178-192,197-198,200-201
+  s_e7a3924fabe171::t_3329d3bcd9636a 73,80-81
+  s_e7a3924fabe171::t_cc3d51e0c39dad 151,172,177,194,199
+  s_e7a3924fabe171::t_e6fb0422020a78 152,174,196
+  s_e7a3924fabe171::t_8c5267254b858a 54-55
+  s_e7a3924fabe171::t_e82a25c3933c97 90-92,98-99,108-110,116-117
+  s_e7a3924fabe171::t_68463688a286ee 193,195
+  s_e7a3924fabe171::t_59bdc7a9f50a2b 171,173
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/CommonRoots.lean
+  s_e7a3924fabe171::t_cbc4925360e8d9 118,152-157,162
+  s_e7a3924fabe171::t_e7e85a07b34c77 14-18
+  s_e7a3924fabe171::t_724cb5a3c2f925 1-13,19-42,48-65,67-74,185
+  s_e7a3924fabe171::t_1fb49388b97b42 170
+  s_e7a3924fabe171::t_13860c9dd54659 161,163
+  s_e7a3924fabe171::t_492f9c881d7568 165-169,175,182-183
+  s_e7a3924fabe171::t_56e6fc6b067b1f 176-181,184
+  s_e7a3924fabe171::t_e4eab5397fb3e8 75-117,119-151,158-160,164
+  s_e7a3924fabe171::t_3fedf6913982d8 66
+  s_e7a3924fabe171::t_ae69277fb4fe2f 171-174
+  s_e7a3924fabe171::t_edb0c938f485b6 43-47
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/EffectiveReductum.lean
+  s_e7a3924fabe171::t_ac29f1f8c95ee7 48,56,67
+  s_e7a3924fabe171::t_a0e06eb12a7ac9 1-47,49-55,57-66,68-85
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/GcdDegree.lean
+  s_e7a3924fabe171::t_c27a3bdfc68aa4 1-26
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Algebra/ReductumNatDegree.lean
+  s_e7a3924fabe171::t_7aee605e3463c0 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "062c0cee4ec385e68ad8e76e30c1fd022ed9ec8d",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": null
+    }
+  }
+}
