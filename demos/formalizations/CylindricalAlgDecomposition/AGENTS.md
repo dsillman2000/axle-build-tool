@@ -22,15 +22,17 @@ The PDF and everything under `docs/` are local-only reference material. They are
 - `docs/alphaxiv-summary.md` — a high-level summary of the paper, useful for orientation.
 - `docs/collins-cad-brief.md` — the condensed mathematical brief fed to Neon to obtain the
   blueprint; use it when the full transcription is too large to hand to a model.
-- `axbt_project.yml` — project root. Modules `Algebra` and `Analysis` live in
-  `CollinsCAD/Algebra/` and `CollinsCAD/Analysis/`. Environment is pinned to `lean-4.36.0`;
-  API timeout is 600 s (some proofs are expensive).
+- `axbt_project.yml` — project root. Modules `Algebra`, `Analysis`, and `CAD` live in
+  `CollinsCAD/Algebra/`, `CollinsCAD/Analysis/`, and `CollinsCAD/CAD/`. Environment is pinned
+  to `lean-4.36.0`; API timeout is 600 s (some proofs are expensive).
 - `.axbt/` — axbt's offline cache and failure artifacts (gitignore it). `manifest.json` holds
   declaration stamps; `failed/` holds exact submitted payloads and source maps.
 - `CollinsCAD/Algebra/` — algebraic Lean sources, one file per concept; import siblings by
   file stem (e.g. `import Algebra.Subresultant`).
 - `CollinsCAD/Analysis/` — analytic Lean sources; use `Analysis.*` for sibling imports and
   `Algebra.*` for algebraic dependencies. The Lean namespace remains `CollinsCAD`.
+- `CollinsCAD/CAD/` — projection and lifting sources; use `CAD.*` for sibling imports and
+  `Analysis.*` / `Algebra.*` for upstream dependencies.
 
 ## Development process
 
@@ -49,11 +51,29 @@ The PDF and everything under `docs/` are local-only reference material. They are
 
 ## Status
 
-Clusters A, B, and C are implemented and verified. `Analysis/Theorem1Mv.lean`
-specializes Collins' Theorem 1 (real-root form) to the normalized fibre
-polynomials of an `MvPolynomial` on a connected `S`, producing
-`IsRealDelineable P S`. Remaining blueprint work: clusters D (projection/lifting),
-E (CAD construction, DECOMP/DEFINE), and F (logic/EVAL/ELIM).
+Clusters A, B, C, and D are implemented and verified. `Analysis/Theorem1Mv.lean`
+specializes Collins' Theorem 1 to normalized multivariate fibres, and `CAD/`
+implements projection definitions, effective reducta, Collins Theorems 4 and 5,
+pairwise branch coincidence, and fundamental lifting. Remaining blueprint work:
+cluster E (CAD construction, DECOMP/DEFINE) and cluster F (logic/EVAL/ELIM).
+
+### Cluster D notes
+
+- `CAD/ProjectionDef.lean` defines `reductaSet`, `projL`, `projS1`, `projS2`, and
+  `collinsProj`. Nonzero constant reducta contribute to `projL`; this is necessary
+  for `projection_effective_reductum`.
+- `CAD/EffectiveReductum.lean` proves the effective-reductum theorem.
+  `CAD/GcdDegreeConstancy.lean` transports the PSC zero/nonzero pattern across a
+  projection-invariant base set, including the `j < min(deg B₁, deg B₂)` boundary.
+- `CAD/Theorem4.lean` handles nonzero constant fibres explicitly and derives the
+  positive-degree case from GCD-degree constancy and Collins Theorem 3.
+- `CAD/CommonRoots.lean`, `CAD/LocalRootData.lean`, `CAD/JointRootData.lean`, and
+  `CAD/JointGcdDegree.lean` prove the local common-root multiplicity-sum formula.
+  `CAD/Pairwise.lean` turns constant GCD degree into clopen branch coincidence.
+- `CAD/Lifting.lean` exports `projection_fundamental_lifting`: an explicit finite,
+  strictly ordered continuous family covering exactly the union of factor roots.
+  The theorem assumes every factor fibre is nonzero on the base set; globally
+  nonzero polynomials can still have identically zero fibres.
 
 ### Cluster C notes
 
@@ -108,7 +128,7 @@ E (CAD construction, DECOMP/DEFINE), and F (logic/EVAL/ELIM).
   `isRealDelineable_of_fiber_natDegree_eq_zero` handles nonzero constant fibres.
   `fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero` provides the reductum/fibre bridge
   needed by effective-reductum arguments.
-- Next step: Cluster D (projection operator and Theorems 4/5).
+- Next step: Cluster E (CAD construction, DECOMP/DEFINE).
 
 ### Cluster A notes
 

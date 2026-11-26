@@ -20,7 +20,7 @@ theorem reductum_natDegree_lt {R : Type*} [Semiring R] (p : Polynomial R) (k : �
 theorem reductum_support_card_le {R : Type*} [Semiring R] (p : Polynomial R) (k : ℕ) :
     (reductum k p).support.card ≤ p.support.card - k := by
   induction k with
-  | zero => simp
+  | zero => simp [reductum]
   | succ k ih =>
       have hcard := Polynomial.card_support_eraseLead (f := reductum k p)
       simp [reductum, hcard]

@@ -7,6 +7,8 @@ modules:
     dir: CollinsCAD/Algebra
   Analysis:
     dir: CollinsCAD/Analysis
+  CAD:
+    dir: CollinsCAD/CAD
 
 axle:
   environment: lean-4.36.0

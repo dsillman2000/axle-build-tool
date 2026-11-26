@@ -6,12 +6,13 @@ Lean 4 / Mathlib formalization of George E. Collins' cylindrical algebraic decom
 
 - `Algebra` → `CollinsCAD/Algebra/`
 - `Analysis` → `CollinsCAD/Analysis/`
+- `CAD` → `CollinsCAD/CAD/`
 
 Imports use `Algebra.*` and `Analysis.*`; the Lean namespace remains `CollinsCAD`.
 
 ## Current coverage
 
-Clusters A–C are implemented and verified: reducta and variable splitting, subresultants and Collins Theorems 2–3, root continuity, local root functions, and Theorem 1 for polynomial families and multivariate fibres. Reusable APIs include the UFD-valued Theorem 2, a shared Vieta-subsequence helper, local complex root-multiplicity constancy, nonzero constant-fibre delineability, and the reductum/fibre bridge.
+Clusters A–D are implemented and verified: reducta and variable splitting, subresultants and Collins Theorems 2–3, root continuity, Theorem 1, Collins projection, effective reducta, Theorem 4, pairwise branch coincidence, and fundamental lifting. The lifting API includes an explicit ordered continuous family whose range is exactly the union of factor-root sets, under the necessary nonzero-fibre hypothesis.
 
 ## Development
 
