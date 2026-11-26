@@ -37,6 +37,31 @@ theorem rootMultiplicity_map_eq {q : Polynomial ℝ} (hq : q ≠ 0) (x : ℝ) :
       simpa using hmapdiv
     exact (Polynomial.le_rootMultiplicity_iff hmapne).mpr hdiv'
 
+/-- A polynomial whose fibres are nonzero constants has no real roots and is
+    therefore real-delineable with the empty root family. -/
+theorem isRealDelineable_of_fiber_natDegree_eq_zero
+    {r : ℕ} (P : MvPolynomial (Fin (r + 1)) ℝ) (S : Set (Fin r → ℝ))
+    (hdeg0 : ∀ a ∈ S, (fiberPoly r P a).natDegree = 0)
+    (hne : ∀ a ∈ S, fiberPoly r P a ≠ 0) :
+    IsRealDelineable P S := by
+  refine ⟨0, (fun i : Fin 0 => Fin.elim0 i), (fun i : Fin 0 => Fin.elim0 i),
+    ?_, ?_, ?_, ?_⟩
+  · intro i
+    exact Fin.elim0 i
+  · intro i
+    exact Fin.elim0 i
+  · intro a ha x hx
+    exfalso
+    have hc : fiberPoly r P a = Polynomial.C ((fiberPoly r P a).coeff 0) :=
+      Polynomial.eq_C_of_natDegree_eq_zero (hdeg0 a ha)
+    have hc0 : (fiberPoly r P a).coeff 0 ≠ 0 := by
+      intro hz
+      exact hne a ha (by rw [hc, hz, Polynomial.C_0])
+    rw [hc, Polynomial.eval_C] at hx
+    exact hc0 hx
+  · intro i
+    exact Fin.elim0 i
+
 /-- Collins' Theorem 1 (real-root form) for a real polynomial in $r+1$
     variables: if the leading coefficient does not vanish on a connected set
     $S$ and the number of distinct complex roots of each fibre is invariant,
@@ -176,11 +201,6 @@ theorem delineability_theorem_1_real_mv
         _ = e i := (hfroot i ai).2.2
   · intro a ha x hx
     let ai : S := ⟨a, ha⟩
-    have hcai : c ai ≠ 0 := inv_ne_zero (Complex.ofReal_ne_zero.mpr (hcne ai))
-    have hqne : q ai ≠ 0 := by
-      intro hzero
-      have : (q ai).coeff d = 0 := by simp [hzero]
-      exact hcne ai this
     have hrootR : (q ai).IsRoot x := by
       rw [Polynomial.IsRoot.def]
       simpa [q] using hx

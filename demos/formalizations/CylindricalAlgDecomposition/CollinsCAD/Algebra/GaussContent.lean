@@ -93,4 +93,64 @@ theorem subresultant_gauss_content_lift {R : Type*} [CommRing R] [IsDomain R]
     exact hnd
   exact le_antisymm hleft hright
 
+/-- Collins' Theorem 2 over a UFD, obtained by transporting the field-valued
+    statement to the fraction field. -/
+theorem subresultant_deg_gcd_eq_least_nonzero_psc_ufd
+    {R : Type*} [CommRing R] [IsDomain R] [UniqueFactorizationMonoid R]
+    [DecidableEq R] [DecidableEq (FractionRing R)]
+    [GCDMonoid (Polynomial R)] [NormalizedGCDMonoid R]
+    (A B : Polynomial R) (hA0 : A ≠ 0) (hB0 : B ≠ 0) (k : ℕ) :
+    (gcd A B).natDegree = k ↔
+      psc A B k ≠ 0 ∧ ∀ j < k, psc A B j = 0 := by
+  classical
+  let K := FractionRing R
+  let φ : R →+* K := algebraMap R K
+  let AR := A.map φ
+  let BR := B.map φ
+  have hinj : Function.Injective φ := FaithfulSMul.algebraMap_injective R K
+  have hAφ0 : AR ≠ 0 := (Polynomial.map_ne_zero_iff hinj).mpr hA0
+  have hBφ0 : BR ≠ 0 := (Polynomial.map_ne_zero_iff hinj).mpr hB0
+  have hdeg : (gcd A B).natDegree = (EuclideanDomain.gcd AR BR).natDegree := by
+    simpa [AR, BR, φ] using subresultant_gauss_content_lift A B hA0 hB0
+  have hpsc : ∀ j, φ (psc A B j) = psc AR BR j := by
+    intro j
+    have hAlc : A.leadingCoeff ≠ 0 := Polynomial.leadingCoeff_ne_zero.mpr hA0
+    have hBlc : B.leadingCoeff ≠ 0 := Polynomial.leadingCoeff_ne_zero.mpr hB0
+    have hφAlc : φ A.leadingCoeff ≠ 0 := by
+      intro hz
+      exact hAlc (hinj (by simpa using hz))
+    have hφBlc : φ B.leadingCoeff ≠ 0 := by
+      intro hz
+      exact hBlc (hinj (by simpa using hz))
+    exact psc_map φ A B j (Or.inl hφAlc) (Or.inl hφBlc)
+  constructor
+  · intro hdk
+    have hdkK : (EuclideanDomain.gcd AR BR).natDegree = k := by
+      rw [← hdeg]
+      exact hdk
+    have hfield :=
+      (subresultant_deg_gcd_eq_least_nonzero_psc AR BR hAφ0 hBφ0 k).mp hdkK
+    refine ⟨?_, ?_⟩
+    · intro hz
+      apply hfield.1
+      rw [← hpsc k, hz, map_zero]
+    · intro j hj
+      have hz := hfield.2 j hj
+      rw [← hpsc j] at hz
+      exact hinj (by simpa using hz)
+  · rintro ⟨hpsc_k, hzeros⟩
+    have hpsc_kK : psc AR BR k ≠ 0 := by
+      intro hz
+      apply hpsc_k
+      apply hinj
+      rw [hpsc k, hz, map_zero]
+    have hzerosK : ∀ j < k, psc AR BR j = 0 := by
+      intro j hj
+      rw [← hpsc j, hzeros j hj, map_zero]
+    have hfield :=
+      (subresultant_deg_gcd_eq_least_nonzero_psc AR BR hAφ0 hBφ0 k).mpr
+        ⟨hpsc_kK, hzerosK⟩
+    rw [hdeg]
+    exact hfield
+
 end CollinsCAD

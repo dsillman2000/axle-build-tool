@@ -49,15 +49,11 @@ The PDF and everything under `docs/` are local-only reference material. They are
 
 ## Status
 
-Cluster A and Cluster B are implemented and verified. Cluster C is in progress: the
-definitions, analytic core, exact root-count continuity, local root uniqueness,
-continuous local root functions, the real/non-real partition, and local constancy of
-the real-root count are implemented and verified (`axbt build`: all selections OK).
-Cluster C is implemented and verified: `Analysis/Theorem1Mv.lean` specializes
-Collins' Theorem 1 (real-root form) to the normalized fibre polynomials of an
-`MvPolynomial` on a connected `S`, producing `IsRealDelineable P S`. Remaining
-blueprint work: clusters D (projection/lifting), E (CAD construction,
-DECOMP/DEFINE), F (logic/EVAL/ELIM).
+Clusters A, B, and C are implemented and verified. `Analysis/Theorem1Mv.lean`
+specializes Collins' Theorem 1 (real-root form) to the normalized fibre
+polynomials of an `MvPolynomial` on a connected `S`, producing
+`IsRealDelineable P S`. Remaining blueprint work: clusters D (projection/lifting),
+E (CAD construction, DECOMP/DEFINE), and F (logic/EVAL/ELIM).
 
 ### Cluster C notes
 
@@ -66,12 +62,13 @@ DECOMP/DEFINE), F (logic/EVAL/ELIM).
   derives invariance on a connected set from nonvanishing by the intermediate value theorem.
 - `Analysis/RootContinuity.lean` proves `cauchy_root_bound` (roots of a monic degree-$d$
   polynomial satisfy $\|z\| \le \max 1 \sum_{k<d}\|P_k\|$), the coefficient-vector helpers
-  `polyOfCoeffs`/`coeff_polyOfCoeffs`/`polyOfCoeffs_self`, and the Vieta--compactness lemma
-  `exists_root_near_of_coeff_close`: a root of $P_0$ persists as a nearby root of every
-  sufficiently close monic polynomial of the same degree. Its proof enumerates roots via
+  `polyOfCoeffs`/`coeff_polyOfCoeffs`/`polyOfCoeffs_self`, and the shared
+  `exists_vieta_subsequence_of_coeff_close` helper. The helper enumerates roots via
   `roots.toList`/`List.ofFn`, bounds them by the Cauchy bound, extracts a convergent
   subsequence with `IsCompact.tendsto_subseq`, and identifies the limit using
   `Polynomial.funext` (evaluation convergence avoids needing continuity of the Vieta map).
+  Both `exists_root_near_of_coeff_close` and `roots_count_in_ball_eq_of_coeff_close`
+  reuse this core.
   `roots_persist_near_of_coeff_close` extends this to all distinct roots at once by
   finite induction over `roots.toFinset` with a minimum of the individual moduli.
 - `roots_count_in_ball_eq_of_coeff_close` is the exact node-20 statement: the number of
@@ -92,6 +89,8 @@ DECOMP/DEFINE), F (logic/EVAL/ELIM).
 - `local_continuous_root_functions` and `local_real_root_functions` provide continuous
   root functions on a neighbourhood, with real centres giving real-valued functions;
   `conj_root_of_real_coeff` and `real_of_unique_root_in_real_ball` drive the partition.
+  `rootMultiplicity_locally_constant_of_continuous_root_in_ball` exports local constancy
+  of complex root multiplicities for reuse by projection arguments.
   `real_root_count_locally_constant` proves the number of distinct real roots is locally
   constant by a `Finset.card_bij` between the real roots at nearby points.
 - `real_root_count_constant_on_preconnected` uses `IsLocallyConstant.iff_exists_open`
@@ -105,7 +104,10 @@ DECOMP/DEFINE), F (logic/EVAL/ELIM).
   polynomials of an `MvPolynomial` on a connected `S`. The fibre is scaled by the
   inverse of its leading coefficient; `rootMultiplicity_map_eq` transfers multiplicities
   from $\mathbb{R}$ to $\mathbb{C}$, and `Polynomial.roots_C_mul` makes the scaling
-  invisible to roots. `delineability_theorem_1_real_mv` yields `IsRealDelineable P S`.
+  invisible to roots. `delineability_theorem_1_real_mv` yields `IsRealDelineable P S`;
+  `isRealDelineable_of_fiber_natDegree_eq_zero` handles nonzero constant fibres.
+  `fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero` provides the reductum/fibre bridge
+  needed by effective-reductum arguments.
 - Next step: Cluster D (projection operator and Theorems 4/5).
 
 ### Cluster A notes
@@ -134,7 +136,8 @@ DECOMP/DEFINE), F (logic/EVAL/ELIM).
   subtraction rewrite.
 - The UFD/Gauss node (`subresultant_gauss_content_lift`) uses
   `IsLocalization.integerNormalization` and `IsPrimitive.dvd_iff_fraction_map_dvd_fraction_map`.
-  Its statement needs explicit decidable-equality and GCD instances.
+  `subresultant_deg_gcd_eq_least_nonzero_psc_ufd` composes this lift with the field-valued
+  Theorem 2 and `psc_map` to export Collins Theorem 2 over a UFD.
 
 ### Mathlib API gotchas encountered
 

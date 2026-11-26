@@ -9,6 +9,10 @@ Lean 4 / Mathlib formalization of George E. Collins' cylindrical algebraic decom
 
 Imports use `Algebra.*` and `Analysis.*`; the Lean namespace remains `CollinsCAD`.
 
+## Current coverage
+
+Clusters A–C are implemented and verified: reducta and variable splitting, subresultants and Collins Theorems 2–3, root continuity, local root functions, and Theorem 1 for polynomial families and multivariate fibres. Reusable APIs include the UFD-valued Theorem 2, a shared Vieta-subsequence helper, local complex root-multiplicity constancy, nonzero constant-fibre delineability, and the reductum/fibre bridge.
+
 ## Development
 
 There is no local Lean toolchain. `axbt` submits self-contained payloads to the Axle API.

@@ -1,5 +1,6 @@
 import Mathlib
 import Algebra.EvalLastComm
+import Algebra.Reductum
 
 namespace CollinsCAD
 
@@ -27,6 +28,28 @@ theorem fiberPoly_eval (r : ℕ) (P : MvPolynomial (Fin (r + 1)) ℝ)
     (a : Fin r → ℝ) (x : ℝ) :
     Polynomial.eval x (fiberPoly r P a) = MvPolynomial.eval (Fin.snoc a x) P := by
   rw [fiberPoly, eval_last_comm]
+
+/-- If the leading coefficients of the first $k$ reducta vanish at $a$, then
+    evaluating the fibre at $a$ agrees with evaluating the $k$-th reductum. -/
+theorem fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero
+    {r k : ℕ} (P : MvPolynomial (Fin (r + 1)) ℝ) (a : Fin r → ℝ)
+    (h : ∀ i < k, MvPolynomial.eval a
+      (reductum i (finLastEquiv ℝ r P)).leadingCoeff = 0) :
+    fiberPoly r P a =
+      (reductum k (finLastEquiv ℝ r P)).map (MvPolynomial.eval a) := by
+  let q := finLastEquiv ℝ r P
+  induction k with
+  | zero => rfl
+  | succ k ih =>
+    have hk : MvPolynomial.eval a (reductum k q).leadingCoeff = 0 :=
+      h k (Nat.lt_succ_self k)
+    have hprev : fiberPoly r P a = (reductum k q).map (MvPolynomial.eval a) :=
+      ih (fun i hi => h i (Nat.lt_succ_of_lt hi))
+    rw [hprev, reductum_succ]
+    have hrec := congrArg (Polynomial.map (MvPolynomial.eval a))
+      (Polynomial.eraseLead_add_monomial_natDegree_leadingCoeff (reductum k q))
+    simpa only [Polynomial.map_add, Polynomial.map_monomial, hk,
+      Polynomial.monomial_zero_right, add_zero] using hrec.symm
 
 /-- A polynomial is sign-invariant on $S$ if $\operatorname{sign}(P(a))$ is the
     same for every $a \in S$. -/
@@ -86,7 +109,7 @@ theorem SignInvariantPoly.of_connected_ne_zero {P : MvPolynomial (Fin r) ℝ}
       exact hne x hxS hx0
     have hs0 : SignType.sign (f a0) = 1 := (sign_eq_one_iff).mpr hpos0
     have hs : SignType.sign (f a) = 1 := (sign_eq_one_iff).mpr hpos
-    simpa [f, hs0, hs]
+    simp [f, hs0, hs]
   · have hneg0 : f a0 < 0 := lt_of_le_of_ne (le_of_not_gt hpos0) (hne a0 ha0)
     have hneg : f a < 0 := by
       by_contra hnneg
@@ -98,7 +121,7 @@ theorem SignInvariantPoly.of_connected_ne_zero {P : MvPolynomial (Fin r) ℝ}
       exact hne x hxS hx0
     have hs0 : SignType.sign (f a0) = -1 := (sign_eq_neg_one_iff).mpr hneg0
     have hs : SignType.sign (f a) = -1 := (sign_eq_neg_one_iff).mpr hneg
-    simpa [f, hs0, hs]
+    simp [f, hs0, hs]
 
 /-- A finite strictly ordered family of continuous functions $f_i$ delineates
     the real roots of $P$ on $S$ if each $f_i(a)$ is a root of the fibre
@@ -115,9 +138,9 @@ def IsRealDelineable (P : MvPolynomial (Fin (r + 1)) ℝ) (S : Set (Fin r → �
     (∀ (i j : Fin k) (a : Fin r → ℝ), a ∈ S → i < j → f i a < f j a)
 
 /-- The full complex analogue of delineability: a strictly ordered family of
-    continuous real root functions together with a family of continuous
-    non-real root functions, exhausting all complex roots with constant
-    multiplicities. -/
+    continuous real root functions together with a pairwise-distinct family of
+    continuous non-real root functions, exhausting all complex roots with
+    constant multiplicities. -/
 def IsDelineable (P : MvPolynomial (Fin (r + 1)) ℝ) (S : Set (Fin r → ℝ)) : Prop :=
   ∃ (k l : ℕ) (fr : Fin k → (Fin r → ℝ) → ℝ) (fc : Fin l → (Fin r → ℝ) → ℂ)
       (er : Fin k → ℕ) (ec : Fin l → ℕ),
@@ -134,6 +157,7 @@ def IsDelineable (P : MvPolynomial (Fin (r + 1)) ℝ) (S : Set (Fin r → ℝ)) 
     (∀ a ∈ S, ∀ z : ℂ,
       Polynomial.eval z ((fiberPoly r P a).map (algebraMap ℝ ℂ)) = 0 →
         (∃ i, (fr i a : ℂ) = z) ∨ (∃ i, fc i a = z)) ∧
-    (∀ (i j : Fin k) (a : Fin r → ℝ), a ∈ S → i < j → fr i a < fr j a)
+    (∀ (i j : Fin k) (a : Fin r → ℝ), a ∈ S → i < j → fr i a < fr j a) ∧
+    (∀ (i j : Fin l) (a : Fin r → ℝ), a ∈ S → i ≠ j → fc i a ≠ fc j a)
 
 end CollinsCAD

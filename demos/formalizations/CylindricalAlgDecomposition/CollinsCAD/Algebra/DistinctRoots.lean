@@ -1,5 +1,4 @@
 import Mathlib
-import Algebra.SubresultantTheorem2
 
 namespace CollinsCAD
 
@@ -60,9 +59,6 @@ theorem card_roots_toFinset_eq_sub_gcd {P : Polynomial ℂ} (hP : P ≠ 0) :
       exact by simpa [S] using (Polynomial.mem_roots'.mpr ⟨hP, hrootP⟩)
     have hzero : ∀ α ∈ S, α ∉ D.roots.toFinset → Multiset.count α D.roots = 0 := by
       intro α hαS hnot
-      have hm := hDmult α hαS
-      have hpos : 0 < Polynomial.rootMultiplicity α P := (Polynomial.rootMultiplicity_pos hP).mpr
-        (Polynomial.isRoot_of_mem_roots (by simpa [S] using hαS))
       have hnotroot : ¬ D.IsRoot α := by
         intro hr
         exact hnot (by simpa using (Polynomial.mem_roots'.mpr ⟨hD0, hr⟩))

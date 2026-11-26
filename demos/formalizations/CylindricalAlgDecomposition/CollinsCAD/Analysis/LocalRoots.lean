@@ -1,6 +1,5 @@
 import Mathlib
 import Analysis.RootContinuity
-import Analysis.Delineability
 
 namespace CollinsCAD
 
@@ -44,16 +43,16 @@ theorem exists_separation_radius (s : Finset ℂ) :
           contradiction
         · have hDle : D ≤ dist a w := Finset.min'_le _ _ (Finset.mem_image.mpr ⟨w, hwt, rfl⟩)
           have hle := min_le_right ε (D / 2)
-          nlinarith
+          linarith
       · rcases hw with hwa | hwt
         · subst w
           have hDle : D ≤ dist a z := Finset.min'_le _ _ (Finset.mem_image.mpr ⟨z, hzt, rfl⟩)
           have hle := min_le_right ε (D / 2)
           rw [dist_comm]
-          nlinarith
+          linarith
         · have hle := min_le_left ε (D / 2)
           have hs := hsep z hzt w hwt hzw
-          nlinarith
+          linarith
     · refine ⟨ε, hεpos, ?_⟩
       intro z hz w hw hzw
       rw [Finset.mem_insert] at hz hw
@@ -106,7 +105,7 @@ theorem unique_root_in_ball_of_count
     have htri : dist z w ≤ dist z v + dist v w := dist_triangle _ _ _
     rw [dist_comm z v] at htri
     have hs := hsep z (by simpa [s] using hz) w (by simpa [s] using hw) hzw
-    nlinarith
+    linarith
   have hTcard : (s.biUnion T).card = ∑ z ∈ s, (T z).card := Finset.card_biUnion hdisj
   have hTsubset : s.biUnion T ⊆ Q.roots.toFinset := by
     intro v hv
@@ -256,28 +255,29 @@ theorem locally_unique_roots_of_monic_family
     intro k
     simp
     exact hδpos
-  refine ⟨U, ε, hUopen, hx0U, hεpos, ?_, ?_, ?_⟩
-  · simpa [s] using hsep4
-  · intro z hz x hxU
+  have hcount_all : ∀ x ∈ U, ∀ z' ∈ (p x0).roots.toFinset,
+      ((p x).roots.filter (fun u => dist u z' < ε)).card =
+        (p x0).roots.count z' := by
+    intro x hxU z' hz'
     have hclose : ∀ k ≤ d, ‖(p x).coeff k - (p x0).coeff k‖ < δ := by
       intro k hk
       exact hxU ⟨k, by omega⟩
-    have hcount_all : ∀ z' ∈ (p x0).roots.toFinset,
-        ((p x).roots.filter (fun u => dist u z' < ε)).card =
-          (p x0).roots.count z' := by
-      intro z' hz'
-      have hδle_choose : δ ≤ Classical.choose (hone z' hz') := by
-        have hle := hδle z' hz'
-        dsimp [δfun] at hle
-        rw [dite_eq_left hz'] at hle
-        exact hle
-      apply (Classical.choose_spec (hone z' hz')).2 (p x) (hmonic x) (by simp [hdeg x])
-      intro k hk
-      exact lt_of_lt_of_le (hclose k hk) hδle_choose
-    have hcard : (p x).roots.toFinset.card = (p x0).roots.toFinset.card := by
-      rw [hm x, hm x0]
+    have hδle_choose : δ ≤ Classical.choose (hone z' hz') := by
+      have hle := hδle z' hz'
+      dsimp [δfun] at hle
+      rw [dite_eq_left hz'] at hle
+      exact hle
+    apply (Classical.choose_spec (hone z' hz')).2 (p x) (hmonic x) (by simp [hdeg x])
+    intro k hk
+    exact lt_of_lt_of_le (hclose k hk) hδle_choose
+  have hcard : ∀ x, (p x).roots.toFinset.card = (p x0).roots.toFinset.card := by
+    intro x
+    rw [hm x, hm x0]
+  refine ⟨U, ε, hUopen, hx0U, hεpos, ?_, ?_, ?_⟩
+  · simpa [s] using hsep4
+  · intro z hz x hxU
     have huniq := (unique_root_in_ball_of_count (p x0) (p x) ε hεpos hsep
-      hcount_all hcard).1 z hz
+      (hcount_all x hxU) (hcard x)).1 z hz
     rcases huniq with ⟨w, hw, huniqw⟩
     refine ⟨w, ?_, ?_⟩
     · exact ⟨Polynomial.isRoot_of_mem_roots (Multiset.mem_toFinset.mp hw.1), hw.2⟩
@@ -286,25 +286,8 @@ theorem locally_unique_roots_of_monic_family
       refine ⟨Multiset.mem_toFinset.mpr
         ((Polynomial.mem_roots (hmonic x).ne_zero).mpr hv.1), hv.2⟩
   · intro x hxU w hw
-    have hclose : ∀ k ≤ d, ‖(p x).coeff k - (p x0).coeff k‖ < δ := by
-      intro k hk
-      exact hxU ⟨k, by omega⟩
-    have hcount_all : ∀ z' ∈ (p x0).roots.toFinset,
-        ((p x).roots.filter (fun u => dist u z' < ε)).card =
-          (p x0).roots.count z' := by
-      intro z' hz'
-      have hδle_choose : δ ≤ Classical.choose (hone z' hz') := by
-        have hle := hδle z' hz'
-        dsimp [δfun] at hle
-        rw [dite_eq_left hz'] at hle
-        exact hle
-      apply (Classical.choose_spec (hone z' hz')).2 (p x) (hmonic x) (by simp [hdeg x])
-      intro k hk
-      exact lt_of_lt_of_le (hclose k hk) hδle_choose
-    have hcard : (p x).roots.toFinset.card = (p x0).roots.toFinset.card := by
-      rw [hm x, hm x0]
     simpa [s] using (unique_root_in_ball_of_count (p x0) (p x) ε hεpos hsep
-      hcount_all hcard).2 w hw
+      (hcount_all x hxU) (hcard x)).2 w hw
 /-- Evaluation of a polynomial of degree at most $d$ as a sum over
     $\mathrm{Fin}(d+1)$. -/
 theorem eval_eq_sum_fin {P : Polynomial ℂ} {d : ℕ} (hd : P.natDegree ≤ d) (z : ℂ) :
@@ -352,7 +335,7 @@ theorem continuous_unique_root_in_ball
     have htri : ‖zsel (u (ns n))‖ ≤ ‖zsel (u (ns n)) - α‖ + ‖α‖ := by
       simpa [dist_eq_norm] using dist_triangle (zsel (u (ns n))) α 0
     rw [dist_eq_norm] at hdist
-    nlinarith
+    linarith
   let K : Set ℂ := Metric.closedBall (0 : ℂ) (‖α‖ + ε)
   have hKcpt : IsCompact K := ProperSpace.isCompact_closedBall 0 (‖α‖ + ε)
   have hmem : ∀ n, zsel (u (ns n)) ∈ K := by
@@ -402,7 +385,7 @@ theorem continuous_unique_root_in_ball
     exact hclosed.mem_of_tendsto hmstend hev
   have hw_eq : w = zsel x := by
     apply hisolate x w hwroot
-    nlinarith
+    linarith
   change Tendsto ((fun n => zsel (u (ns n))) ∘ ms) atTop (nhds (zsel x))
   simpa [hw_eq] using hmstend
 
@@ -512,7 +495,7 @@ theorem local_continuous_root_functions
           have hs' := hsep4 z hz z' (by simpa [s] using hz's) hneq
           have htri : dist z z' ≤ dist z w + dist w z' := dist_triangle _ _ _
           have hwdist' : dist z w < 2 * ε := by simpa [dist_comm] using hwdist
-          nlinarith
+          linarith
         subst z'
         exact (Classical.choose_spec (huniq z hz x.1 x.2)).2 w ⟨hwroot, hdistz'⟩
       exact continuous_unique_root_in_ball pU hcoeffU d hdegU z ε hεpos hsel hisolate
@@ -529,6 +512,103 @@ theorem local_continuous_root_functions
   · simpa [s] using huniq
   · simpa [s] using hcover
   · simpa [s] using hsep4
+
+/-- If a continuous complex root branch passes through an isolated base root
+    `z0`, and every nearby polynomial has a unique root in $B(z_0,\varepsilon)$,
+    then the multiplicity of the branch is locally constant. -/
+theorem rootMultiplicity_locally_constant_of_continuous_root_in_ball
+    {X : Type*} [PseudoMetricSpace X]
+    (p : X → Polynomial ℂ)
+    (hcoeff : ∀ k : ℕ, Continuous (fun x => (p x).coeff k))
+    (d : ℕ) (hd : 0 < d)
+    (hdeg : ∀ x, (p x).natDegree = d)
+    (hmonic : ∀ x, (p x).Monic)
+    (x0 : X) (z0 : ℂ) (ε : ℝ) (hε : 0 < ε)
+    (hz0root : (p x0).IsRoot z0)
+    (hsep : ∀ β ∈ (p x0).roots.toFinset, β ≠ z0 → 2 * ε ≤ dist β z0)
+    (U : Set X) (hUopen : IsOpen U) (hx0U : x0 ∈ U)
+    (f : X → ℂ) (hf : ContinuousOn f U)
+    (hfroot : ∀ x ∈ U, (p x).IsRoot (f x))
+    (hf0 : f x0 = z0)
+    (huniq : ∀ x ∈ U, ∃! w : ℂ, (p x).IsRoot w ∧ dist w z0 < ε) :
+    ∃ V : Set X, IsOpen V ∧ x0 ∈ V ∧ V ⊆ U ∧
+      ∀ x ∈ V, Polynomial.rootMultiplicity (f x) (p x) =
+        Polynomial.rootMultiplicity z0 (p x0) := by
+  classical
+  obtain ⟨δ, hδpos, hδprop⟩ := roots_count_in_ball_eq_of_coeff_close
+    (p x0) (hmonic x0) (by simpa [hdeg x0] using hd) z0 hz0root ε hε hsep
+  let Vcoeff : Set X := {y | ∀ k : Fin (d + 1),
+    ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ}
+  have hVcoeffopen : IsOpen Vcoeff := by
+    dsimp [Vcoeff]
+    have h : IsOpen (⋂ k : Fin (d + 1),
+        {y : X | ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ}) := by
+      apply isOpen_iInter_of_finite
+      intro k
+      exact isOpen_lt ((hcoeff (k : ℕ)).sub continuous_const).norm continuous_const
+    have hset : (⋂ k : Fin (d + 1),
+        {y : X | ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ}) =
+        {y : X | ∀ k : Fin (d + 1),
+          ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ} := by
+      ext y
+      simp
+    rw [← hset]
+    exact h
+  have hx0Vcoeff : x0 ∈ Vcoeff := by
+    intro k
+    simp
+    exact hδpos
+  have hUball : IsOpen (U ∩ {y | dist (f y) z0 < ε}) := by
+    rw [isOpen_iff_mem_nhds]
+    intro y hy
+    have hfy : ContinuousAt f y := hf.continuousAt (hUopen.mem_nhds hy.1)
+    have hball : {y | dist (f y) z0 < ε} ∈ nhds y := by
+      rw [show {y | dist (f y) z0 < ε} = f ⁻¹' Metric.ball z0 ε by
+        ext y
+        simp]
+      exact hfy.preimage_mem_nhds (Metric.isOpen_ball.mem_nhds hy.2)
+    exact inter_mem (hUopen.mem_nhds hy.1) hball
+  let V : Set X := (U ∩ {y | dist (f y) z0 < ε}) ∩ Vcoeff
+  have hVopen : IsOpen V := hUball.inter hVcoeffopen
+  have hx0V : x0 ∈ V := by
+    refine ⟨⟨hx0U, ?_⟩, hx0Vcoeff⟩
+    simpa [hf0] using hε
+  refine ⟨V, hVopen, hx0V, ?_, ?_⟩
+  · intro y hy
+    exact hy.1.1
+  · intro y hy
+    rcases hy with ⟨⟨hyU, hydist⟩, hyVcoeff⟩
+    have hclose : ∀ k ≤ d, ‖(p y).coeff k - (p x0).coeff k‖ < δ := by
+      intro k hk
+      exact hyVcoeff ⟨k, by omega⟩
+    have hclose' : ∀ k ≤ (p x0).natDegree,
+        ‖(p y).coeff k - (p x0).coeff k‖ < δ := by
+      intro k hk
+      exact hclose k (by simpa [hdeg x0] using hk)
+    have hcnt := hδprop (p y) (hmonic y) (by rw [hdeg y, hdeg x0]) hclose'
+    have huniqy := huniq y hyU
+    have hfyeq : f y = Classical.choose huniqy :=
+      (Classical.choose_spec huniqy).2 (f y) ⟨hfroot y hyU, hydist⟩
+    have hfilter : (p y).roots.filter (fun w => dist w z0 < ε) =
+        (p y).roots.filter (fun w => w = Classical.choose huniqy) := by
+      apply Multiset.filter_congr
+      intro w hw
+      constructor
+      · intro hwdist
+        have hwroot : (p y).IsRoot w := Polynomial.isRoot_of_mem_roots hw
+        exact (Classical.choose_spec huniqy).2 w ⟨hwroot, hwdist⟩
+      · intro heq
+        subst w
+        exact (Classical.choose_spec huniqy).1.2
+    have hcard : ((p y).roots.filter (fun w => dist w z0 < ε)).card =
+        (p y).roots.count (Classical.choose huniqy) := by
+      rw [hfilter, Multiset.filter_eq']
+      simp
+    rw [← Polynomial.count_roots (a := f y) (p y)]
+    rw [hfyeq]
+    rw [← hcard]
+    rw [hcnt]
+    rw [← Polynomial.count_roots (a := z0) (p x0)]
 
 /-- A real root at the base point stays real along a nearby continuous family
     of real-coefficient polynomials. -/
@@ -579,7 +659,7 @@ theorem real_root_count_locally_constant
       ((p x).roots.toFinset.filter (fun z => z.im = 0)).card =
       ((p x0).roots.toFinset.filter (fun z => z.im = 0)).card := by
   classical
-  obtain ⟨U, ε, g, hUopen, hx0U, hεpos, hcont, hrootprop, hrealpres,
+  obtain ⟨U, ε, g, hUopen, hx0U, hεpos, _hcont, hrootprop, hrealpres,
     hcover, hsep4, huniq⟩ :=
     local_real_root_functions p hcoeff d m hd hdeg hmonic hm hreal x0
   refine ⟨U, hUopen, hx0U, ?_⟩
@@ -606,7 +686,7 @@ theorem real_root_count_locally_constant
       have htri : dist z1 z2 ≤ dist z1 (g z1 x) + dist (g z1 x) z2 := dist_triangle _ _ _
       rw [← heq] at hd2
       have hd1' : dist z1 (g z1 x) < ε := by simpa [dist_comm] using hd1
-      nlinarith
+      linarith
     · intro w hw
       have hwrootmem : w ∈ (p x).roots.toFinset := (Finset.mem_filter.mp hw).1
       have hwreal : w.im = 0 := (Finset.mem_filter.mp hw).2
@@ -631,7 +711,7 @@ theorem real_root_count_locally_constant
           dist_triangle _ _ _
         rw [hdistcw] at htri
         rw [dist_comm z w] at htri
-        nlinarith
+        linarith
       refine ⟨z, Finset.mem_filter.mpr ⟨hzS, hzreal⟩, ?_⟩
       have hwball := (huniq z hzS x hx)
       have hg := hrootprop z hzS x hx

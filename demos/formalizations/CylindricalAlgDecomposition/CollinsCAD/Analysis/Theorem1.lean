@@ -1,6 +1,5 @@
 import Mathlib
 import Analysis.LocalRoots
-import Analysis.Delineability
 
 namespace CollinsCAD
 
@@ -174,7 +173,7 @@ theorem ordered_real_root_functions_of_family
       rw [Real.dist_eq] at hd1r hd2r
       rw [abs_sub_lt_iff] at hd1r hd2r
       dsimp [hfun]
-      nlinarith
+      linarith
     have huniqemb := Finset.orderEmbOfFin_unique (hkS y) hmem hstrict
     have hpoint : ((S y).orderEmbOfFin (hkS y)) i = hfun i := by
       rw [← huniqemb]
@@ -213,111 +212,34 @@ theorem ordered_real_root_functions_with_multiplicity
     have hloc : IsLocallyConstant mu := by
       rw [IsLocallyConstant.iff_exists_open]
       intro x0
-      obtain ⟨U, ε, g, hUopen, hx0U, hεpos, hcont, hrootprop, hrealpres,
-        hcover, hsep4, huniq⟩ :=
-        local_real_root_functions p hcoeff d m hd hdeg hmonic hm hreal x0
-      let T0 : Finset ℂ := (p x0).roots.toFinset.filter (fun z => z.im = 0)
-      let S0 : Finset ℝ := T0.image Complex.re
-      have hcardTS : (S0).card = (T0).card := by
-        dsimp [S0]
-        apply Finset.card_image_of_injOn
-        intro a ha b hb hab
-        apply Complex.ext
-        · exact hab
-        · rw [(Finset.mem_filter.mp ha).2, (Finset.mem_filter.mp hb).2]
-      let k0 : ℕ := (S0).card
-      have hk0 : ∀ y, ((p y).roots.toFinset.filter (fun z => z.im = 0)).card = k0 := by
-        intro y
-        dsimp [k0]
-        have hT : ((p y).roots.toFinset.filter (fun z => z.im = 0)).card =
-            ((p x0).roots.toFinset.filter (fun z => z.im = 0)).card :=
-          real_root_count_constant_on_preconnected p hcoeff d m hd hdeg hmonic hm hreal y x0
-        exact hT.trans (by simpa [T0] using hcardTS.symm)
-      have hfirootmem : ((f i x0 : ℝ) : ℂ) ∈ (p x0).roots.toFinset := by
-        exact Multiset.mem_toFinset.mpr
-          ((Polynomial.mem_roots (hmonic x0).ne_zero).mpr (hfroot i x0).1)
-      have hfiim : ((f i x0 : ℝ) : ℂ).im = 0 := (hfroot i x0).2
-      have hfiT : ((f i x0 : ℝ) : ℂ) ∈ T0 :=
-        Finset.mem_filter.mpr ⟨hfirootmem, hfiim⟩
-      have hfiS0 : f i x0 ∈ S0 := Finset.mem_image.mpr ⟨((f i x0 : ℝ) : ℂ), hfiT, by simp⟩
+      obtain ⟨U, ε, _g, hUopen, hx0U, hεpos, _hcont, _hrootprop,
+        huniq, _hcover, hsep4⟩ :=
+        local_continuous_root_functions p hcoeff d m hd hdeg hmonic hm x0
       let z0 : ℂ := ((f i x0 : ℝ) : ℂ)
-      have hz0roots : z0 ∈ (p x0).roots.toFinset := hfirootmem
-      have hz0im : z0.im = 0 := hfiim
-      have hsepz : ∀ β ∈ (p x0).roots.toFinset, β ≠ z0 → 2 * ε ≤ dist β z0 := by
+      have hz0root : (p x0).IsRoot z0 := (hfroot i x0).1
+      have hz0roots : z0 ∈ (p x0).roots.toFinset :=
+        Multiset.mem_toFinset.mpr
+          ((Polynomial.mem_roots (hmonic x0).ne_zero).mpr hz0root)
+      have hsepz : ∀ β ∈ (p x0).roots.toFinset, β ≠ z0 →
+          2 * ε ≤ dist β z0 := by
         intro β hβ hβz
-        have hs' := hsep4 z0 hz0roots β hβ (Ne.symm hβz)
+        have hs := hsep4 z0 hz0roots β hβ (Ne.symm hβz)
         rw [dist_comm]
-        nlinarith
-      obtain ⟨δ, hδpos, hδprop⟩ := roots_count_in_ball_eq_of_coeff_close
-        (p x0) (hmonic x0) (by simpa [hdeg x0] using hd) z0
-        (by exact (hfroot i x0).1) ε hεpos hsepz
-      let V : Set X := {y | ∀ k : Fin (d + 1),
-        ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ}
-      have hVopen : IsOpen V := by
-        have h : IsOpen (⋂ k : Fin (d + 1),
-            {y : X | ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ}) := by
-          apply isOpen_iInter_of_finite
-          intro k
-          exact isOpen_lt ((hcoeff (k : ℕ)).sub continuous_const).norm continuous_const
-        have hset : (⋂ k : Fin (d + 1),
-            {y : X | ‖(p y).coeff (k : ℕ) - (p x0).coeff (k : ℕ)‖ < δ}) = V := by
-          ext y
-          simp [V]
-        rw [← hset]
-        exact h
-      have hx0V : x0 ∈ V := by
-        intro k
-        simp
-        exact hδpos
-      let W : Set X := U ∩ V ∩ {y | dist ((f i y : ℝ) : ℂ) z0 < ε}
-      have hWopen : IsOpen W := by
-        dsimp [W]
-        refine (hUopen.inter hVopen).inter ?_
-        have hcontfi : Continuous (fun y => dist ((f i y : ℝ) : ℂ) z0) := by fun_prop
-        exact isOpen_lt hcontfi continuous_const
-      have hx0W : x0 ∈ W := by
-        refine ⟨⟨hx0U, hx0V⟩, ?_⟩
-        simpa [z0] using hεpos
-      refine ⟨W, hWopen, hx0W, ?_⟩
-      intro y hyW
-      rcases hyW with ⟨⟨hyU, hyV⟩, hydist⟩
-      have hclose : ∀ k ≤ d, ‖(p y).coeff k - (p x0).coeff k‖ < δ := by
-        intro k hk
-        exact hyV ⟨k, by omega⟩
-      have hclose' : ∀ kk ≤ (p x0).natDegree,
-          ‖(p y).coeff kk - (p x0).coeff kk‖ < δ := by
-        intro kk hk
-        exact hclose kk (by simpa [hdeg x0] using hk)
-      have hcnt := hδprop (p y) (hmonic y) (by rw [hdeg y, hdeg x0]) hclose'
-      have huniqz := huniq z0 hz0roots y hyU
-      have hz0eq : ((f i x0 : ℝ) : ℂ) = z0 := rfl
-      have hfyball : ((f i y : ℝ) : ℂ) ∈ (p y).roots.filter (fun w => dist w z0 < ε) := by
-        exact Multiset.mem_filter.mpr ⟨
-          ((Polynomial.mem_roots (hmonic y).ne_zero).mpr (hfroot i y).1), hydist⟩
-      have hfyeq : ((f i y : ℝ) : ℂ) = Classical.choose huniqz :=
-        (Classical.choose_spec huniqz).2 ((f i y : ℝ) : ℂ)
-          ⟨(hfroot i y).1, hydist⟩
-      have hfilter_eq : (p y).roots.filter (fun w => dist w z0 < ε) =
-          (p y).roots.filter (fun w => w = Classical.choose huniqz) := by
-        apply Multiset.filter_congr
-        intro w hwmem
-        constructor
-        · intro hdist
-          have hwroot : (p y).IsRoot w := Polynomial.isRoot_of_mem_roots hwmem
-          exact (Classical.choose_spec huniqz).2 w ⟨hwroot, hdist⟩
-        · intro heq
-          subst w
-          exact (Classical.choose_spec huniqz).1.2
-      have hcnt_eq : ((p y).roots.filter (fun w => dist w z0 < ε)).card =
-          (p y).roots.count (Classical.choose huniqz) := by
-        rw [hfilter_eq, Multiset.filter_eq']
-        simp
-      dsimp [mu, e]
-      rw [← Polynomial.count_roots (a := ((f i y : ℝ) : ℂ)) (p y)]
-      rw [hfyeq]
-      rw [← hcnt_eq]
-      rw [← Polynomial.count_roots (a := z0) (p x0)]
-      rw [hcnt]
+        linarith
+      have huniqz : ∀ y ∈ U, ∃! w : ℂ,
+          (p y).IsRoot w ∧ dist w z0 < ε := by
+        intro y hy
+        exact huniq z0 hz0roots y hy
+      have hficont : Continuous (fun y => ((f i y : ℝ) : ℂ)) :=
+        Complex.continuous_ofReal.comp (hfcont i)
+      obtain ⟨V, hVopen, hx0V, _hVU, hmult⟩ :=
+        rootMultiplicity_locally_constant_of_continuous_root_in_ball
+          p hcoeff d hd hdeg hmonic x0 z0 ε hεpos hz0root hsepz
+          U hUopen hx0U (fun y => ((f i y : ℝ) : ℂ))
+          hficont.continuousOn (fun y _ => (hfroot i y).1) rfl huniqz
+      refine ⟨V, hVopen, hx0V, ?_⟩
+      intro y hy
+      simpa [mu, z0] using hmult y hy
     change mu x = mu x0base
     exact hloc.apply_eq_of_preconnectedSpace x x0base
   exact ⟨k, f, e, hfcont, fun i x => ⟨hepos i, (hfroot i x).1, heq i x⟩, hfexhaust, hfmono⟩

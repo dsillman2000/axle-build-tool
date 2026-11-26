@@ -35,7 +35,7 @@ theorem psc_eq_zero_of_lt_gcd {K : Type*} [Field K] [DecidableEq K]
   have hB'deg : B'.natDegree = B.natDegree - h.natDegree := by
     rw [hBeq, Polynomial.natDegree_mul hh0 hB'0]
     omega
-  let t := (EuclideanDomain.gcd A B).natDegree - j - 1
+  let t := h.natDegree - j - 1
   have hk : (EuclideanDomain.gcd A B).natDegree = h.natDegree := rfl
   let up : Polynomial K := B' * X ^ t
   let vp : Polynomial K := -A' * X ^ t
@@ -56,7 +56,6 @@ theorem psc_eq_zero_of_lt_gcd {K : Type*} [Field K] [DecidableEq K]
     rw [Polynomial.natDegree_mul hB'0 (pow_ne_zero _ Polynomial.X_ne_zero),
       Polynomial.natDegree_X_pow]
     rw [hB'deg]
-    have hk : (EuclideanDomain.gcd A B).natDegree = h.natDegree := rfl
     dsimp [t]
     omega
   have hvpdeg : vp.natDegree < A.natDegree - j := by

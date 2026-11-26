@@ -143,40 +143,43 @@ theorem tendsto_eval_polyOfCoeffs {d : ℕ} {vseq : ℕ → Fin (d + 1) → ℂ}
     fun_prop
   exact (hcont.tendsto v).comp hv
 
-/-- Continuity of a single root: a root $\alpha$ of a monic polynomial forces
-    every sufficiently nearby monic polynomial of the same degree to have a
-    root in any prescribed neighbourhood of $\alpha$. -/
-theorem exists_root_near_of_coeff_close
-    (P0 : Polynomial ℂ) (_hmonic0 : P0.Monic) (hd0 : 0 < P0.natDegree)
-    (α : ℂ) (hαroot : P0.IsRoot α) (ε : ℝ) (hε : 0 < ε) :
-    ∃ δ > 0, ∀ P : Polynomial ℂ, P.Monic → P.natDegree = P0.natDegree →
-      (∀ k ≤ P0.natDegree, ‖P.coeff k - P0.coeff k‖ < δ) →
-      ∃ z : ℂ, P.IsRoot z ∧ dist z α < ε := by
+/-- A sequence of monic degree-$d$ polynomials with coefficients approaching
+    those of $P_0$ has a subsequence whose enumerated roots converge to a root
+    vector of $P_0$. The enumerations preserve multiplicities. -/
+theorem exists_vieta_subsequence_of_coeff_close
+    (P0 : Polynomial ℂ) (d : ℕ) (hd0 : 0 < d) (hdeg0 : P0.natDegree = d)
+    (Pseq : ℕ → Polynomial ℂ)
+    (hmonicP : ∀ n, (Pseq n).Monic)
+    (hdegP : ∀ n, (Pseq n).natDegree = d)
+    (hcloseP : ∀ n k, k ≤ d →
+      ‖(Pseq n).coeff k - P0.coeff k‖ < (1 : ℝ) / (n + 1)) :
+    ∃ (zseq : ℕ → Fin d → ℂ) (w : Fin d → ℂ) (φ : ℕ → ℕ),
+      (∀ n i, (Pseq n).IsRoot (zseq n i)) ∧
+      (∀ n, Multiset.map (zseq n) Finset.univ.val = (Pseq n).roots) ∧
+      StrictMono φ ∧
+      Tendsto (fun n => zseq (φ n)) atTop (nhds w) ∧
+      rootPoly d w = P0 ∧
+      P0.roots = (List.ofFn w : Multiset ℂ) := by
   classical
-  let d := P0.natDegree
   let M0 : ℝ := ∑ k ∈ Finset.range d, ‖P0.coeff k‖
   let B : ℝ := max 1 M0 + d + 1
-  by_contra hbad
-  push Not at hbad
-  have hseq : ∀ n : ℕ, ∃ P : Polynomial ℂ, P.Monic ∧ P.natDegree = d ∧
-      (∀ k ≤ d, ‖P.coeff k - P0.coeff k‖ < (1 : ℝ) / (n + 1)) ∧
-      ¬ ∃ z : ℂ, P.IsRoot z ∧ dist z α < ε := by
-    intro n
-    simpa [d] using hbad ((1 : ℝ) / (n + 1)) (by positivity)
-  choose Pseq hmonicP hdegP hcloseP hnoroot using hseq
   have hrootcard : ∀ n, (Pseq n).roots.card = d := by
     intro n
     have hc := Polynomial.Splits.natDegree_eq_card_roots (IsAlgClosed.splits (Pseq n))
-    simpa [hdegP n, d] using hc.symm
+    simpa [hdegP n] using hc.symm
   let lseq : ℕ → List ℂ := fun n => (Pseq n).roots.toList
   have hlen : ∀ n, (lseq n).length = d := by
     intro n
     simpa [lseq, Multiset.length_toList] using hrootcard n
-  let zseq : ℕ → (Fin d → ℂ) := fun n i =>
+  let zseq : ℕ → Fin d → ℂ := fun n i =>
     (lseq n).get ⟨i, by simp [hlen n]⟩
   have hofn : ∀ n, List.ofFn (zseq n) = lseq n := by
     intro n
     simpa [zseq, hlen n] using (List.ofFn_get (lseq n))
+  have hms : ∀ n, Multiset.map (zseq n) Finset.univ.val = (Pseq n).roots := by
+    intro n
+    rw [Fin.univ_val_map, hofn]
+    simp [lseq]
   have hzroot : ∀ n i, (Pseq n).IsRoot (zseq n i) := by
     intro n i
     apply Polynomial.isRoot_of_mem_roots
@@ -185,7 +188,7 @@ theorem exists_root_near_of_coeff_close
     simpa [lseq] using (Multiset.mem_toList.mp hm)
   have hbound : ∀ n i, ‖zseq n i‖ ≤ B := by
     intro n i
-    have hb := cauchy_root_bound (hmonicP n) (by simpa [hdegP n, d] using hd0) (hzroot n i)
+    have hb := cauchy_root_bound (hmonicP n) (by simpa [hdegP n] using hd0) (hzroot n i)
     have hMle : (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖) ≤ M0 + d := by
       calc
         (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖)
@@ -195,8 +198,7 @@ theorem exists_root_near_of_coeff_close
               have hk' : k ≤ d := le_of_lt (Finset.mem_range.mp hk)
               have hc := hcloseP n k hk'
               have hc1 : ‖(Pseq n).coeff k - P0.coeff k‖ ≤ 1 := by
-                have hnnonneg : (0 : ℝ) ≤ (n : ℝ) := Nat.cast_nonneg n
-                have hn1 : (1 : ℝ) ≤ (n : ℝ) + 1 := by nlinarith
+                have hn1 : (1 : ℝ) ≤ (n : ℝ) + 1 := by linarith
                 have hle1 : (1 : ℝ) / (n + 1) ≤ 1 := by
                   exact (div_le_one (by positivity : (0 : ℝ) < (n : ℝ) + 1)).2 hn1
                 exact (lt_of_lt_of_le hc hle1).le
@@ -211,12 +213,12 @@ theorem exists_root_near_of_coeff_close
       have hdnn : (0 : ℝ) ≤ (d : ℝ) := Nat.cast_nonneg d
       have hle_a : max 1 (M0 + d) ≤ max 1 M0 + d := by
         apply max_le
-        · nlinarith [le_max_left (1 : ℝ) M0]
-        · nlinarith [le_max_right (1 : ℝ) M0]
+        · linarith [le_max_left (1 : ℝ) M0]
+        · linarith [le_max_right (1 : ℝ) M0]
       dsimp [B]
-      nlinarith
+      linarith
     have hb' : ‖zseq n i‖ ≤ max 1 (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖) := by
-      simpa [hdegP n, d] using hb
+      simpa [hdegP n] using hb
     exact hb'.trans (hle1.trans hle2)
   let K : Set (Fin d → ℂ) := {w | ∀ i, w i ∈ Metric.closedBall (0 : ℂ) B}
   have hKcpt : IsCompact K := by
@@ -226,7 +228,7 @@ theorem exists_root_near_of_coeff_close
   have hzmem : ∀ n, zseq n ∈ K := by
     intro n i
     simpa [Metric.mem_closedBall, dist_eq_norm] using hbound n i
-  rcases hKcpt.tendsto_subseq hzmem with ⟨w, hwK, φ, hφmono, hφtend⟩
+  rcases hKcpt.tendsto_subseq hzmem with ⟨w, _, φ, hφmono, hφtend⟩
   let vseq : ℕ → Fin (d + 1) → ℂ := fun n k => (Pseq n).coeff (k : ℕ)
   let v0 : Fin (d + 1) → ℂ := fun k => P0.coeff (k : ℕ)
   have hvseq : Tendsto vseq atTop (nhds v0) := by
@@ -239,20 +241,19 @@ theorem exists_root_near_of_coeff_close
     intro n hn
     have hle : (1 : ℝ) / (n + 1) ≤ 1 / (N + 1) := by
       gcongr
-    have hc := hcloseP n (k : ℕ) (by
-      have hklt : (k : ℕ) < d + 1 := k.isLt
-      exact Nat.le_of_lt_succ hklt)
-    have : dist (vseq n k) (v0 k) = ‖(Pseq n).coeff (k : ℕ) - P0.coeff (k : ℕ)‖ := by
+    have hc := hcloseP n (k : ℕ) (Nat.le_of_lt_succ k.isLt)
+    have hdist : dist (vseq n k) (v0 k) =
+        ‖(Pseq n).coeff (k : ℕ) - P0.coeff (k : ℕ)‖ := by
       simp [vseq, v0, dist_eq_norm]
-    rw [this]
+    rw [hdist]
     exact lt_of_lt_of_le hc (hle.trans (le_of_lt hN))
   have hpseq : ∀ n, polyOfCoeffs d (vseq n) = Pseq n := by
     intro n
     apply polyOfCoeffs_self
-    simpa [vseq, d] using le_of_eq (hdegP n)
+    exact (hdegP n).le
   have hv0poly : polyOfCoeffs d v0 = P0 := by
     apply polyOfCoeffs_self
-    simp [d]
+    exact hdeg0.le
   have hrootPoly_eq : rootPoly d w = P0 := by
     apply Polynomial.funext
     intro x
@@ -269,12 +270,9 @@ theorem exists_root_near_of_coeff_close
         Polynomial.eval x (Pseq (φ n)) := by
       intro n
       rw [rootPoly_eval]
-      have hms : Multiset.map (zseq (φ n)) Finset.univ.val = (Pseq (φ n)).roots := by
-        rw [Fin.univ_val_map, hofn]
-        simp [lseq]
       have hprod : ((Pseq (φ n)).roots.map (fun r => x - r)).prod =
           ∏ i : Fin d, (x - zseq (φ n) i) := by
-        rw [← hms, Multiset.map_map]
+        rw [← hms (φ n), Multiset.map_map]
         exact (Finset.prod_eq_multiset_prod Finset.univ
           (fun i : Fin d => x - zseq (φ n) i)).symm
       rw [Polynomial.Splits.eval_eq_prod_roots_of_monic
@@ -282,6 +280,39 @@ theorem exists_root_near_of_coeff_close
       exact hprod.symm
     exact tendsto_nhds_unique_of_eventuallyEq hlim2 hlim1
       (Eventually.of_forall heqseq)
+  have hrootPoly_prod : rootPoly d w =
+      (Multiset.map (fun a : ℂ => Polynomial.X - Polynomial.C a)
+        (List.ofFn w : Multiset ℂ)).prod := by
+    rw [rootPoly, Finset.prod_eq_multiset_prod]
+    change (Multiset.map ((fun a : ℂ => Polynomial.X - Polynomial.C a) ∘ w)
+      Finset.univ.val).prod = _
+    rw [← Multiset.map_map, Fin.univ_val_map]
+  have hwroots : P0.roots = (List.ofFn w : Multiset ℂ) := by
+    rw [← hrootPoly_eq, hrootPoly_prod, Polynomial.roots_multiset_prod_X_sub_C]
+  exact ⟨zseq, w, φ, hzroot, hms, hφmono, hφtend, hrootPoly_eq, hwroots⟩
+
+/-- Continuity of a single root: a root $\alpha$ of a monic polynomial forces
+    every sufficiently nearby monic polynomial of the same degree to have a
+    root in any prescribed neighbourhood of $\alpha$. -/
+theorem exists_root_near_of_coeff_close
+    (P0 : Polynomial ℂ) (_hmonic0 : P0.Monic) (hd0 : 0 < P0.natDegree)
+    (α : ℂ) (hαroot : P0.IsRoot α) (ε : ℝ) (hε : 0 < ε) :
+    ∃ δ > 0, ∀ P : Polynomial ℂ, P.Monic → P.natDegree = P0.natDegree →
+      (∀ k ≤ P0.natDegree, ‖P.coeff k - P0.coeff k‖ < δ) →
+      ∃ z : ℂ, P.IsRoot z ∧ dist z α < ε := by
+  classical
+  let d := P0.natDegree
+  by_contra hbad
+  push Not at hbad
+  have hseq : ∀ n : ℕ, ∃ P : Polynomial ℂ, P.Monic ∧ P.natDegree = d ∧
+      (∀ k ≤ d, ‖P.coeff k - P0.coeff k‖ < (1 : ℝ) / (n + 1)) ∧
+      ¬ ∃ z : ℂ, P.IsRoot z ∧ dist z α < ε := by
+    intro n
+    simpa [d] using hbad ((1 : ℝ) / (n + 1)) (by positivity)
+  choose Pseq hmonicP hdegP hcloseP hnoroot using hseq
+  obtain ⟨zseq, w, φ, hzroot, _, _, hφtend, hrootPoly_eq, _⟩ :=
+    exists_vieta_subsequence_of_coeff_close
+      P0 d hd0 rfl Pseq hmonicP hdegP hcloseP
   have hwroot : ∃ i : Fin d, w i = α := by
     have heval : Polynomial.eval α (rootPoly d w) = 0 := by simpa [hrootPoly_eq] using hαroot
     rw [rootPoly_eval] at heval
@@ -315,8 +346,6 @@ theorem roots_count_in_ball_eq_of_coeff_close
       (P.roots.filter (fun z => dist z α < ε)).card = P0.roots.count α := by
   classical
   let d := P0.natDegree
-  let M0 : ℝ := ∑ k ∈ Finset.range d, ‖P0.coeff k‖
-  let B : ℝ := max 1 M0 + d + 1
   by_contra hbad
   push Not at hbad
   have hseq : ∀ n : ℕ, ∃ P : Polynomial ℂ, P.Monic ∧ P.natDegree = d ∧
@@ -325,143 +354,17 @@ theorem roots_count_in_ball_eq_of_coeff_close
     intro n
     simpa [d] using hbad ((1 : ℝ) / (n + 1)) (by positivity)
   choose Pseq hmonicP hdegP hcloseP hbadP using hseq
-  have hrootcard : ∀ n, (Pseq n).roots.card = d := by
-    intro n
-    have hc := Polynomial.Splits.natDegree_eq_card_roots (IsAlgClosed.splits (Pseq n))
-    simpa [hdegP n, d] using hc.symm
-  let lseq : ℕ → List ℂ := fun n => (Pseq n).roots.toList
-  have hlen : ∀ n, (lseq n).length = d := by
-    intro n
-    simpa [lseq, Multiset.length_toList] using hrootcard n
-  let zseq : ℕ → (Fin d → ℂ) := fun n i =>
-    (lseq n).get ⟨i, by simp [hlen n]⟩
-  have hofn : ∀ n, List.ofFn (zseq n) = lseq n := by
-    intro n
-    simpa [zseq, hlen n] using (List.ofFn_get (lseq n))
-  have hzroot : ∀ n i, (Pseq n).IsRoot (zseq n i) := by
-    intro n i
-    apply Polynomial.isRoot_of_mem_roots
-    have hm : zseq n i ∈ lseq n := by
-      exact List.get_mem (lseq n) ⟨i, by simp [hlen n]⟩
-    simpa [lseq] using (Multiset.mem_toList.mp hm)
-  have hbound : ∀ n i, ‖zseq n i‖ ≤ B := by
-    intro n i
-    have hb := cauchy_root_bound (hmonicP n) (by simpa [hdegP n, d] using hd0) (hzroot n i)
-    have hMle : (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖) ≤ M0 + d := by
-      calc
-        (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖)
-            ≤ ∑ k ∈ Finset.range d, (‖P0.coeff k‖ + 1) := by
-              apply Finset.sum_le_sum
-              intro k hk
-              have hk' : k ≤ d := le_of_lt (Finset.mem_range.mp hk)
-              have hc := hcloseP n k hk'
-              have hc1 : ‖(Pseq n).coeff k - P0.coeff k‖ ≤ 1 := by
-                have hnnonneg : (0 : ℝ) ≤ (n : ℝ) := Nat.cast_nonneg n
-                have hn1 : (1 : ℝ) ≤ (n : ℝ) + 1 := by nlinarith
-                have hle1 : (1 : ℝ) / (n + 1) ≤ 1 := by
-                  exact (div_le_one (by positivity : (0 : ℝ) < (n : ℝ) + 1)).2 hn1
-                exact (lt_of_lt_of_le hc hle1).le
-              calc
-                ‖(Pseq n).coeff k‖ = ‖((Pseq n).coeff k - P0.coeff k) + P0.coeff k‖ := by ring_nf
-                _ ≤ ‖(Pseq n).coeff k - P0.coeff k‖ + ‖P0.coeff k‖ := norm_add_le _ _
-                _ ≤ ‖P0.coeff k‖ + 1 := by linarith
-        _ = M0 + d := by simp [M0, Finset.sum_add_distrib]
-    have hle1 : max 1 (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖) ≤ max 1 (M0 + d) := by
-      gcongr
-    have hle2 : max 1 (M0 + d) ≤ B := by
-      have hdnn : (0 : ℝ) ≤ (d : ℝ) := Nat.cast_nonneg d
-      have hle_a : max 1 (M0 + d) ≤ max 1 M0 + d := by
-        apply max_le
-        · nlinarith [le_max_left (1 : ℝ) M0]
-        · nlinarith [le_max_right (1 : ℝ) M0]
-      dsimp [B]
-      nlinarith
-    have hb' : ‖zseq n i‖ ≤ max 1 (∑ k ∈ Finset.range d, ‖(Pseq n).coeff k‖) := by
-      simpa [hdegP n, d] using hb
-    exact hb'.trans (hle1.trans hle2)
-  let K : Set (Fin d → ℂ) := {w | ∀ i, w i ∈ Metric.closedBall (0 : ℂ) B}
-  have hKcpt : IsCompact K := by
-    have hc : ∀ i : Fin d, IsCompact (Metric.closedBall (0 : ℂ) B) :=
-      fun _ => ProperSpace.isCompact_closedBall 0 B
-    simpa [K, Set.pi] using (isCompact_univ_pi hc)
-  have hzmem : ∀ n, zseq n ∈ K := by
-    intro n i
-    simpa [Metric.mem_closedBall, dist_eq_norm] using hbound n i
-  rcases hKcpt.tendsto_subseq hzmem with ⟨w, hwK, φ, hφmono, hφtend⟩
-  let vseq : ℕ → Fin (d + 1) → ℂ := fun n k => (Pseq n).coeff (k : ℕ)
-  let v0 : Fin (d + 1) → ℂ := fun k => P0.coeff (k : ℕ)
-  have hvseq : Tendsto vseq atTop (nhds v0) := by
-    rw [tendsto_pi_nhds]
-    intro k
-    rw [Metric.tendsto_atTop]
-    intro η hη
-    obtain ⟨N, hN⟩ := exists_nat_one_div_lt hη
-    refine ⟨N, ?_⟩
-    intro n hn
-    have hle : (1 : ℝ) / (n + 1) ≤ 1 / (N + 1) := by
-      gcongr
-    have hc := hcloseP n (k : ℕ) (by
-      exact Nat.le_of_lt_succ k.isLt)
-    have hdist : dist (vseq n k) (v0 k) = ‖(Pseq n).coeff (k : ℕ) - P0.coeff (k : ℕ)‖ := by
-      simp [vseq, v0, dist_eq_norm]
-    rw [hdist]
-    exact lt_of_lt_of_le hc (hle.trans (le_of_lt hN))
-  have hpseq : ∀ n, polyOfCoeffs d (vseq n) = Pseq n := by
-    intro n
-    apply polyOfCoeffs_self
-    simpa [vseq, d] using le_of_eq (hdegP n)
-  have hv0poly : polyOfCoeffs d v0 = P0 := by
-    apply polyOfCoeffs_self
-    simp [d]
-  have hrootPoly_eq : rootPoly d w = P0 := by
-    apply Polynomial.funext
-    intro x
-    have hlim1 : Tendsto (fun n => Polynomial.eval x (Pseq (φ n))) atTop
-        (nhds (Polynomial.eval x P0)) := by
-      have hvφ : Tendsto (fun n => vseq (φ n)) atTop (nhds v0) :=
-        hvseq.comp hφmono.tendsto_atTop
-      simpa [hpseq, hv0poly] using (tendsto_eval_polyOfCoeffs hvφ x)
-    have hlim2 : Tendsto
-        (fun n => Polynomial.eval x (rootPoly d (zseq (φ n)))) atTop
-        (nhds (Polynomial.eval x (rootPoly d w))) :=
-      ((continuous_rootPoly_eval d x).tendsto w).comp hφtend
-    have heqseq : ∀ n, Polynomial.eval x (rootPoly d (zseq (φ n))) =
-        Polynomial.eval x (Pseq (φ n)) := by
-      intro n
-      rw [rootPoly_eval]
-      have hms : Multiset.map (zseq (φ n)) Finset.univ.val = (Pseq (φ n)).roots := by
-        rw [Fin.univ_val_map, hofn]
-        simp [lseq]
-      have hprod : ((Pseq (φ n)).roots.map (fun r => x - r)).prod =
-          ∏ i : Fin d, (x - zseq (φ n) i) := by
-        rw [← hms, Multiset.map_map]
-        exact (Finset.prod_eq_multiset_prod Finset.univ
-          (fun i : Fin d => x - zseq (φ n) i)).symm
-      rw [Polynomial.Splits.eval_eq_prod_roots_of_monic
-        (IsAlgClosed.splits (Pseq (φ n))) (hmonicP (φ n)) x]
-      exact hprod.symm
-    exact tendsto_nhds_unique_of_eventuallyEq hlim2 hlim1
-      (Eventually.of_forall heqseq)
-  have hrootPoly_prod : rootPoly d w =
-      (Multiset.map (fun a : ℂ => Polynomial.X - Polynomial.C a)
-        (List.ofFn w : Multiset ℂ)).prod := by
-    rw [rootPoly, Finset.prod_eq_multiset_prod]
-    change (Multiset.map ((fun a : ℂ => Polynomial.X - Polynomial.C a) ∘ w)
-      Finset.univ.val).prod = _
-    rw [← Multiset.map_map, Fin.univ_val_map]
-  have hwroots : P0.roots = (List.ofFn w : Multiset ℂ) := by
-    rw [← hrootPoly_eq, hrootPoly_prod, Polynomial.roots_multiset_prod_X_sub_C]
+  obtain ⟨zseq, w, φ, _, hzroots, _, hφtend, _, hwroots⟩ :=
+    exists_vieta_subsequence_of_coeff_close
+      P0 d hd0 rfl Pseq hmonicP hdegP hcloseP
   have hcountP : ∀ n, ((Pseq n).roots.filter (fun z => dist z α < ε)).card =
       (Finset.univ.filter (fun i : Fin d => dist (zseq n i) α < ε)).card := by
     intro n
-    have hms : Multiset.map (zseq n) Finset.univ.val = (Pseq n).roots := by
-      rw [Fin.univ_val_map, hofn]
-      simp [lseq]
     have hleft : ((Pseq n).roots.filter (fun z => dist z α < ε)).card =
         (Pseq n).roots.countP (fun z => dist z α < ε) :=
       (Multiset.countP_eq_card_filter (fun z => dist z α < ε) (Pseq n).roots).symm
     rw [hleft]
-    rw [← hms, Multiset.countP_map]
+    rw [← hzroots n, Multiset.countP_map]
     rfl
   have hcount0 : P0.roots.count α =
       (Finset.univ.filter (fun i : Fin d => w i = α)).card := by
@@ -469,11 +372,6 @@ theorem roots_count_in_ball_eq_of_coeff_close
     change (Finset.univ.val.filter (fun i : Fin d => α = w i)).card =
       (Finset.univ.val.filter (fun i : Fin d => w i = α)).card
     simp [eq_comm]
-  have hwroot : ∀ i : Fin d, P0.IsRoot (w i) := by
-    intro i
-    apply Polynomial.isRoot_of_mem_roots
-    rw [hwroots]
-    simp
   have hevent_mem : ∀ᶠ n in atTop, ∀ i : Fin d,
       (dist (zseq (φ n) i) α < ε ↔ w i = α) := by
     rw [Filter.eventually_all]
@@ -501,7 +399,7 @@ theorem roots_count_in_ball_eq_of_coeff_close
         have htri : dist (w i) α ≤ dist (w i) (zseq (φ n) i) +
             dist (zseq (φ n) i) α := dist_triangle _ _ _
         rw [dist_comm (w i) (zseq (φ n) i)] at htri
-        nlinarith
+        linarith
       · intro hwia
         exact (hwi hwia).elim
   have hevent_count : ∀ᶠ n in atTop,
