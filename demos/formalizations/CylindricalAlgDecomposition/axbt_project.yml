@@ -1,0 +1,14 @@
+project:
+  name: collins-cad
+  version: "0.1.0"
+
+modules:
+  Algebra:
+    dir: CollinsCAD/Algebra
+  Analysis:
+    dir: CollinsCAD/Analysis
+
+axle:
+  environment: lean-4.36.0
+  timeout_seconds: 600
+  global_options: {}
