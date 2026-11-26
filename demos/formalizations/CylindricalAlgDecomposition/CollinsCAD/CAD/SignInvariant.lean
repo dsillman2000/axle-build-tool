@@ -11,6 +11,14 @@ theorem SignInvariant.mono {r : ℕ} {A B : Finset (MvPolynomial (Fin r) ℝ)}
   intro P hP
   exact h P (hsub hP)
 
+/-- A polynomial that vanishes everywhere is sign-invariant with sign zero. -/
+theorem SignInvariantPoly.of_eq_zero {r : ℕ}
+    {P : MvPolynomial (Fin r) ℝ} {S : Set (Fin r → ℝ)}
+    (h : ∀ a ∈ S, MvPolynomial.eval a P = 0) : SignInvariantPoly P S := by
+  refine ⟨0, ?_⟩
+  intro a ha
+  simp [h a ha]
+
 /-- A sign-invariant polynomial that vanishes at one point vanishes everywhere. -/
 theorem SignInvariantPoly.eq_zero_of_eq_zero {r : ℕ}
     {P : MvPolynomial (Fin r) ℝ} {S : Set (Fin r → ℝ)}

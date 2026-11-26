@@ -51,11 +51,51 @@ The PDF and everything under `docs/` are local-only reference material. They are
 
 ## Status
 
-Clusters A, B, C, and D are implemented and verified. `Analysis/Theorem1Mv.lean`
-specializes Collins' Theorem 1 to normalized multivariate fibres, and `CAD/`
-implements projection definitions, effective reducta, Collins Theorems 4 and 5,
-pairwise branch coincidence, and fundamental lifting. Remaining blueprint work:
-cluster E (CAD construction, DECOMP/DEFINE) and cluster F (logic/EVAL/ELIM).
+Clusters A, B, C, D, and E are implemented and verified. `Analysis/Theorem1Mv.lean`
+specializes Collins' Theorem 1 to normalized multivariate fibres, `CAD/` implements
+projection, lifting, and List-based cylindrical decompositions, and `Analysis/Thom*.lean`
+provides the derivative-sign classification used by DEFINE. Remaining blueprint work:
+cluster F (logic/EVAL/ELIM), which has not been started.
+
+### Cluster E notes
+
+- `CAD/Cell.lean` defines connected cells with explicit samples. Whole cylinders,
+  lower/upper sectors, bounded sectors, and graph sections are continuous images
+  of connected products; `Cell.graph` is the section constructor because `section`
+  is a Lean keyword.
+- `CAD/Cylinder.lean` defines `RootFamily`, `LiftShape`, the recursive alternating
+  child list `liftCells`, `Cylinder`, and `IsCylinderPartition`. `CAD/Structure.lean`
+  stores the raw List-based CAD history and explicit `parentChildren` map, with
+  recursive validity in `IsCAD` and semantic partition invariants in `Decomposition`.
+- `CAD/CylinderGeometry.lean`, `CAD/CylinderCoverage.lean`, and
+  `CAD/CylinderPartition.lean` prove the `2k+1` shape, fibre coverage, nonempty
+  fibres, cylindrical samples, pairwise disjointness, and canonical partition API.
+- `CAD/LiftedSignInvariant.lean` packages lifting after zero-fibre filtering.
+  Sections use the per-factor dichotomy; sectors use root exhaustion; connectedness
+  plus nonvanishing gives sign invariance. Excluded factors vanish identically.
+- `CAD/Decomp.lean` proves `exists_decomposition_lift`, `cad_decomp_exists`, and
+  `cad_base_r1`. The induction is uniform from `r = 0`; there is no separate
+  univariate base construction.
+- `Analysis/ThomCells.lean` and `Analysis/ThomLemma.lean` classify derivative-sign
+  cells as empty, singleton, or nonempty open order-connected sets.
+  `Analysis/ThomFamily.lean` extends this to finite families and proves that equal
+  derivative signs cannot cross a family root.
+- `CAD/AugmentedProjection.lean` builds `derivativeTower`, `augPolySet`, and
+  `augProj` directly from effective reducta and iterated last-variable derivatives.
+  `localAugPolySet` filters the global envelope at a cell sample. Derivatives
+  omitted by the filter are handled by an explicit identically-zero dichotomy;
+  no commutation between differentiation and `eraseLead` is assumed.
+- `CAD/AugmentedDecomp.lean` records `HasAugmentedProvenance` on the existing CAD
+  tree and proves `exists_augmented_cad`. Each cylinder remembers its local
+  augmented family, nonvanishing fibres, derivative dichotomy, and original-family
+  invariance.
+- `CAD/LiftRootSeparation.lean` and `CAD/LiftSignVector.lean` prove fixed-fibre
+  sign-vector uniqueness from root separation and the family Thom theorem.
+- `CAD/SignFormula.lean` defines semantic `SignCondition`/`SignFormula`, prefixing,
+  sample sign vectors, and the finite `definePolys` support envelope.
+  `CAD/Define.lean` exports `define_lifted_cell_formula`,
+  `cad_define_cell_formula`, and `cad_define_exists`. First-order syntax belongs
+  to Cluster F.
 
 ### Cluster D notes
 
@@ -132,7 +172,7 @@ cluster E (CAD construction, DECOMP/DEFINE) and cluster F (logic/EVAL/ELIM).
   `isRealDelineable_of_fiber_natDegree_eq_zero` handles nonzero constant fibres.
   `fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero` provides the reductum/fibre bridge
   needed by effective-reductum arguments.
-- Next step: Cluster E (CAD construction, DECOMP/DEFINE).
+- Next step after Cluster E: Cluster F (logic/EVAL/ELIM), pending confirmation.
 
 ### Cluster A notes
 
