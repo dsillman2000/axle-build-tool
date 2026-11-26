@@ -1,0 +1,61 @@
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/RootContinuity.lean
+  s_e7a3924fabe171::t_fe9e9f33a386db 146-162,169,174,179-182,191,201,216-217,219,221,231,244-246,248,253,256,275,283-293,310
+  s_e7a3924fabe171::t_eef876e5916bd5 313-315
+  s_e7a3924fabe171::t_d215e1da4b86fa 367
+  s_e7a3924fabe171::t_c5aff247dfa529 402
+  s_e7a3924fabe171::t_7f82bc293394ce 357-359
+  s_e7a3924fabe171::t_0ad7ee7c622f5e 294-296,307-309
+  s_e7a3924fabe171::t_e58d4e716e0936 311-312
+  s_e7a3924fabe171::t_f9c13464a5d85b 297-306
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Algebra/GaussContent.lean
+  s_e7a3924fabe171::t_0335be0e4787d0 96-116,126-139,141-155
+  s_e7a3924fabe171::t_05d298b6f5f336 117-125,140
+demos/formalizations/CylindricalAlgDecomposition/README.md
+  s_e7a3924fabe171::t_6fa03a44034bf1 12-15
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/Delineability.lean
+  s_e7a3924fabe171::t_53b3e3591c48ea 112,124
+  s_e7a3924fabe171::t_ca6547c99e5446 47-48,51-52
+  s_e7a3924fabe171::t_3e5c50f023c961 141-143
+  s_e7a3924fabe171::t_91355103454e37 160-161
+  s_e7a3924fabe171::t_43fc4e52615f94 3
+  s_e7a3924fabe171::t_6f9925658cab10 32-46,49-50,53
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Algebra/GcdDegreeZero.lean
+  s_e7a3924fabe171::t_65b3d611fe6567 38
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/Theorem1Mv.lean
+  s_e7a3924fabe171::t_09f0c817974e88 40-59,62-64
+  s_e7a3924fabe171::t_25b0257d0a0a46 60-61
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_8344afed633160 107-110
+  s_e7a3924fabe171::t_45092a15479cd2 52-56
+  s_e7a3924fabe171::t_411b30b1d0884e 139-140
+  s_e7a3924fabe171::t_4198f30bf650d3 92-93
+  s_e7a3924fabe171::t_ec41925a98f192 65-66,70-71
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/Theorem1.lean
+  s_e7a3924fabe171::t_9b6f82c484fff9 215-217,219-224,226,229-242
+  s_e7a3924fabe171::t_54fba369bdad1f 176,228
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/LocalRoots.lean
+  s_e7a3924fabe171::t_f2e2fa6b43eba5 516-565,570-612
+  s_e7a3924fabe171::t_03c564f4c89ba1 46,52,55,108,338,388,498,689,714
+  s_e7a3924fabe171::t_1848e1667b7db5 566-569
+  s_e7a3924fabe171::t_f477eeedf5ff42 662
+  s_e7a3924fabe171::t_59769c5e15d862 280
+  s_e7a3924fabe171::t_cc045cc76c29e2 258-261,265-275
+  s_e7a3924fabe171::t_38b7f55ff8f70c 290
+  s_e7a3924fabe171::t_cc332cb3b92ebb 276-278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "3271b4b33d6346ffde049cf999f4f3337300f420",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
