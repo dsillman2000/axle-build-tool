@@ -86,4 +86,31 @@ def IsCylinderPartition (L : Cylinder r) : Prop :=
   L.children.Nodup ∧
   (∀ c ∈ L.children, Fin.init c.sample = L.parent.sample)
 
+/-- Equation for a nonempty tail of roots. -/
+@[simp] theorem liftCellsAux_succ_of_pos (S : Cell r) (k : ℕ)
+    (f : Fin (k + 1) → (Fin r → ℝ) → ℝ)
+    (hc : ∀ i, ContinuousOn (f i) S.carrier)
+    (ho : ∀ (i j : Fin (k + 1)) (a : Fin r → ℝ),
+      a ∈ S.carrier → i < j → f i a < f j a) (hk : 0 < k) :
+    liftCellsAux S (k + 1) f hc ho =
+      [Cell.lower S (f 0) (hc 0),
+        Cell.graph S (f 0) (hc 0),
+        Cell.bounded S (f 0) (f ⟨1, by omega⟩) (hc 0) (hc ⟨1, by omega⟩)
+          (fun a ha => ho 0 ⟨1, by omega⟩ a ha (by change 0 < 1; omega))] ++
+      (liftCellsAux S k (fun i => f i.succ) (fun i => hc i.succ)
+        (fun i j a ha hij => ho i.succ j.succ a ha
+          (by change i.val + 1 < j.val + 1; omega))).tail := by
+  simp [liftCellsAux, hk]
+
+/-- Equation for the final root, when the recursive tail is empty. -/
+@[simp] theorem liftCellsAux_one (S : Cell r)
+    (f : Fin 1 → (Fin r → ℝ) → ℝ)
+    (hc : ∀ i, ContinuousOn (f i) S.carrier)
+    (ho : ∀ (i j : Fin 1) (a : Fin r → ℝ),
+      a ∈ S.carrier → i < j → f i a < f j a) :
+    liftCellsAux S 1 f hc ho =
+      [Cell.lower S (f 0) (hc 0), Cell.graph S (f 0) (hc 0),
+        Cell.upper S (f 0) (hc 0)] := by
+  simp [liftCellsAux]
+
 end CollinsCAD

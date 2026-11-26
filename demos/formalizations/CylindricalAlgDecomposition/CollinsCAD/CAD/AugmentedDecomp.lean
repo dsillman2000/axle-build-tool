@@ -55,32 +55,18 @@ theorem exists_augmented_cylinder
     exact fiberPoly_ne_zero_of_mem_localAugPolySet S.sample_mem hproj hQ
   have hprojB : SignInvariant (collinsProj B) S.carrier :=
     signInvariant_collinsProj_localAugPolySet S.sample hproj
-  rcases projection_fundamental_lifting B S.carrier S.connected hprojB hfiberB with
-    ⟨hDall, k, f, e, hcont, hroot, hexhaust, hmono, hdich, hrange⟩
-  let R : RootFamily S.carrier := ⟨k, f, hcont, hmono⟩
-  let W : LiftingWitness B S :=
-    { retained := B
-      retained_subset := fun _ h => h
-      roots := R
-      retained_or_zero := fun _ h => Or.inl h
-      exhaustive := by
-        intro a ha x hx
-        rcases hx with ⟨Q, hQ, hxQ⟩
-        have hxprod : Polynomial.eval x (fiberPoly r (∏ Q ∈ B, Q) a) = 0 :=
-          (fiberPoly_eval_prod_eq_zero_iff B a x).mpr ⟨Q, hQ, hxQ⟩
-        exact hexhaust a ha x hxprod
-      dichotomy := hdich
-      section_root := by
-        intro i a ha
-        have hxprod := (hroot i a ha).2.1
-        rcases (fiberPoly_eval_prod_eq_zero_iff B a (f i a)).mp hxprod with ⟨Q, hQ, hxQ⟩
-        exact ⟨Q, hQ, hxQ⟩ }
+  obtain ⟨W⟩ := exists_liftingWitness_of_nonzero_fibers (A := B) S hprojB hfiberB
   have hinvB : ∀ d ∈ liftCells S W.roots, SignInvariant B d.carrier := by
     intro d hd
     exact LiftShape.signInvariant W (liftCells_shape S W.roots d hd)
-  let L := Cylinder.canonical S W.roots B hinvB W.section_root
+  have hsection : ∀ i a, a ∈ S.carrier →
+      ∃ P ∈ B, Polynomial.eval (W.roots.f i a) (fiberPoly r P a) = 0 := by
+    intro i a ha
+    rcases W.section_root i a ha with ⟨P, hP, hroot⟩
+    exact ⟨P, W.retained_subset hP, hroot⟩
+  let L := Cylinder.canonical S W.roots B hinvB hsection
   have hpart : IsCylinderPartition L :=
-    IsCylinderPartition.canonical S W.roots B hinvB W.section_root
+    IsCylinderPartition.canonical S W.roots B hinvB hsection
   have haug : IsAugmentedCylinder A L := by
     refine ⟨?_, hfiberB, ?_, ?_⟩
     · exact nonzeroFibers_subset (augPolySet A) S.sample
@@ -104,6 +90,14 @@ def HasAugmentedProvenance : {r : ℕ} → CAD r →
       HasAugmentedProvenance previous (augProj A) ∧
         IsParentChildMap previous.decomposition next edges ∧
         (∀ L ∈ edges, IsAugmentedCylinder A L)
+
+/-- Augmented provenance descends to the preceding CAD level. -/
+theorem HasAugmentedProvenance.previous {T : CAD (r + 1)}
+    {A : Finset (MvPolynomial (Fin (r + 1)) ℝ)}
+    (hT : HasAugmentedProvenance T A) :
+    HasAugmentedProvenance T.previous (augProj A) := by
+  cases T with
+  | succ previous next edges => exact hT.1
 
 /-- There is an invariant CAD with full augmented provenance. -/
 theorem exists_augmented_cad (r : ℕ) (A : Finset (MvPolynomial (Fin r) ℝ)) :

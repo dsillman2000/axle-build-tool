@@ -14,7 +14,7 @@ Imports use `Algebra.*`, `Analysis.*`, and `CAD.*`; the Lean namespace remains `
 
 Clusters A–E are implemented and verified: reducta and variable splitting, subresultants and Collins Theorems 2–3, root continuity, Theorem 1, Collins projection, effective reducta, Collins Theorems 4 and 5, fundamental lifting, cylindrical cell trees, DECOMP, Thom's lemma, augmented projection, and DEFINE. The lifting API includes an explicit ordered continuous family whose range is exactly the union of factor-root sets, together with a per-factor vanishing dichotomy. `CAD/ZeroFiber.lean` filters arbitrary input families into retained factors with nowhere-zero fibres and excluded factors that vanish identically on the base set.
 
-Cluster E exports `cad_decomp_exists`, `exists_augmented_cad`, `thom_lemma_univariate`, `cad_define_cell_formula`, and `cad_define_exists`. CAD levels use List-based cells and cylinders with explicit parent-to-child maps; cells carry connected carrier sets and sample points. DEFINE uses finite conjunctions of polynomial sign conditions, with first-order formula syntax deferred to Cluster F.
+Cluster E exports `cad_decomp_exists`, `exists_augmented_cad`, `thom_lemma_univariate`, `cad_define_cell_formula`, and `cad_define_exists`. CAD levels use List-based cells and cylinders with explicit parent-to-child maps; cells carry connected carrier sets and sample points. DEFINE uses finite conjunctions of polynomial sign conditions, with first-order formula syntax deferred to Cluster F. `CAD/Integrality.lean` proves that the DEFINE support envelope preserves integer coefficients, and `CAD/Structure.lean` exports direct child lookup, fibre coverage, nonemptiness, and projection APIs for later EVAL.
 
 ## Development
 

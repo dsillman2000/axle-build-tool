@@ -64,9 +64,15 @@ cluster F (logic/EVAL/ELIM), which has not been started.
   of connected products; `Cell.graph` is the section constructor because `section`
   is a Lean keyword.
 - `CAD/Cylinder.lean` defines `RootFamily`, `LiftShape`, the recursive alternating
-  child list `liftCells`, `Cylinder`, and `IsCylinderPartition`. `CAD/Structure.lean`
-  stores the raw List-based CAD history and explicit `parentChildren` map, with
-  recursive validity in `IsCAD` and semantic partition invariants in `Decomposition`.
+  child list `liftCells`, `Cylinder`, and `IsCylinderPartition`. Stable successor
+  equations `liftCellsAux_succ_of_pos` and `liftCellsAux_one` expose the head
+  decomposition without unfolding the recursive definition by hand.
+  `CAD/Structure.lean` stores the raw List-based CAD history and explicit
+  `parentChildren` map, with recursive validity in `IsCAD` and semantic partition
+  invariants in `Decomposition`. `IsCAD.mem_childrenOf`, `childrenOf_subset_cells`,
+  `childrenOf_cover`, `childrenOf_fiber_nonempty`, `childrenOf_nonempty`,
+  `childrenOf_init_mem`, `IsCAD.previous`, and `HasAugmentedProvenance.previous`
+  provide the direct APIs needed by EVAL and ELIM.
 - `CAD/CylinderGeometry.lean`, `CAD/CylinderCoverage.lean`, and
   `CAD/CylinderPartition.lean` prove the `2k+1` shape, fibre coverage, nonempty
   fibres, cylindrical samples, pairwise disjointness, and canonical partition API.
@@ -93,6 +99,11 @@ cluster F (logic/EVAL/ELIM), which has not been started.
   sign-vector uniqueness from root separation and the family Thom theorem.
 - `CAD/SignFormula.lean` defines semantic `SignCondition`/`SignFormula`, prefixing,
   sample sign vectors, and the finite `definePolys` support envelope.
+  `CAD/Integrality.lean` defines `IsIntPoly`/`IsIntUPoly` and proves closure through
+  last-variable splitting, reducta, derivatives, leading coefficients, PSCs,
+  Collins projection, augmented projection, and `definePolys`; this is the bridge
+  required to translate DEFINE formulas into integer-coefficient first-order
+  syntax in Cluster F.
   `CAD/Define.lean` exports `define_lifted_cell_formula`,
   `cad_define_cell_formula`, and `cad_define_exists`. First-order syntax belongs
   to Cluster F.

@@ -69,7 +69,7 @@ noncomputable def lower (S : Cell r) (f : (Fin r → ℝ) → ℝ)
         (f (Fin.init z) - z (Fin.last r)) = z (Fin.last r) := by ring
     rw [hval, Fin.snoc_init_self]
 
-/-- The graph graph of a continuous root function. -/
+/-- The graph of a continuous root function. -/
 noncomputable def graph (S : Cell r) (f : (Fin r → ℝ) → ℝ)
     (hf : ContinuousOn f S.carrier) : Cell (r + 1) where
   carrier := (fun a : Fin r → ℝ => Fin.snoc a (f a)) '' S.carrier

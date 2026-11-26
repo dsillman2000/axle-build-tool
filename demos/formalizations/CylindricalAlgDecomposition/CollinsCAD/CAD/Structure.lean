@@ -1,5 +1,5 @@
 import Mathlib
-import CAD.Cylinder
+import CAD.CylinderPartition
 import Analysis.Delineability
 
 namespace CollinsCAD
@@ -60,6 +60,12 @@ def IsCAD : {r : ℕ} → CAD r → Prop
   | _ + 1, .succ previous next edges =>
       IsCAD previous ∧ IsParentChildMap previous.decomposition next edges
 
+/-- The parent-to-child map component of a valid successor CAD. -/
+theorem IsCAD.parentChildMap {T : CAD (r + 1)} (hT : IsCAD T) :
+    IsParentChildMap T.previous.decomposition T.decomposition T.parentChildren := by
+  cases T with
+  | succ previous next edges => exact hT.2
+
 /-- A polynomial family is invariant on every cell of a list. -/
 def CADInvariant (A : Finset (MvPolynomial (Fin r) ℝ))
     (cells : List (Cell r)) : Prop :=
@@ -72,6 +78,64 @@ noncomputable def CAD.childrenOf (T : CAD (r + 1)) (c : Cell r) :
   classical
   exact (T.parentChildren.filter (fun L => L.parent = c)).flatMap
     (fun L => L.children)
+
+/-- Membership in the direct child list is exactly membership in the unique
+    cylinder with the requested parent. -/
+theorem IsCAD.mem_childrenOf {T : CAD (r + 1)} (_hT : IsCAD T)
+    {c : Cell r} {d : Cell (r + 1)} :
+    d ∈ T.childrenOf c ↔
+      ∃ L ∈ T.parentChildren, L.parent = c ∧ d ∈ L.children := by
+  classical
+  simp [CAD.childrenOf, List.mem_flatMap, List.mem_filter, and_assoc]
+
+/-- Direct children are cells of the next CAD level. -/
+theorem IsCAD.childrenOf_subset_cells {T : CAD (r + 1)} (hT : IsCAD T)
+    {c : Cell r} {d : Cell (r + 1)} (hd : d ∈ T.childrenOf c) : d ∈ T.cells := by
+  have hmap := hT.parentChildMap
+  rcases hT.mem_childrenOf.mp hd with ⟨L, hL, _, hdL⟩
+  have hmem : d ∈ T.parentChildren.flatMap (fun M => M.children) :=
+    List.mem_flatMap.mpr ⟨L, hL, hdL⟩
+  rw [← hmap.2.2.2.2.1] at hmem
+  exact hmem
+
+/-- Direct children cover every fibre over their parent cell. -/
+theorem IsCAD.childrenOf_cover {T : CAD (r + 1)} (hT : IsCAD T)
+    {c : Cell r} (hc : c ∈ T.previous.cells) {a : Fin r → ℝ}
+    (ha : a ∈ c.carrier) (x : ℝ) :
+    ∃ d ∈ T.childrenOf c, Fin.snoc a x ∈ d.carrier := by
+  have hmap := hT.parentChildMap
+  rcases hmap.2.2.1 c hc with ⟨L, hL, rfl⟩
+  rcases (hmap.2.2.2.2.2 L hL).1 a ha x with ⟨d, hd, hxd⟩
+  exact ⟨d, hT.mem_childrenOf.mpr ⟨L, hL, rfl, hd⟩, hxd⟩
+
+/-- Every direct child meets every fibre over its parent cell. -/
+theorem IsCAD.childrenOf_fiber_nonempty {T : CAD (r + 1)} (hT : IsCAD T)
+    {c : Cell r} {a : Fin r → ℝ} (ha : a ∈ c.carrier)
+    {d : Cell (r + 1)} (hd : d ∈ T.childrenOf c) :
+    ∃ x : ℝ, Fin.snoc a x ∈ d.carrier := by
+  have hmap := hT.parentChildMap
+  rcases hT.mem_childrenOf.mp hd with ⟨L, hL, hparent, hdL⟩
+  have ha' : a ∈ L.parent.carrier := by simpa [hparent] using ha
+  exact (hmap.2.2.2.2.2 L hL).2.1 a ha' d hdL
+
+/-- A direct child is nonempty whenever its parent occurs in the previous CAD. -/
+theorem IsCAD.childrenOf_nonempty {T : CAD (r + 1)} (hT : IsCAD T)
+    {c : Cell r} (hc : c ∈ T.previous.cells) : (T.childrenOf c) ≠ [] := by
+  rcases hT.childrenOf_cover hc c.sample_mem 0 with ⟨d, hd, _⟩
+  exact List.ne_nil_of_mem hd
+
+/-- Points in a direct child project into its parent cell. -/
+theorem IsCAD.childrenOf_init_mem {T : CAD (r + 1)} (hT : IsCAD T)
+    {c : Cell r} {d : Cell (r + 1)} (hd : d ∈ T.childrenOf c)
+    {z : Fin (r + 1) → ℝ} (hz : z ∈ d.carrier) : Fin.init z ∈ c.carrier := by
+  rcases hT.mem_childrenOf.mp hd with ⟨L, hL, hparent, hdL⟩
+  have hzparent := LiftShape.init_mem (L.children_shape d hdL) hz
+  simpa [hparent] using hzparent
+
+/-- Validity descends to the preceding CAD level. -/
+theorem IsCAD.previous {T : CAD (r + 1)} (hT : IsCAD T) : IsCAD T.previous := by
+  cases T with
+  | succ previous next edges => exact hT.1
 
 /-- The unique zero-dimensional cell. -/
 def baseCell0 : Cell 0 where

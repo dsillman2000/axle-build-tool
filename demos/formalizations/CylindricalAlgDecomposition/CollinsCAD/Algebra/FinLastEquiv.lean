@@ -26,4 +26,35 @@ noncomputable def finLastEquiv (R : Type*) [CommSemiring R] (r : ℕ) :
   (MvPolynomial.renameEquiv R (finLastIndexEquiv r)).trans
     (MvPolynomial.optionEquivLeft R (Fin r))
 
+/-- The optional-variable equivalence commutes with coefficient maps. -/
+private theorem optionEquivLeft_map {R S : Type*} [CommSemiring R] [CommSemiring S]
+    {σ : Type*} (f : R →+* S) (p : MvPolynomial (Option σ) R) :
+    (MvPolynomial.optionEquivLeft R σ p).map (MvPolynomial.map f) =
+      MvPolynomial.optionEquivLeft S σ (MvPolynomial.map f p) := by
+  ext n d
+  rw [Polynomial.coeff_map, MvPolynomial.optionEquivLeft_coeff_coeff,
+    MvPolynomial.coeff_map, MvPolynomial.optionEquivLeft_coeff_coeff]
+  simp [MvPolynomial.coeff_map]
+
+/-- The last-variable splitting equivalence commutes with coefficient maps. -/
+theorem finLastEquiv_map {R S : Type*} [CommSemiring R] [CommSemiring S]
+    (f : R →+* S) (r : ℕ) (p : MvPolynomial (Fin (r + 1)) R) :
+    finLastEquiv S r (MvPolynomial.map f p) =
+      (finLastEquiv R r p).map (MvPolynomial.map f) := by
+  change MvPolynomial.optionEquivLeft S (Fin r)
+      (MvPolynomial.rename (finLastIndexEquiv r) (MvPolynomial.map f p)) =
+    (MvPolynomial.optionEquivLeft R (Fin r)
+      (MvPolynomial.rename (finLastIndexEquiv r) p)).map (MvPolynomial.map f)
+  rw [← MvPolynomial.map_rename]
+  exact (optionEquivLeft_map f _).symm
+
+/-- The inverse last-variable splitting equivalence commutes with coefficient
+    maps. -/
+theorem finLastEquiv_symm_map {R S : Type*} [CommSemiring R] [CommSemiring S]
+    (f : R →+* S) (r : ℕ) (D : Polynomial (MvPolynomial (Fin r) R)) :
+    (finLastEquiv S r).symm (D.map (MvPolynomial.map f)) =
+      MvPolynomial.map f ((finLastEquiv R r).symm D) := by
+  apply (finLastEquiv S r).injective
+  rw [AlgEquiv.apply_symm_apply, finLastEquiv_map, AlgEquiv.apply_symm_apply]
+
 end CollinsCAD

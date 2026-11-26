@@ -1,5 +1,6 @@
 import Mathlib
 import CAD.AugmentedProjection
+import CAD.Integrality
 
 namespace CollinsCAD
 
@@ -25,6 +26,13 @@ def SignFormula.Holds {r : ℕ} (F : SignFormula r) (x : Fin r → ℝ) : Prop :
 /-- Polynomial support of a sign formula. -/
 noncomputable def SignFormula.polys {r : ℕ} (F : SignFormula r) : Finset (MvPolynomial (Fin r) ℝ) :=
   F.conditions.image SignCondition.poly
+
+/-- Integrality of every condition gives integrality of the formula support. -/
+theorem SignFormula.isIntPoly_of_mem_polys {r : ℕ} {F : SignFormula r}
+    (hF : ∀ c ∈ F.conditions, IsIntPoly c.poly) {Q : MvPolynomial (Fin r) ℝ}
+    (hQ : Q ∈ F.polys) : IsIntPoly Q := by
+  rcases Finset.mem_image.mp hQ with ⟨c, hc, rfl⟩
+  exact hF c hc
 
 /-- The sign formula recording all signs at a sample point. -/
 noncomputable def signFormulaOfSample {r : ℕ}
@@ -53,6 +61,14 @@ noncomputable def signFormulaOfSample {r : ℕ}
 noncomputable def prefixPoly {r : ℕ} (P : MvPolynomial (Fin r) ℝ) :
     MvPolynomial (Fin (r + 1)) ℝ :=
   (finLastEquiv ℝ r).symm (Polynomial.C P)
+
+/-- Prefixing preserves integer coefficients. -/
+theorem IsIntPoly.prefix {P : MvPolynomial (Fin r) ℝ}
+    (hP : IsIntPoly P) : IsIntPoly (prefixPoly P) := by
+  rcases hP with ⟨P₀, rfl⟩
+  refine ⟨(finLastEquiv ℤ r).symm (Polynomial.C P₀), ?_⟩
+  simpa [prefixPoly, intCastMv, Polynomial.map_C] using
+    finLastEquiv_symm_map (Int.castRingHom ℝ) r (Polynomial.C P₀)
 
 @[simp] theorem eval_prefixPoly {r : ℕ} (P : MvPolynomial (Fin r) ℝ)
     (a : Fin r → ℝ) (x : ℝ) :
@@ -150,5 +166,20 @@ noncomputable def definePolys : (r : ℕ) →
       (∃ P ∈ definePolys r (augProj A), Q = prefixPoly P) ∨ Q ∈ augPolySet A := by
   simp [definePolys, Finset.mem_union, Finset.mem_image]
   aesop
+
+/-- The DEFINE support envelope preserves integer coefficients. -/
+theorem isIntPoly_of_mem_definePolys (r : ℕ) :
+    ∀ (A : Finset (MvPolynomial (Fin r) ℝ)), IsIntPolyFamily A →
+      ∀ Q ∈ definePolys r A, IsIntPoly Q := by
+  induction r with
+  | zero =>
+    intro A hA Q hQ
+    simp [definePolys] at hQ
+  | succ r ih =>
+    intro A hA Q hQ
+    rcases mem_definePolys_succ.mp hQ with ⟨P, hP, rfl⟩ | hQ
+    · exact IsIntPoly.prefix (ih (augProj A)
+        (fun R hR => isIntPoly_of_mem_augProj hA hR) P hP)
+    · exact isIntPoly_of_mem_augPolySet hA hQ
 
 end CollinsCAD
