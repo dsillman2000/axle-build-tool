@@ -8,14 +8,26 @@ namespace CollinsCAD
 open Polynomial MvPolynomial
 
 /-- If every factor has nonzero fibres on a connected projection-invariant set,
-    the factors are individually delineable and their product is delineable. -/
-theorem exists_product_delineability_of_nonzero_fibers
+    the factors are individually delineable and their product has an explicit
+    delineating family with a per-factor vanishing dichotomy. -/
+theorem exists_product_delineability_with_factor_dichotomy_of_nonzero_fibers
     {dim : ℕ} (A : Finset (MvPolynomial (Fin (dim + 1)) ℝ))
     (S : Set (Fin dim → ℝ)) (hS : IsConnected S)
     (hproj : SignInvariant (collinsProj A) S)
     (hfiber : ∀ P ∈ A, ∀ a ∈ S, fiberPoly dim P a ≠ 0) :
     (∀ P ∈ A, IsRealDelineable P S) ∧
-      IsRealDelineable (∏ P ∈ A, P) S := by
+      ∃ (k : ℕ) (f : Fin k → (Fin dim → ℝ) → ℝ) (e : Fin k → ℕ),
+        (∀ i, ContinuousOn (f i) S) ∧
+        (∀ i a, a ∈ S → 0 < e i ∧
+          Polynomial.eval (f i a) (fiberPoly dim (∏ P ∈ A, P) a) = 0 ∧
+          Polynomial.rootMultiplicity (f i a)
+            (fiberPoly dim (∏ P ∈ A, P) a) = e i) ∧
+        (∀ a ∈ S, ∀ x : ℝ,
+          Polynomial.eval x (fiberPoly dim (∏ P ∈ A, P) a) = 0 → ∃ i, f i a = x) ∧
+        (∀ (i j : Fin k) (a : Fin dim → ℝ), a ∈ S → i < j → f i a < f j a) ∧
+        (∀ P ∈ A, ∀ i : Fin k,
+          (∀ a ∈ S, Polynomial.eval (f i a) (fiberPoly dim P a) = 0) ∨
+          (∀ a ∈ S, Polynomial.eval (f i a) (fiberPoly dim P a) ≠ 0)) := by
   classical
   obtain ⟨a₀, ha₀⟩ := hS.nonempty
   have hdata : ∀ P : A, Nonempty (RealDelineabilityData P.1 S) := by
@@ -164,24 +176,65 @@ theorem exists_product_delineability_of_nonzero_fibers
     ⟨ord i, R₀.orderEmbOfFin_mem rfl i⟩
   let f : Fin k → (Fin dim → ℝ) → ℝ := fun i => g (ordR i)
   let e : Fin k → ℕ := fun i => E (ordR i)
-  have hD : IsRealDelineable Q S := by
-    refine ⟨k, f, e, ?_, ?_, ?_, ?_⟩
-    · intro i
-      exact (W (sel (ordR i)).1).continuous (sel (ordR i)).2
-    · intro i a ha
-      exact ⟨hEpos (ordR i), hrootg (ordR i) a ha, hmult (ordR i) a ha⟩
-    · intro a ha x hx
-      rcases hgcover a ha x hx with ⟨r, hr⟩
-      rcases (R₀.orderIsoOfFin rfl).surjective r with ⟨i, hi⟩
-      have hiR : ordR i = r := by
-        apply Subtype.ext
-        simpa only [ordR, ord, Finset.coe_orderIsoOfFin_apply] using
-          congrArg Subtype.val hi
-      exact ⟨i, by simpa [f, hiR] using hr⟩
-    · intro i j a ha hij
-      exact hg_lt (ordR i) (ordR j) (ord.strictMono hij) a ha
-  refine ⟨?_, hD⟩
-  intro P hP
-  exact (RealDelineabilityData.isRealDelineable (W ⟨P, hP⟩))
+  have hdich : ∀ P ∈ A, ∀ i : Fin k,
+      (∀ a ∈ S, Polynomial.eval (f i a) (fiberPoly dim P a) = 0) ∨
+      (∀ a ∈ S, Polynomial.eval (f i a) (fiberPoly dim P a) ≠ 0) := by
+    intro P hP i
+    by_cases hbase : Polynomial.eval (ordR i : ℝ) (fiberPoly dim P a₀) = 0
+    · left
+      intro a ha
+      have hpos0 : 0 < Polynomial.rootMultiplicity (ordR i : ℝ)
+          (fiberPoly dim P a₀) :=
+        (Polynomial.rootMultiplicity_pos (hfiber P hP a₀ ha₀)).mpr
+          (by simpa [Polynomial.IsRoot.def] using hbase)
+      have heq := hfactor_mult P hP (ordR i) a ha
+      have hpos : 0 < Polynomial.rootMultiplicity (f i a) (fiberPoly dim P a) := by
+        change 0 < Polynomial.rootMultiplicity (g (ordR i) a) (fiberPoly dim P a)
+        rw [heq]
+        exact hpos0
+      simpa [Polynomial.IsRoot.def] using
+        (Polynomial.rootMultiplicity_pos (hfiber P hP a ha)).mp hpos
+    · right
+      intro a ha hzero
+      have hpos : 0 < Polynomial.rootMultiplicity (f i a) (fiberPoly dim P a) :=
+        (Polynomial.rootMultiplicity_pos (hfiber P hP a ha)).mpr
+          (by simpa [Polynomial.IsRoot.def] using hzero)
+      have heq := hfactor_mult P hP (ordR i) a ha
+      have hpos0 : 0 < Polynomial.rootMultiplicity (ordR i : ℝ)
+          (fiberPoly dim P a₀) := by
+        change 0 < Polynomial.rootMultiplicity (g (ordR i) a) (fiberPoly dim P a) at hpos
+        rwa [heq] at hpos
+      exact hbase (by
+        simpa [Polynomial.IsRoot.def] using
+          (Polynomial.rootMultiplicity_pos (hfiber P hP a₀ ha₀)).mp hpos0)
+  refine ⟨?_, k, f, e, ?_, ?_, ?_, ?_, hdich⟩
+  · intro P hP
+    exact (RealDelineabilityData.isRealDelineable (W ⟨P, hP⟩))
+  · intro i
+    exact (W (sel (ordR i)).1).continuous (sel (ordR i)).2
+  · intro i a ha
+    exact ⟨hEpos (ordR i), hrootg (ordR i) a ha, hmult (ordR i) a ha⟩
+  · intro a ha x hx
+    rcases hgcover a ha x hx with ⟨r, hr⟩
+    rcases (R₀.orderIsoOfFin rfl).surjective r with ⟨i, hi⟩
+    have hiR : ordR i = r := by
+      apply Subtype.ext
+      simpa only [ordR, ord, Finset.coe_orderIsoOfFin_apply] using
+        congrArg Subtype.val hi
+    exact ⟨i, by simpa [f, hiR] using hr⟩
+  · intro i j a ha hij
+    exact hg_lt (ordR i) (ordR j) (ord.strictMono hij) a ha
+
+/-- Product delineability for a family with nonzero fibres. -/
+theorem exists_product_delineability_of_nonzero_fibers
+    {dim : ℕ} (A : Finset (MvPolynomial (Fin (dim + 1)) ℝ))
+    (S : Set (Fin dim → ℝ)) (hS : IsConnected S)
+    (hproj : SignInvariant (collinsProj A) S)
+    (hfiber : ∀ P ∈ A, ∀ a ∈ S, fiberPoly dim P a ≠ 0) :
+    (∀ P ∈ A, IsRealDelineable P S) ∧
+      IsRealDelineable (∏ P ∈ A, P) S := by
+  rcases exists_product_delineability_with_factor_dichotomy_of_nonzero_fibers
+    A S hS hproj hfiber with ⟨hDall, k, f, e, hcont, hroot, hexhaust, hmono, _⟩
+  exact ⟨hDall, k, f, e, hcont, hroot, hexhaust, hmono⟩
 
 end CollinsCAD

@@ -23,13 +23,16 @@ theorem projection_fundamental_lifting
         (∀ a ∈ S, ∀ x : ℝ,
           Polynomial.eval x (fiberPoly r (∏ P ∈ A, P) a) = 0 → ∃ i, f i a = x) ∧
         (∀ (i j : Fin k) (a : Fin r → ℝ), a ∈ S → i < j → f i a < f j a) ∧
+        (∀ P ∈ A, ∀ i : Fin k,
+          (∀ a ∈ S, Polynomial.eval (f i a) (fiberPoly r P a) = 0) ∨
+          (∀ a ∈ S, Polynomial.eval (f i a) (fiberPoly r P a) ≠ 0)) ∧
         (∀ a ∈ S, Set.range (fun i => f i a) =
           ⋃ P ∈ A, {x : ℝ | Polynomial.eval x (fiberPoly r P a) = 0}) := by
   classical
-  rcases exists_product_delineability_of_nonzero_fibers A S hS hproj hfiber with
-    ⟨hDall, hDprod⟩
-  rcases hDprod with ⟨k, f, e, hcont, hroot, hexhaust, hmono⟩
-  refine ⟨hDall, k, f, e, hcont, hroot, hexhaust, hmono, ?_⟩
+  rcases exists_product_delineability_with_factor_dichotomy_of_nonzero_fibers
+    A S hS hproj hfiber with
+    ⟨hDall, k, f, e, hcont, hroot, hexhaust, hmono, hdich⟩
+  refine ⟨hDall, k, f, e, hcont, hroot, hexhaust, hmono, hdich, ?_⟩
   intro a ha
   ext x
   constructor

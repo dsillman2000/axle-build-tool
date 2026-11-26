@@ -7,13 +7,6 @@ namespace CollinsCAD
 
 open Polynomial MvPolynomial
 
-/-- Sign invariance is inherited by subsets of the projected polynomial set. -/
-theorem SignInvariant.mono {r : ℕ} {A B : Finset (MvPolynomial (Fin r) ℝ)}
-    {S : Set (Fin r → ℝ)} (h : SignInvariant B S) (hsub : A ⊆ B) :
-    SignInvariant A S := by
-  intro P hP
-  exact h P (hsub hP)
-
 /-- Under leading-coefficient sign invariance, every polynomial is either
     identically zero on the base set or has an effective nonzero reductum whose
     leading coefficient is nowhere zero there. -/

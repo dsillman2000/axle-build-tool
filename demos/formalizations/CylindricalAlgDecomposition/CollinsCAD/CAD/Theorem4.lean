@@ -1,11 +1,8 @@
 import Mathlib
 import CAD.EffectiveReductum
-import CAD.GcdDegreeConstancy
-import CAD.Derivative
 import CAD.Fiber
 import CAD.EffectiveFamily
 import Analysis.Theorem1Mv
-import Algebra.Theorem3
 
 namespace CollinsCAD
 
@@ -74,7 +71,7 @@ theorem isRealDelineable_of_fiber_natDegree_eq_one
     dsimp [f]
     symm
     rw [eq_div_iff (hlc a ha)]
-    nlinarith [hx]
+    linarith [hx]
   refine ⟨1, fun _ => f, fun _ => 1, ?_, ?_, ?_, ?_⟩
   · intro i
     exact hfcont
@@ -152,39 +149,10 @@ theorem projection_theorem_4 {r : ℕ}
         exact Or.inl (IsRealDelineable.of_fiber_eq hDQ
           (fun a ha => (hbridge a ha).trans (hfiberQ a).symm))
       · have hdpos : 0 < B.natDegree := by omega
-        let d := B.natDegree
-        have hBderdeg : B.derivative.natDegree = d - 1 := by
-          simp [d]
-        have hBderlc : ∀ a ∈ S,
-            MvPolynomial.eval a B.derivative.leadingCoeff ≠ 0 := by
-          intro a ha
-          exact derivative_leadingCoeff_eval_ne_zero B a hdpos (hBlc a ha)
-        have hpsc : ∀ j < min d (d - 1),
-            SignInvariantPoly (psc B B.derivative j) S := by
-          intro j hj
-          have hj' : j < B.derivative.natDegree := by
-            simpa [hBderdeg, Nat.min_eq_right (Nat.sub_le _ _)] using hj
-          exact hproj _ (psc_self_derivative_mem_collinsProj hBmem hj')
         obtain ⟨a₀, ha₀⟩ := hS.nonempty
-        obtain ⟨gdeg, hgmin, hgcd⟩ := gcd_natDegree_constant_of_signInvariant_psc
-          d (d - 1) rfl hBderdeg hBlc hBderlc hpsc ha₀
-        let m := d - gdeg
-        have hmapdeg : ∀ a ∈ S, (B.map (MvPolynomial.eval a)).natDegree = d := by
-          intro a ha
-          exact Polynomial.natDegree_map_of_leadingCoeff_ne_zero
-            (MvPolynomial.eval a) (hBlc a ha)
-        have hmapne : ∀ a ∈ S, B.map (MvPolynomial.eval a) ≠ 0 := by
-          intro a ha hz
-          apply hBlc a ha
-          have hc := congrArg (fun q : Polynomial ℝ => q.coeff d) hz
-          simpa [Polynomial.coeff_map, d, Polynomial.coeff_natDegree] using hc
-        have hm : ∀ a ∈ S,
-            ((B.map (MvPolynomial.eval a)).map (algebraMap ℝ ℂ)).roots.toFinset.card = m := by
-          intro a ha
-          have hc := roots_card_distinct_eq_sub_deg_gcd_deriv
-            (B.map (MvPolynomial.eval a)) (hmapne a ha)
-          rw [Polynomial.derivative_map, hmapdeg a ha, hgcd a ha] at hc
-          exact hc
+        obtain ⟨d, m, hBdeg, hdpos', hmapdeg, hm⟩ :=
+          projection_reductum_family_data_of_natDegree_pos
+            hBmem S hproj hBlc ha₀ hdpos
         have hdegQ : ∀ a ∈ S, (fiberPoly r Q a).natDegree = d := by
           intro a ha
           rw [hfiberQ]
@@ -193,7 +161,8 @@ theorem projection_theorem_4 {r : ℕ}
           intro a ha
           rw [hfiberQ, Polynomial.coeff_map]
           have hc : B.coeff d = B.leadingCoeff := by
-            simp [d]
+            rw [← hBdeg]
+            exact Polynomial.coeff_natDegree
           rw [hc]
           exact hBlc a ha
         have hmQ : ∀ a ∈ S,
@@ -202,7 +171,7 @@ theorem projection_theorem_4 {r : ℕ}
           rw [hfiberQ]
           exact hm a ha
         have hDQ : IsRealDelineable Q S :=
-          delineability_theorem_1_real_mv Q S hS d m hdpos hdegQ hlcQ hmQ
+          delineability_theorem_1_real_mv Q S hS d m hdpos' hdegQ hlcQ hmQ
         exact Or.inl (IsRealDelineable.of_fiber_eq hDQ
           (fun a ha => (hbridge a ha).trans (hfiberQ a).symm))
 

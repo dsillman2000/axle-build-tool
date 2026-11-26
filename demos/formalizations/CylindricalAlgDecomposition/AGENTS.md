@@ -65,15 +65,19 @@ cluster E (CAD construction, DECOMP/DEFINE) and cluster F (logic/EVAL/ELIM).
 - `CAD/EffectiveReductum.lean` proves the effective-reductum theorem.
   `CAD/GcdDegreeConstancy.lean` transports the PSC zero/nonzero pattern across a
   projection-invariant base set, including the `j < min(deg B₁, deg B₂)` boundary.
-- `CAD/Theorem4.lean` handles nonzero constant fibres explicitly and derives the
-  positive-degree case from GCD-degree constancy and Collins Theorem 3.
+- `CAD/Theorem4.lean` handles `d = 0` and `d = 1` explicitly and reuses
+  `CAD/EffectiveFamily.lean` for the positive-degree family-data argument.
 - `CAD/CommonRoots.lean`, `CAD/LocalRootData.lean`, `CAD/JointRootData.lean`, and
   `CAD/JointGcdDegree.lean` prove the local common-root multiplicity-sum formula.
   `CAD/Pairwise.lean` turns constant GCD degree into clopen branch coincidence.
 - `CAD/Lifting.lean` exports `projection_fundamental_lifting`: an explicit finite,
-  strictly ordered continuous family covering exactly the union of factor roots.
-  The theorem assumes every factor fibre is nonzero on the base set; globally
-  nonzero polynomials can still have identically zero fibres.
+  strictly ordered continuous family covering exactly the union of factor roots,
+  with a per-factor vanishing dichotomy on every lifted branch. The theorem
+  assumes every factor fibre is nonzero on the base set.
+- `CAD/ZeroFiber.lean` defines `nonzeroFibers A a₀` and proves that retained
+  factors have nowhere-zero fibres, excluded factors vanish identically, and
+  projection sign invariance restricts to the retained family. Its product
+  wrapper handles arbitrary input families without strengthening them globally.
 
 ### Cluster C notes
 

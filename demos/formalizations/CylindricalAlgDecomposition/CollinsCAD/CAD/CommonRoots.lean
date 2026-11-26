@@ -33,45 +33,6 @@ theorem rootMultiplicity_gcd {K : Type*} [Field K] [DecidableEq K]
         (Polynomial.pow_rootMultiplicity_dvd q z)
     exact EuclideanDomain.dvd_gcd h1 h2
 
-/-- Over an algebraically closed field, the degree of a GCD is the sum of the
-    minimum root multiplicities over the roots of the first polynomial. -/
-theorem natDegree_gcd_eq_sum_min_rootMultiplicity
-    (p q : Polynomial ℂ) (hp : p ≠ 0) (hq : q ≠ 0) :
-    (EuclideanDomain.gcd p q).natDegree =
-      ∑ z ∈ p.roots.toFinset,
-        min (Polynomial.rootMultiplicity z p) (Polynomial.rootMultiplicity z q) := by
-  have hgcd0 : EuclideanDomain.gcd p q ≠ 0 := by
-    intro hz
-    have hdvd := EuclideanDomain.gcd_dvd_left p q
-    rw [hz] at hdvd
-    exact hp (zero_dvd_iff.mp hdvd)
-  rw [← IsAlgClosed.card_roots_eq_natDegree]
-  rw [← Multiset.toFinset_sum_count_eq (EuclideanDomain.gcd p q).roots]
-  have hsubset : (EuclideanDomain.gcd p q).roots.toFinset ⊆ p.roots.toFinset := by
-    intro z hz
-    have hmem : z ∈ (EuclideanDomain.gcd p q).roots := Multiset.mem_toFinset.mp hz
-    have hroot : (EuclideanDomain.gcd p q).IsRoot z := Polynomial.isRoot_of_mem_roots hmem
-    have hdvd : EuclideanDomain.gcd p q ∣ p := EuclideanDomain.gcd_dvd_left p q
-    obtain ⟨w, hw⟩ := hdvd
-    have hrootp : p.IsRoot z := by
-      rw [hw, Polynomial.IsRoot, Polynomial.eval_mul, hroot, zero_mul]
-    exact Multiset.mem_toFinset.mpr (Polynomial.mem_roots'.mpr ⟨hp, hrootp⟩)
-  have hzero : ∀ z ∈ p.roots.toFinset,
-      z ∉ (EuclideanDomain.gcd p q).roots.toFinset →
-        Multiset.count z (EuclideanDomain.gcd p q).roots = 0 := by
-    intro z hz hnot
-    have hnotroot : ¬ (EuclideanDomain.gcd p q).IsRoot z := by
-      intro hr
-      exact hnot (Multiset.mem_toFinset.mpr
-        (Polynomial.mem_roots'.mpr ⟨hgcd0, hr⟩))
-    have hz0 : Polynomial.rootMultiplicity z (EuclideanDomain.gcd p q) = 0 :=
-      Polynomial.rootMultiplicity_eq_zero hnotroot
-    simp [Polynomial.count_roots, hz0]
-  rw [Finset.sum_subset hsubset hzero]
-  apply Finset.sum_congr rfl
-  intro z hz
-  rw [Polynomial.count_roots, rootMultiplicity_gcd p q hp hq z]
-
 /-- The natural degree of a polynomial GCD. -/
 noncomputable def gcdNatDegree {K : Type*} [Field K] [DecidableEq K]
     (A B : Polynomial K) : ℕ :=

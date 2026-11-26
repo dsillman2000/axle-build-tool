@@ -8,11 +8,11 @@ Lean 4 / Mathlib formalization of George E. Collins' cylindrical algebraic decom
 - `Analysis` → `CollinsCAD/Analysis/`
 - `CAD` → `CollinsCAD/CAD/`
 
-Imports use `Algebra.*` and `Analysis.*`; the Lean namespace remains `CollinsCAD`.
+Imports use `Algebra.*`, `Analysis.*`, and `CAD.*`; the Lean namespace remains `CollinsCAD`.
 
 ## Current coverage
 
-Clusters A–D are implemented and verified: reducta and variable splitting, subresultants and Collins Theorems 2–3, root continuity, Theorem 1, Collins projection, effective reducta, Theorem 4, pairwise branch coincidence, and fundamental lifting. The lifting API includes an explicit ordered continuous family whose range is exactly the union of factor-root sets, under the necessary nonzero-fibre hypothesis.
+Clusters A–D are implemented and verified: reducta and variable splitting, subresultants and Collins Theorems 2–3, root continuity, Theorem 1, Collins projection, effective reducta, Theorem 4, pairwise branch coincidence, and fundamental lifting. The lifting API includes an explicit ordered continuous family whose range is exactly the union of factor-root sets, together with a per-factor vanishing dichotomy. `CAD/ZeroFiber.lean` filters arbitrary input families into retained factors with nowhere-zero fibres and excluded factors that vanish identically on the base set.
 
 ## Development
 

@@ -4,6 +4,13 @@ import CAD.ProjectionDef
 
 namespace CollinsCAD
 
+/-- Sign invariance is inherited by subsets of the projected polynomial set. -/
+theorem SignInvariant.mono {r : ℕ} {A B : Finset (MvPolynomial (Fin r) ℝ)}
+    {S : Set (Fin r → ℝ)} (h : SignInvariant B S) (hsub : A ⊆ B) :
+    SignInvariant A S := by
+  intro P hP
+  exact h P (hsub hP)
+
 /-- A sign-invariant polynomial that vanishes at one point vanishes everywhere. -/
 theorem SignInvariantPoly.eq_zero_of_eq_zero {r : ℕ}
     {P : MvPolynomial (Fin r) ℝ} {S : Set (Fin r → ℝ)}
