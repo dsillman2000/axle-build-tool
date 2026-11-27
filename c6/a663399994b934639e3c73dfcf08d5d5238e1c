@@ -1,0 +1,48 @@
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Define.lean
+  s_e7a3924fabe171::t_8348f28d29028a 5-13
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Analysis/Theorem1Mv.lean
+  s_e7a3924fabe171::t_7fced354bf3279 84-85,95-100,103-104,106-107
+  s_e7a3924fabe171::t_697e6758d18d57 125,138-139,163
+  s_e7a3924fabe171::t_c6e3cfeed20a8f 4
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Decomp.lean
+  s_e7a3924fabe171::t_9bb7a4de40c1c2 5-13
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/OrderedRing.lean
+  s_e7a3924fabe171::t_ef0119d655769d 3-12
+  s_e7a3924fabe171::t_59880a61152f1a 96,99
+  s_e7a3924fabe171::t_cad766f18c517d 97-98,100
+  s_e7a3924fabe171::t_b9a8249e4b6049 101
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Basic.lean
+  s_e7a3924fabe171::t_07dd8eb5cd609c 6-8
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/SignFormula.lean
+  s_e7a3924fabe171::t_8f69ac7c2fe20f 28-30,38,40,43,45,47,49
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/ProjectionDef.lean
+  s_e7a3924fabe171::t_b9d6bd353515a2 7-15
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_86b4bc2776d94e 216-221
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Evaluation.lean
+  s_e7a3924fabe171::t_27718dbfecd97f 20,41,57,76,79,88
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Integrality.lean
+  s_e7a3924fabe171::t_b270657c6e69e4 4-13
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Elim.lean
+  s_e7a3924fabe171::t_8afedc9960eb05 3-12
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/ElimStep.lean
+  s_e7a3924fabe171::t_f4309c0672ccf0 84
+  s_e7a3924fabe171::t_388d1b82d5a201 59-74
+  s_e7a3924fabe171::t_f0e3e411512e62 91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "c6a663399994b934639e3c73dfcf08d5d5238e1c",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
