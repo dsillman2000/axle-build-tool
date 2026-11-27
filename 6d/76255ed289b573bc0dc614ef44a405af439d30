@@ -1,0 +1,21 @@
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_7b65a6a82dba4f 65-66
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/OrderedRing.lean
+  s_e7a3924fabe171::t_b0e813b8fcc9d2 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "6d76255ed289b573bc0dc614ef44a405af439d30",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
