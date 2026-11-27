@@ -1,0 +1,291 @@
+# Cylindrical algebraic decomposition formalization
+
+Goal: formalize George E. Collins' quantifier-elimination algorithm for real closed fields
+("Quantifier Elimination for Real Closed Fields by Cylindrical Algebraic Decomposition", 1975)
+in Lean 4 / Mathlib, following the dependency-ordered blueprint produced by Gemini/Neon.
+
+There is no local Lean install. All proof work goes through `axbt`, which submits
+self-contained payloads to the Axle API. Requires `AXLE_API_KEY` in the environment.
+
+## Layout
+
+The PDF and everything under `docs/` are local-only reference material. They are ignored by Git and are not part of the demo branch.
+
+- `3-540-07407-4_17.pdf` — the original 50-page paper (scanned typewritten pages).
+- `docs/page01.md` … `docs/page50.md` — Markdown OCR transcriptions of the paper, one file per
+  PDF page. They were produced page-by-page in the Gemini chat and saved verbatim except for
+  attachment-name artifacts (`cad-pageN.jpg`). Page 48 and 50 are structured bibliography
+  extractions rather than strict verbatim transcriptions. "discoverd" on page 1 is faithful to
+  the scan and must not be "corrected".
+- `docs/blueprint.md` — the Gemini/Neon blueprint: formal statement sketches, a DAG of lemmas
+  with `mathlib_status`/`tactic_hint`/`risk`, module layout, gap analysis. This is the roadmap.
+- `docs/alphaxiv-summary.md` — a high-level summary of the paper, useful for orientation.
+- `docs/collins-cad-brief.md` — the condensed mathematical brief fed to Neon to obtain the
+  blueprint; use it when the full transcription is too large to hand to a model.
+- `axbt_project.yml` — project root. Modules `Algebra`, `Analysis`, `CAD`, and `Logic` live in
+  `CollinsCAD/Algebra/`, `CollinsCAD/Analysis/`, `CollinsCAD/CAD/`, and
+  `CollinsCAD/Logic/`. Environment is pinned to `lean-4.36.0`; API timeout is 600 s
+  (some proofs are expensive).
+- `.axbt/` — axbt's offline cache and failure artifacts (gitignore it). `manifest.json` holds
+  declaration stamps; `failed/` holds exact submitted payloads and source maps.
+- `CollinsCAD/Algebra/` — algebraic Lean sources, one file per concept; import siblings by
+  file stem (e.g. `import Algebra.Subresultant`).
+- `CollinsCAD/Analysis/` — analytic Lean sources; use `Analysis.*` for sibling imports and
+  `Algebra.*` for algebraic dependencies. The Lean namespace remains `CollinsCAD`.
+- `CollinsCAD/CAD/` — projection and lifting sources; use `CAD.*` for sibling imports and
+  `Analysis.*` / `Algebra.*` for upstream dependencies.
+- `CollinsCAD/Logic/` — first-order language, term translation, EVAL, and ELIM sources;
+  use `Logic.*` for sibling imports and `CAD.*` for decomposition APIs.
+
+## Development process
+
+1. Read the relevant `docs/pageNN.md` and the corresponding blueprint node before writing Lean.
+2. Write small single-purpose files with LaTeX doc comments aimed at mathematicians.
+3. Iterate with `axbt compile` then `axbt check -s <Module.File.decl>`; use `axbt verify -s …`
+   for kernel-level verification of finished proofs. Do not rely on `check` alone — a `sorry`
+   typechecks but does not verify. `axbt build` is the finish line (check pass then verify pass).
+4. Do not reflexively use `--force`/`--full-refresh`; incremental compilation and
+   declaration-level caching re-judge only what changed. For unfinished upstream declarations,
+   use `axbt build --sorry <upstream-file>` or `verify --permitted-sorries <selector>`.
+5. Some heavy declarations use `set_option maxHeartbeats N in` immediately before the doc
+   comment. Keep the option before the docstring so axbt's declaration splitter stays happy.
+6. On a FAIL, read the named `.axbt/failed/<id>.lean` payload and its `.map.json` before
+   rebuilding from source; positions in the report refer to that exact payload.
+
+## Status
+
+Clusters A, B, C, D, E, and F are implemented and verified. `Analysis/Theorem1Mv.lean`
+specializes Collins' Theorem 1 to normalized multivariate fibres, `CAD/` implements
+projection, lifting, and List-based cylindrical decompositions, `Analysis/Thom*.lean`
+provides the derivative-sign classification used by DEFINE, and `Logic/` implements
+ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination theorem.
+
+### Cluster F notes
+
+- `Logic/OrderedRing.lean` imports Mathlib directly and defines
+  `FirstOrder.Language.orderedRing` with a primitive
+  binary `lt` relation, its `ℝ` structure, ring-style term operations, and strict-order
+  formula helpers. `compatibleRingReal` is a scoped instance, enabled downstream with
+  `open scoped FirstOrder.Language` to avoid imposing a global ring-language structure.
+  `Logic/TermPoly.lean` defines `termToMvPoly` and `mvPolyToTerm`,
+  proves realization preservation in both directions, and proves the polynomial round
+  trip `termToMvPoly_mvPolyToTerm`; syntactic term round trips are intentionally not
+  claimed.
+- `Logic/AtomPolys.lean` defines concatenated free/bound realization helpers,
+  `atomPolys`, `realAtomPolys`, integrality and monotonicity of atom support, and the
+  equality/strict-order sign-semantics lemmas. `Logic/Evaluation.lean` proves
+  `boundedQF_realize_eq_sample`, `qf_realize_eq_sample`, and
+  `cellConstant_of_qf_invariant`.
+- `Logic/QuantifierStep.lean` evaluates one `∀` or `∃` through the explicit cylinder
+  child map. `eval_quantifier_step` identifies quantified truth with the finite
+  conjunction/disjunction of child-sample truths using fibre coverage and
+  nonemptiness; specialized `eval_exists_iff_children_of_constant` and
+  `eval_forall_iff_children_of_constant` expose the depth-one API.
+- `Logic/SignFormula.lean` translates integral `SignCondition`/`SignFormula` values
+  into quantifier-free ordered-ring syntax and supplies finite `iInf`/`iSup` QF helpers.
+- `Logic/Prefix.lean` defines fixed-matrix-arity `Prefix`, `PrenexView`, CAD descent,
+  augmented-family projection, and preservation of validity, provenance, and
+  integrality.
+- `Logic/ElimStep.lean` constructs the finite disjunction of translated DEFINE formulas
+  for accepting parent cells. `Logic/Elim.lean` proves `Prefix.elim`,
+  `logic_elim_prenex`, `rcf_quantifier_elimination`, and `logic_elim_main` using
+  Mathlib's `toPrenex` and `realize_toPrenex`. It also exports
+  `rcf_quantifier_elimination_fintype` for arbitrary finite variable types and
+  `rcf_sentence_quantifier_elimination` for sentences.
+
+### Cluster E notes
+
+- `CAD/Cell.lean` defines connected cells with explicit samples. Whole cylinders,
+  lower/upper sectors, bounded sectors, and graph sections are continuous images
+  of connected products; `Cell.graph` is the section constructor because `section`
+  is a Lean keyword.
+- `CAD/Cylinder.lean` defines `RootFamily`, `LiftShape`, the recursive alternating
+  child list `liftCells`, `Cylinder`, and `IsCylinderPartition`. Stable successor
+  equations `liftCellsAux_succ_of_pos` and `liftCellsAux_one` expose the head
+  decomposition without unfolding the recursive definition by hand.
+  `CAD/Structure.lean` stores the raw List-based CAD history and explicit
+  `parentChildren` map, with recursive validity in `IsCAD` and semantic partition
+  invariants in `Decomposition`. `IsCAD.mem_childrenOf`, `childrenOf_subset_cells`,
+  `childrenOf_cover`, `childrenOf_fiber_nonempty`, `childrenOf_nonempty`,
+  `childrenOf_init_mem`, `IsCAD.previous`, and `HasAugmentedProvenance.previous`
+  provide the direct APIs needed by EVAL and ELIM.
+- `CAD/CylinderGeometry.lean`, `CAD/CylinderCoverage.lean`, and
+  `CAD/CylinderPartition.lean` prove the `2k+1` shape, fibre coverage, nonempty
+  fibres, cylindrical samples, pairwise disjointness, and canonical partition API.
+- `CAD/LiftedSignInvariant.lean` packages lifting after zero-fibre filtering.
+  Sections use the per-factor dichotomy; sectors use root exhaustion; connectedness
+  plus nonvanishing gives sign invariance. Excluded factors vanish identically.
+- `CAD/Decomp.lean` proves `exists_decomposition_lift`, `cad_decomp_exists`, and
+  `cad_base_r1`. The induction is uniform from `r = 0`; there is no separate
+  univariate base construction. `exists_cad_succ_of_cylinder_builder` centralizes
+  the parent-to-child list assembly shared with augmented decomposition.
+- `Analysis/ThomCells.lean` and `Analysis/ThomLemma.lean` classify derivative-sign
+  cells as empty, singleton, or nonempty open order-connected sets.
+  `Analysis/ThomFamily.lean` extends this to finite families and proves that equal
+  derivative signs cannot cross a family root.
+- `CAD/AugmentedProjection.lean` builds `derivativeTower`, `augPolySet`, and
+  `augProj` directly from effective reducta and iterated last-variable derivatives.
+  `derivative_iterate_mem_tower` is reused by `symm_derivative_mem_augPolySet`, so
+  derivative-tower closure has one proof. `localAugPolySet` filters the global envelope at a cell sample. Derivatives
+  omitted by the filter are handled by an explicit identically-zero dichotomy;
+  no commutation between differentiation and `eraseLead` is assumed.
+- `CAD/AugmentedDecomp.lean` records `HasAugmentedProvenance` on the existing CAD
+  tree and proves `exists_augmented_cad`. Each cylinder remembers its local
+  augmented family, nonvanishing fibres, derivative dichotomy, and original-family
+  invariance.
+- `CAD/LiftRootSeparation.lean` and `CAD/LiftSignVector.lean` prove fixed-fibre
+  sign-vector uniqueness from root separation and the family Thom theorem. The
+  general `Cylinder.sign_fiber_eq_of_snoc_mem_general` lemma subsumes the older
+  same-base and arbitrary-point fibre-sign variants.
+- `CAD/SignFormula.lean` defines semantic `SignCondition`/`SignFormula`, prefixing,
+  sample sign vectors, and the finite `definePolys` support envelope.
+  `CAD/Integrality.lean` defines `IsIntPoly`/`IsIntUPoly` and proves closure through
+  last-variable splitting, reducta, derivatives, leading coefficients, PSCs,
+  Collins projection, augmented projection, and `definePolys`; this is the bridge
+  required to translate DEFINE formulas into integer-coefficient first-order
+  syntax in Cluster F.
+  `CAD/Define.lean` exports `define_lifted_cell_formula`,
+  `cad_define_cell_formula`, and `cad_define_exists`. `Logic/SignFormula.lean`
+  translates these semantic conditions into first-order syntax.
+
+### Cluster D notes
+
+- `CAD/ProjectionDef.lean` defines `reductaSet`, `projL`, `projS1`, `projS2`, and
+  `collinsProj`. Nonzero constant reducta contribute to `projL`; this is necessary
+  for `projection_effective_reductum`.
+- `CAD/EffectiveReductum.lean` proves the effective-reductum theorem.
+  `CAD/GcdDegreeConstancy.lean` transports the PSC zero/nonzero pattern across a
+  projection-invariant base set. Its degree-preserved variant allows one degree to drop at each
+  point, provided both fibres stay nonzero; the both-degrees-preserved API remains a wrapper.
+- `CAD/Theorem4.lean` handles `d = 0` and `d = 1` explicitly and reuses
+  `CAD/EffectiveFamily.lean` for the positive-degree family-data argument.
+- `CAD/CommonRoots.lean`, `CAD/LocalRootData.lean`, `CAD/JointRootData.lean`, and
+  `CAD/JointGcdDegree.lean` prove the local common-root multiplicity-sum formula.
+  `CAD/Pairwise.lean` turns constant GCD degree into clopen branch coincidence.
+- `CAD/Lifting.lean` exports `projection_fundamental_lifting`: an explicit finite,
+  strictly ordered continuous family covering exactly the union of factor roots,
+  with a per-factor vanishing dichotomy on every lifted branch. The theorem
+  assumes every factor fibre is nonzero on the base set.
+- `CAD/ZeroFiber.lean` defines `nonzeroFibers A a₀` and proves that retained
+  factors have nowhere-zero fibres, excluded factors vanish identically, and
+  projection sign invariance restricts to the retained family. Its product
+  wrapper handles arbitrary input families without strengthening them globally.
+
+### Cluster C notes
+
+- `Analysis/Delineability.lean` defines `fiberPoly`, `SignInvariantPoly`, `SignInvariant`,
+  `IsRealDelineable`, and `IsDelineable`. `SignInvariantPoly.of_connected_ne_zero`
+  derives invariance on a connected set from nonvanishing by the intermediate value theorem.
+- `Analysis/RootContinuity.lean` proves `cauchy_root_bound` (roots of a monic degree-$d$
+  polynomial satisfy $\|z\| \le \max 1 \sum_{k<d}\|P_k\|$), the coefficient-vector helpers
+  `polyOfCoeffs`/`coeff_polyOfCoeffs`/`polyOfCoeffs_self`, and the shared
+  `exists_vieta_subsequence_of_coeff_close` helper. The helper enumerates roots via
+  `roots.toList`/`List.ofFn`, bounds them by the Cauchy bound, extracts a convergent
+  subsequence with `IsCompact.tendsto_subseq`, and identifies the limit using
+  `Polynomial.funext` (evaluation convergence avoids needing continuity of the Vieta map).
+  Both `exists_root_near_of_coeff_close` and `roots_count_in_ball_eq_of_coeff_close`
+  reuse this core.
+  `roots_persist_near_of_coeff_close` extends this to all distinct roots at once by
+  finite induction over `roots.toFinset` with a minimum of the individual moduli.
+- `roots_count_in_ball_eq_of_coeff_close` is the exact node-20 statement: the number of
+  roots (with multiplicity) in a disc around one distinct root is preserved. It reuses
+  the compactness core and then identifies the limit multiset via `Fin.univ_val_map`
+  and `Polynomial.roots_multiset_prod_X_sub_C`.
+- `Analysis/LocalRoots.lean` adds `exists_separation_radius`, `eval_eq_sum_fin`,
+  `evalFin`, and `continuous_unique_root_in_ball`: a root selected uniquely from an
+  isolated disc varies continuously along a continuous coefficient family. The proof
+  uses `Filter.tendsto_of_subseq_tendsto`, compactness of a bounded disc, and
+  uniqueness via a separation radius. Writing the joint evaluation map as the named
+  `evalFin` avoids a whnf loop with `Tendsto.comp` on an anonymous finite sum.
+- `unique_root_in_ball_of_count` turns preserved disc counts plus constant distinct-root
+  count into uniqueness of a root in each disc, using `Finset.card_biUnion` and
+  disjointness of the discs; it also returns coverage of all roots by the discs.
+  `locally_unique_roots_of_monic_family` combines this with coefficient continuity to
+  produce an open neighbourhood of a base point where each disc has a unique root.
+- `local_continuous_root_functions` and `local_real_root_functions` provide continuous
+  root functions on a neighbourhood, with real centres giving real-valued functions;
+  `conj_root_of_real_coeff` and `real_of_unique_root_in_real_ball` drive the partition.
+  `rootMultiplicity_locally_constant_of_continuous_root_in_ball` exports local constancy
+  of complex root multiplicities for reuse by projection arguments.
+  `real_root_count_locally_constant` proves the number of distinct real roots is locally
+  constant by a `Finset.card_bij` between the real roots at nearby points.
+- `real_root_count_constant_on_preconnected` uses `IsLocallyConstant.iff_exists_open`
+  and `IsLocallyConstant.apply_eq_of_preconnectedSpace` to obtain a single global `k`.
+- `Analysis/Theorem1.lean` defines `ordered_real_root_functions_of_family` and
+  `ordered_real_root_functions_with_multiplicity` using `Finset.orderEmbOfFin` on the
+  real parts of the roots, `Finset.orderEmbOfFin_unique` to identify each global `f_i`
+  with a local continuous branch, and `IsLocallyConstant` to transport multiplicities.
+  `delineability_theorem_1_real` is the resulting family-version statement.
+- `Analysis/Theorem1Mv.lean` specializes the family theorem to the normalized fibre
+  polynomials of an `MvPolynomial` on a connected `S`. The shared
+  `Analysis/MonicComplexFiber.lean` API scales each fibre by the inverse of its
+  leading coefficient and proves coefficient continuity, degree, monicity, root,
+  and real-coefficient properties; both `CAD/Pairwise.lean` and `Theorem1Mv.lean`
+  reuse it. `rootMultiplicity_map_eq` transfers multiplicities from $\mathbb{R}$ to
+  $\mathbb{C}$. `delineability_theorem_1_real_mv` yields `IsRealDelineable P S`;
+  `isRealDelineable_of_fiber_natDegree_eq_zero` handles nonzero constant fibres.
+  `fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero` provides the reductum/fibre bridge
+  needed by effective-reductum arguments.
+- Cluster F completes the blueprint's logic, EVAL, and ELIM nodes. No later cluster
+  has been started.
+
+### Cluster A notes
+
+- `reductum` is iterated `eraseLead`; the degree/support bounds use `eraseLead_natDegree_lt_or_eraseLead_eq_zero` and `card_support_eraseLead`.
+- `finLastEquiv` views $R[X_0,\ldots,X_r]$ as $R[X_0,\ldots,X_{r-1}][X]$ via
+  `Fin (r+1) ≃ Option (Fin r)` and `MvPolynomial.optionEquivLeft`; `eval_last_comm` uses
+  `MvPolynomial.optionEquivLeft_elim_eval` and `hom_eq_hom`.
+
+### Cluster B notes
+
+- Mathlib 4.36 has `Polynomial.resultant` but no subresultants. `Algebra/FixedSubresultant.lean`
+  defines Mathlib-aligned fixed-bound `Polynomial.subresultantMatrix p q m n j` and
+  `Polynomial.psc p q m n j`, including mapping, resultant, commutativity, terminal-coefficient,
+  and matrix-vector lemmas. `Algebra/Subresultant.lean` preserves the legacy CollinsCAD matrix and
+  actual-degree `psc A B j`; the latter is a signed fixed-bound wrapper.
+- `Algebra/GcdPsc.lean` ports the unified kernel-vector/Bézout gcd criterion. A short polynomial
+  relation gives a matrix kernel vector, and a coefficient-window lemma plus the gcd Bézout
+  identity rules out a kernel vector at the gcd degree. `natDegree_gcd_eq_iff_psc` also handles
+  zero inputs uniformly.
+- `coeffMap`, `coeffMap_toMatrix`, `coeffMap_eq_vecMul`, and
+  `psc_eq_zero_iff_exists_uv` remain as compatibility helpers in `SubresultantBezout.lean`; the
+  standalone `Algebra/CoeffMap.lean` module was removed.
+- Collins Theorem 2 (`subresultant_deg_gcd_eq_least_nonzero_psc`) is a thin wrapper around the
+  unified criterion. The old directional lemmas remain available as compatibility wrappers.
+- `Algebra/SubresultantDegreeDrop.lean` proves fixed-bound left/right degree-drop formulas, and
+  `Algebra/SubresultantSpecialization.lean` specializes them to actual-degree PSCs. A single
+  degree drop changes a PSC by a nonzero scalar when the fibres are nonzero; two strict drops
+  force strict PSCs to vanish.
+- Collins Theorem 3 (`roots_card_distinct_eq_sub_deg_gcd_deriv`) is proved over ℂ from root
+  multiplicities, then mapped back from ℝ. `Multiset.toFinset_sum_count_eq` gives the sum of
+  multiplicities; `Finset.sum_add_distrib` gives the cardinality identity without a brittle
+  subtraction rewrite.
+- The UFD/Gauss node (`subresultant_gauss_content_lift`) uses
+  `IsLocalization.integerNormalization` and `IsPrimitive.dvd_iff_fraction_map_dvd_fraction_map`.
+  `subresultant_deg_gcd_eq_least_nonzero_psc_ufd` composes this lift with the field-valued
+  Theorem 2 and injective fixed-bound PSC mapping to export Collins Theorem 2 over a UFD.
+  Adapted Tau Ceti proofs are attributed in `Algebra/TAUCETI_ATTRIBUTION.md` under Apache 2.0.
+
+### Mathlib API gotchas encountered
+
+- Prefer `natDegree` over `WithBot` degree arithmetic; the latter needs instances that are
+  awkward to synthesize.
+- Current Mathlib uses generic `Finset.antidiagonal`; the old `Finset.Nat.mem_antidiagonal`
+  path is not reliable. Use `Polynomial.coeff_X_pow_mul'` where possible.
+- Big-operator notation here is `∑ x ∈ s, …` (with `open scoped BigOperators`); `∑ x in s` may
+  not parse.
+- `EuclideanDomain.gcd` and `GCDMonoid.gcd` are not definitionally the same in every theorem;
+  `simpa`/`change` may be needed, and `EuclideanDomain.dvd_gcd` is the field-safe variant.
+- `Polynomial.rootMultiplicity_pos` takes the nonzero proof as an explicit first argument;
+  `Polynomial.degree_pos_of_root` plus `Polynomial.coe_lt_degree` converts to `natDegree`.
+
+## External artifacts
+
+The paper transcriptions and blueprint came from two Gemini sessions driven with the `browse`
+CLI on the user's Brave browser:
+
+- OCR Document Transcription Task: `https://gemini.google.com/app/8d9a1c6df42a20f2`
+- Lean 4 Formalization Blueprint: `https://gemini.google.com/app/acdf77bc0815feec`
+
+When requesting more transcriptions, render a page with `pdftoppm -r 200 -jpeg -singlefile`
+and upload the image; use the response's Copy action to get clean Markdown.
