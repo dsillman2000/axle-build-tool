@@ -17,8 +17,7 @@ def ConstantOnCell {n m : ℕ}
 theorem boundedQF_realize_eq_sample {r k : ℕ}
     {φ : orderedRing.BoundedFormula (Fin r) k} (hφ : φ.IsQF)
     {C : Cell (r + k)}
-    (hInv : SignInvariant (realAtomPolys (atomPolys φ)) C.carrier)
-    (hs : C.sample ∈ C.carrier) :
+    (hInv : SignInvariant (realAtomPolys (atomPolys φ)) C.carrier) :
     ∀ z ∈ C.carrier, boundedRealize φ z ↔ boundedRealize φ C.sample := by
   revert hInv
   induction hφ with
@@ -39,7 +38,7 @@ theorem boundedQF_realize_eq_sample {r k : ℕ}
             (boundedTermToMvPoly t₁ - boundedTermToMvPoly t₂) = _
           simp [intCastMv]
       rcases hInv _ hmem with ⟨s, hs'⟩
-      have hsign := (hs' z hz).trans (hs' C.sample hs).symm
+      have hsign := (hs' z hz).trans (hs' C.sample C.sample_mem).symm
       rw [boundedRealize_equal_iff_sign_zero,
         boundedRealize_equal_iff_sign_zero, hsign]
     | rel R ts =>
@@ -55,7 +54,7 @@ theorem boundedQF_realize_eq_sample {r k : ℕ}
               (boundedTermToMvPoly (ts 0) - boundedTermToMvPoly (ts 1)) = _
             simp [intCastMv]
         rcases hInv _ hmem with ⟨s, hs'⟩
-        have hsign := (hs' z hz).trans (hs' C.sample hs).symm
+        have hsign := (hs' z hz).trans (hs' C.sample C.sample_mem).symm
         have hrel : (Relations.boundedFormula orderedRingRel.lt ts) =
             orderedRingTermLt (ts 0) (ts 1) := by
           congr 1
@@ -74,11 +73,10 @@ theorem boundedQF_realize_eq_sample {r k : ℕ}
 /-- Formula-level EVAL base theorem. -/
 theorem qf_realize_eq_sample {n : ℕ}
     {φ : orderedRing.Formula (Fin n)} (hφ : φ.IsQF)
-    {C : Cell n} (hInv : SignInvariant (realAtomPolys (atomPolys φ)) C.carrier)
-    (hs : C.sample ∈ C.carrier) :
+    {C : Cell n} (hInv : SignInvariant (realAtomPolys (atomPolys φ)) C.carrier) :
     ∀ z ∈ C.carrier, φ.Realize z ↔ φ.Realize C.sample := by
   intro z hz
-  have h := boundedQF_realize_eq_sample hφ hInv hs z hz
+  have h := boundedQF_realize_eq_sample hφ hInv z hz
   simpa only [boundedRealize_zero, Nat.add_zero] using h
 
 /-- Quantifier-free invariance gives sample constancy on every CAD cell. -/
@@ -87,6 +85,6 @@ theorem cellConstant_of_qf_invariant {r k : ℕ} {T : CAD (r + k)}
     (hInv : CADInvariant (realAtomPolys (atomPolys φ)) T.cells) :
     ∀ C ∈ T.cells, ConstantOnCell φ C := by
   intro C hC z hz
-  exact boundedQF_realize_eq_sample hφ (hInv C hC) C.sample_mem z hz
+  exact boundedQF_realize_eq_sample hφ (hInv C hC) z hz
 
 end CollinsCAD

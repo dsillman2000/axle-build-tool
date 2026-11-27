@@ -56,50 +56,39 @@ theorem logic_elim_quantifier_step {n m : ℕ} (q : Quantifier)
         rw [realize_signFormulaToBounded]
         exact hdef c.1 (joinTuple v xs)
       exact ⟨c, hc'.mpr hzS⟩
+  have hacc_iff (S : Cell (n + m)) (hS : S ∈ U.previous.cells)
+      (x : Fin (n + m) → ℝ) (hx : x ∈ S.carrier) :
+      (∃ T : cells, T ∈ accept ∧ x ∈ T.1.carrier) ↔ mark S := by
+    constructor
+    · rintro ⟨T, hTacc, hxT⟩
+      have hTmark : mark T.1 := (Finset.mem_filter.mp hTacc).2
+      have heq : T.1 = S := by
+        by_contra hne
+        exact Set.disjoint_left.mp
+          (U.previous.decomposition.pairwise_disjoint T.1 T.2 S hS hne) hxT hx
+      simpa [heq] using hTmark
+    · intro hmark
+      let Ssub : cells := ⟨S, hS⟩
+      have hacc : Ssub ∈ accept :=
+        Finset.mem_filter.mpr ⟨Finset.mem_univ _, hmark⟩
+      exact ⟨Ssub, hacc, hx⟩
   refine ⟨ψ, ?_, ?_, ?_⟩
   · apply isQF_iSup
     intro c
     exact signFormulaToBounded_isQF (F c.1) (hFint c.1)
   · intro v xs
     rcases U.previous.decomposition.cover (joinTuple v xs) with ⟨S, hS, hzS⟩
-    let S₀ : cells := ⟨S, hS⟩
     have hstep := eval_quantifier_step q U hU φ hconst S hS
       (joinTuple v xs) hzS
     simp only [freePart_joinTuple, boundPart_joinTuple] at hstep
-    have hmem : (∃ T : cells, T ∈ accept ∧ joinTuple v xs ∈ T.1.carrier) ↔
-        mark S := by
-      constructor
-      · rintro ⟨T, hTacc, hzT⟩
-        have hTmark : mark T.1 := (Finset.mem_filter.mp hTacc).2
-        have heq : T.1 = S := by
-          by_contra hne
-          exact Set.disjoint_left.mp
-            (U.previous.decomposition.pairwise_disjoint T.1 T.2 S hS hne) hzT hzS
-        simpa [heq] using hTmark
-      · intro hmark
-        have hacc : S₀ ∈ accept := by
-          exact Finset.mem_filter.mpr ⟨Finset.mem_univ _, hmark⟩
-        exact ⟨S₀, hacc, hzS⟩
-    rw [hψ, hmem]
+    rw [hψ, hacc_iff S hS (joinTuple v xs) hzS]
     exact hstep.symm
   · intro C hC
     have hcell (x : Fin (n + m) → ℝ) (hx : x ∈ C.carrier) :
         ψ.Realize (freePart x) (boundPart x) ↔ mark C := by
       rw [hψ]
       simp only [joinTuple_freePart_boundPart]
-      constructor
-      · rintro ⟨T, hTacc, hxT⟩
-        have hTmark : mark T.1 := (Finset.mem_filter.mp hTacc).2
-        have heq : T.1 = C := by
-          by_contra hne
-          exact Set.disjoint_left.mp
-            (U.previous.decomposition.pairwise_disjoint T.1 T.2 C hC hne) hxT hx
-        simpa [heq] using hTmark
-      · intro hmark
-        let Csub : cells := ⟨C, hC⟩
-        have hacc : Csub ∈ accept :=
-          Finset.mem_filter.mpr ⟨Finset.mem_univ _, hmark⟩
-        exact ⟨Csub, hacc, hx⟩
+      exact hacc_iff C hC x hx
     change ∀ z ∈ C.carrier, boundedRealize ψ z ↔ boundedRealize ψ C.sample
     intro z hz
     exact (hcell z hz).trans (hcell C.sample C.sample_mem).symm

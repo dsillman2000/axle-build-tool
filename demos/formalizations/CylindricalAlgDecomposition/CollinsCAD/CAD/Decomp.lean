@@ -2,6 +2,15 @@ import Mathlib
 import CAD.Structure
 import CAD.LiftedSignInvariant
 
+/-!
+# Cylindrical decomposition
+
+A CAD level is assembled by lifting every cell of the preceding level with an
+invariant cylinder and flattening the resulting child lists. The construction
+is uniform from dimension zero: the base decomposition has one empty-tuple
+cell, and each successor uses the same parent-to-child map plumbing.
+-/
+
 namespace CollinsCAD
 
 open Polynomial MvPolynomial

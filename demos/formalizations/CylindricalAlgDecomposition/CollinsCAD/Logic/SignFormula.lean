@@ -25,9 +25,9 @@ noncomputable def intPolyTerm {r : ℕ} {P : MvPolynomial (Fin r) ℝ}
 noncomputable def signConditionToFormula {r : ℕ} (c : SignCondition r)
     (hc : IsIntPoly c.poly) : orderedRing.Formula (Fin r) :=
   match c.sign with
-  | 0 => (intPolyTerm hc).equal (zeroTerm : orderedRing.Term (Fin r))
-  | -1 => orderedRingTermLtFormula (intPolyTerm hc) (zeroTerm : orderedRing.Term (Fin r))
-  | 1 => orderedRingTermLtFormula (zeroTerm : orderedRing.Term (Fin r)) (intPolyTerm hc)
+  | 0 => (intPolyTerm hc).equal (0 : orderedRing.Term (Fin r))
+  | -1 => orderedRingTermLtFormula (intPolyTerm hc) (0 : orderedRing.Term (Fin r))
+  | 1 => orderedRingTermLtFormula (0 : orderedRing.Term (Fin r)) (intPolyTerm hc)
 
 /-- Sign-condition translation preserves truth. -/
 @[simp] theorem realize_signConditionToFormula {r : ℕ} (c : SignCondition r)
@@ -35,18 +35,18 @@ noncomputable def signConditionToFormula {r : ℕ} (c : SignCondition r)
     (signConditionToFormula c hc).Realize z ↔ c.Holds z := by
   rcases c with ⟨P, s⟩
   cases s
-  · change ((intPolyTerm hc).equal (zeroTerm : orderedRing.Term (Fin r))).Realize z ↔
+  · change ((intPolyTerm hc).equal (0 : orderedRing.Term (Fin r))).Realize z ↔
       SignType.sign (MvPolynomial.eval z P) = 0
-    rw [Formula.realize_equal, realize_intPolyTerm, realize_zeroTerm]
+    rw [Formula.realize_equal, realize_intPolyTerm, realize_zero]
     exact sign_eq_zero_iff.symm
   · change (orderedRingTermLtFormula (intPolyTerm hc)
-      (zeroTerm : orderedRing.Term (Fin r))).Realize z ↔
+      (0 : orderedRing.Term (Fin r))).Realize z ↔
       SignType.sign (MvPolynomial.eval z P) = -1
-    rw [realize_orderedRingTermLtFormula, realize_intPolyTerm, realize_zeroTerm]
+    rw [realize_orderedRingTermLtFormula, realize_intPolyTerm, realize_zero]
     exact sign_eq_neg_one_iff.symm
-  · change (orderedRingTermLtFormula (zeroTerm : orderedRing.Term (Fin r))
+  · change (orderedRingTermLtFormula (0 : orderedRing.Term (Fin r))
       (intPolyTerm hc)).Realize z ↔ SignType.sign (MvPolynomial.eval z P) = 1
-    rw [realize_orderedRingTermLtFormula, realize_intPolyTerm, realize_zeroTerm]
+    rw [realize_orderedRingTermLtFormula, realize_intPolyTerm, realize_zero]
     exact sign_eq_one_iff.symm
 
 /-- Sign-condition translation is quantifier-free. -/

@@ -3,9 +3,9 @@
 
 This module exposes Mathlib's bounded formulas, prenex conversion, ring
 languages, and the free-commutative-ring term representation used by Cluster F.
+The broad `Mathlib` import includes `Mathlib.ModelTheory.Complexity`,
+`Mathlib.ModelTheory.Algebra.Ring.Basic`, and
+`Mathlib.ModelTheory.Algebra.Ring.FreeCommRing`.
 -/
 
 import Mathlib
-import Mathlib.ModelTheory.Complexity
-import Mathlib.ModelTheory.Algebra.Ring.Basic
-import Mathlib.ModelTheory.Algebra.Ring.FreeCommRing

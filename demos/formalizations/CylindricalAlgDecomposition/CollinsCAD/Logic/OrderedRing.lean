@@ -1,5 +1,15 @@
 import Logic.Basic
 
+/-!
+# First-order ordered-ring language
+
+The language extends the ring function symbols with one primitive binary
+strict-order relation. Ordered-ring terms translate structurally to integer
+multivariate polynomials, while the reverse translation uses Mathlib's free
+commutative ring representation. Both directions preserve realization on the
+real ordered-ring structure.
+-/
+
 open scoped FirstOrder.Language
 
 namespace FirstOrder.Language
@@ -67,14 +77,6 @@ instance orderedRingStructure : orderedRing.Structure ℝ where
 @[simp] theorem orderedRing_relMap_lt (x : Fin 2 → ℝ) :
     @Structure.RelMap orderedRing ℝ _ 2 ltSymb x = (x 0 < x 1) := rfl
 
-/-- The zero term, without relying on numeral typeclass inference. -/
-def zeroTerm {α : Type*} : orderedRing.Term α := Constants.term zeroFunc
-
-@[simp] theorem realize_zeroTerm {α : Type*} (v : α → ℝ) :
-    Term.realize v (zeroTerm : orderedRing.Term α) = 0 := by
-  simp only [zeroTerm, Term.realize_constants, constantMap]
-  exact orderedRing_funMap_zero _
-
 /-- Ring-style operations on ordered-ring terms. -/
 instance (α : Type*) : Zero (orderedRing.Term α) :=
   ⟨Constants.term zeroFunc⟩
@@ -90,6 +92,12 @@ instance (α : Type*) : Mul (orderedRing.Term α) :=
 
 instance (α : Type*) : Neg (orderedRing.Term α) :=
   ⟨fun t => negFunc.apply₁ t⟩
+
+instance orderedRingTermOfNatZero (α : Type*) : OfNat (orderedRing.Term α) 0 :=
+  ⟨Constants.term zeroFunc⟩
+
+instance orderedRingTermOfNatOne (α : Type*) : OfNat (orderedRing.Term α) 1 :=
+  ⟨Constants.term oneFunc⟩
 
 @[simp] theorem zero_def (α : Type*) :
     (0 : orderedRing.Term α) = Constants.term zeroFunc := rfl

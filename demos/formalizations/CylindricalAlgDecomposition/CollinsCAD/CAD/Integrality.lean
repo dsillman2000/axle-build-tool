@@ -1,6 +1,16 @@
 import Mathlib
 import CAD.AugmentedProjection
 
+/-!
+# Integral coefficient preservation
+
+Integer-coefficient polynomials form a subring stable under last-variable
+splitting, reducta, differentiation, leading coefficients, and principal
+subresultants. This proves that Collins projection, augmented projection, and
+the recursive DEFINE support envelope preserve integrality, allowing semantic
+DEFINE formulas to be translated into integer-coefficient first-order syntax.
+-/
+
 namespace CollinsCAD
 
 open Polynomial MvPolynomial

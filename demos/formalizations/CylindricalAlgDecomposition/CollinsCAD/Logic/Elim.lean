@@ -1,5 +1,15 @@
 import Logic.ElimStep
 
+/-!
+# Prenex quantifier elimination
+
+A fixed-arity quantifier prefix eliminates bound variables from the last
+coordinate inward, matching Mathlib's `Fin.snoc` semantics and Collins'
+last-variable CAD projection. Each step replaces the inner formula by the
+finite disjunction of DEFINE formulas for accepting parent cells. The final
+wrapper converts arbitrary formulas to prenex form with Mathlib's `toPrenex`.
+-/
+
 namespace CollinsCAD
 
 open FirstOrder FirstOrder.Language Polynomial MvPolynomial

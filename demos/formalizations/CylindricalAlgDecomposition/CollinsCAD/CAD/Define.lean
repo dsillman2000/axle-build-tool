@@ -2,6 +2,15 @@ import Mathlib
 import CAD.AugmentedDecomp
 import CAD.SignFormula
 
+/-!
+# DEFINE cell formulas
+
+Each lifted cell is characterized by its parent's sign conditions together
+with the sign vector of the local augmented polynomial family at the child
+sample. Fixed-fibre sign-vector uniqueness ensures that these conditions
+select exactly the intended sector or section.
+-/
+
 namespace CollinsCAD
 
 open Polynomial MvPolynomial

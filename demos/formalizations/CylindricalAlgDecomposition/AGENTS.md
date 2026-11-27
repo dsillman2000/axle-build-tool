@@ -213,10 +213,12 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
   with a local continuous branch, and `IsLocallyConstant` to transport multiplicities.
   `delineability_theorem_1_real` is the resulting family-version statement.
 - `Analysis/Theorem1Mv.lean` specializes the family theorem to the normalized fibre
-  polynomials of an `MvPolynomial` on a connected `S`. The fibre is scaled by the
-  inverse of its leading coefficient; `rootMultiplicity_map_eq` transfers multiplicities
-  from $\mathbb{R}$ to $\mathbb{C}$, and `Polynomial.roots_C_mul` makes the scaling
-  invisible to roots. `delineability_theorem_1_real_mv` yields `IsRealDelineable P S`;
+  polynomials of an `MvPolynomial` on a connected `S`. The shared
+  `Analysis/MonicComplexFiber.lean` API scales each fibre by the inverse of its
+  leading coefficient and proves coefficient continuity, degree, monicity, root,
+  and real-coefficient properties; both `CAD/Pairwise.lean` and `Theorem1Mv.lean`
+  reuse it. `rootMultiplicity_map_eq` transfers multiplicities from $\mathbb{R}$ to
+  $\mathbb{C}$. `delineability_theorem_1_real_mv` yields `IsRealDelineable P S`;
   `isRealDelineable_of_fiber_natDegree_eq_zero` handles nonzero constant fibres.
   `fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero` provides the reductum/fibre bridge
   needed by effective-reductum arguments.

@@ -1,6 +1,7 @@
 import Mathlib
 import Analysis.Theorem1
 import Analysis.Delineability
+import Analysis.MonicComplexFiber
 
 namespace CollinsCAD
 
@@ -80,7 +81,8 @@ theorem delineability_theorem_1_real_mv
   let : Nonempty S := ⟨⟨a0, ha0⟩⟩
   let q : S → Polynomial ℝ := fun a => fiberPoly r P a.1
   let c : S → ℂ := fun a => (algebraMap ℝ ℂ ((q a).coeff d))⁻¹
-  let p : S → Polynomial ℂ := fun a => (q a).map (algebraMap ℝ ℂ) * Polynomial.C (c a)
+  let p : S → Polynomial ℂ := monicComplexFiber q d
+  have hp_eq (a : S) : p a = (q a).map (algebraMap ℝ ℂ) * Polynomial.C (c a) := rfl
   have hqcoeff : ∀ k : ℕ, Continuous (fun a : S => (q a).coeff k) := by
     intro k
     have hfun : (fun a : S => (q a).coeff k) =
@@ -89,68 +91,20 @@ theorem delineability_theorem_1_real_mv
       simp [q, fiberPoly]
     rw [hfun]
     exact (MvPolynomial.continuous_eval _).comp continuous_subtype_val
-  have hclc : Continuous (fun a : S => (q a).coeff d) := hqcoeff d
   have hcne : ∀ a : S, (q a).coeff d ≠ 0 := fun a => hlc a.1 a.2
-  have hccont : Continuous c := by
-    dsimp [c]
-    exact (Complex.continuous_ofReal.comp hclc).inv₀
-      (fun a => Complex.ofReal_ne_zero.mpr (hcne a))
-  have hcoeff : ∀ k : ℕ, Continuous (fun a : S => (p a).coeff k) := by
-    intro k
-    dsimp [p]
-    by_cases hk : k ≤ d
-    · have h1 : Continuous (fun a : S =>
-          (algebraMap ℝ ℂ ((q a).coeff k))) :=
-        Complex.continuous_ofReal.comp (hqcoeff k)
-      have hcoeff_eq : (fun a : S => (p a).coeff k) =
-          (fun a : S => (algebraMap ℝ ℂ) ((q a).coeff k) * c a) := by
-        funext a
-        simp [p, Polynomial.coeff_mul_C]
-      rw [hcoeff_eq]
-      exact h1.mul hccont
-    · have hgt : d < k := Nat.lt_of_not_ge hk
-      have hzeroq : ∀ a : S, (q a).coeff k = 0 := by
-        intro a
-        exact Polynomial.coeff_eq_zero_of_natDegree_lt (by simpa [q, hdeg a.1 a.2] using hgt)
-      simpa [Polynomial.coeff_mul_C, hzeroq] using
-        (continuous_const : Continuous (fun _ : S => (0 : ℂ)))
-  have hdegp : ∀ a : S, (p a).natDegree = d := by
-    intro a
-    apply Polynomial.natDegree_eq_of_le_of_coeff_ne_zero
-    · dsimp [p]
-      calc
-        ((q a).map (algebraMap ℝ ℂ) * Polynomial.C (c a)).natDegree
-            ≤ ((q a).map (algebraMap ℝ ℂ)).natDegree := Polynomial.natDegree_mul_C_le _ _
-        _ = (q a).natDegree := by
-          exact Polynomial.natDegree_map_eq_of_injective Complex.ofReal_injective (q a)
-        _ = d := hdeg a.1 a.2
-    · have hc : c a ≠ 0 := inv_ne_zero (Complex.ofReal_ne_zero.mpr (hcne a))
-      dsimp [p, c]
-      have hc' : (algebraMap ℝ ℂ) ((q a).coeff d) ≠ 0 :=
-        Complex.ofReal_ne_zero.mpr (hcne a)
-      simpa [Polynomial.coeff_mul_C, c] using mul_ne_zero hc' (inv_ne_zero hc')
-  have hmonicp : ∀ a : S, (p a).Monic := by
-    intro a
-    exact Polynomial.monic_of_natDegree_le_of_coeff_eq_one d (le_of_eq (hdegp a)) (by
-      have hc : (algebraMap ℝ ℂ) ((q a).coeff d) ≠ 0 :=
-        Complex.ofReal_ne_zero.mpr (hcne a)
-      dsimp [p, c]
-      simpa [Polynomial.coeff_mul_C] using mul_inv_cancel₀ hc)
+  have hcoeff : ∀ k : ℕ, Continuous (fun a : S => (p a).coeff k) :=
+    continuous_monicComplexFiber_coeff q hqcoeff d hcne
+  have hdegp : ∀ a : S, (p a).natDegree = d :=
+    natDegree_monicComplexFiber q d (fun a => hdeg a.1 a.2) hcne
+  have hmonicp : ∀ a : S, (p a).Monic :=
+    monic_monicComplexFiber q d (fun a => hdeg a.1 a.2) hcne
   have hmp : ∀ a : S, (p a).roots.toFinset.card = m := by
     intro a
-    have hroots : (p a).roots = ((q a).map (algebraMap ℝ ℂ)).roots := by
-      dsimp [p]
-      rw [mul_comm, Polynomial.roots_C_mul]
-      exact inv_ne_zero (Complex.ofReal_ne_zero.mpr (hcne a))
-    rw [hroots]
+    change (monicComplexFiber q d a).roots.toFinset.card = m
+    rw [roots_monicComplexFiber q d hcne]
     exact hm a.1 a.2
-  have hrealp : ∀ a : S, ∀ k : ℕ, ((p a).coeff k).im = 0 := by
-    intro a k
-    have hcoeff_val : (p a).coeff k =
-        (algebraMap ℝ ℂ) ((q a).coeff k) * c a := by
-      simp [p, Polynomial.coeff_mul_C]
-    rw [hcoeff_val]
-    simp [c]
+  have hrealp : ∀ a : S, ∀ k : ℕ, ((p a).coeff k).im = 0 :=
+    fun a k => im_coeff_monicComplexFiber q d a k
   obtain ⟨k, f, e, hfcont, hfroot, hfexhaust, hfmono⟩ :=
     delineability_theorem_1_real p hcoeff d m hd hdegp hmonicp hmp hrealp
   let F : Fin k → (Fin r → ℝ) → ℝ := fun i a => if ha : a ∈ S then f i ⟨a, ha⟩ else 0
@@ -168,7 +122,7 @@ theorem delineability_theorem_1_real_mv
     refine ⟨(hfroot i ai).1, ?_, ?_⟩
     · have hz := (hfroot i ai).2.1
       rw [Polynomial.IsRoot.def] at hz
-      dsimp [p] at hz
+      rw [hp_eq ai] at hz
       rw [Polynomial.eval_mul, Polynomial.eval_C] at hz
       have hevalmap : Polynomial.eval ((f i ai : ℝ) : ℂ)
           ((q ai).map (algebraMap ℝ ℂ)) =
@@ -181,9 +135,8 @@ theorem delineability_theorem_1_real_mv
       have hrealzero : Polynomial.eval (f i ai) (q ai) = 0 :=
         Complex.ofReal_injective hcastzero
       simpa [F, ha, q] using hrealzero
-    · have hscale : (p ai).roots = ((q ai).map (algebraMap ℝ ℂ)).roots := by
-        dsimp [p]
-        rw [mul_comm, Polynomial.roots_C_mul _ hcai]
+    · have hscale : (p ai).roots = ((q ai).map (algebraMap ℝ ℂ)).roots :=
+        roots_monicComplexFiber q d hcne ai
       have hrp_scale : Polynomial.rootMultiplicity ((f i ai : ℝ) : ℂ) (p ai) =
           Polynomial.rootMultiplicity ((f i ai : ℝ) : ℂ)
             ((q ai).map (algebraMap ℝ ℂ)) := by
@@ -207,7 +160,7 @@ theorem delineability_theorem_1_real_mv
     have hrootC : ((q ai).map (algebraMap ℝ ℂ)).IsRoot ((algebraMap ℝ ℂ) x) :=
       hrootR.map (algebraMap ℝ ℂ)
     have hrootP : (p ai).IsRoot ((algebraMap ℝ ℂ) x) := by
-      dsimp [p]
+      rw [hp_eq ai]
       exact Polynomial.root_mul_right_of_isRoot (Polynomial.C (c ai)) hrootC
     rcases hfexhaust ai ((algebraMap ℝ ℂ) x) hrootP (by simp) with ⟨i, hi⟩
     refine ⟨i, ?_⟩

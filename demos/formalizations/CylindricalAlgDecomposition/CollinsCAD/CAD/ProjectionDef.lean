@@ -4,6 +4,15 @@ import Algebra.FinLastEquiv
 import Algebra.Subresultant
 import Algebra.ReductumNatDegree
 
+/-!
+# Collins projection operators
+
+The projection family consists of leading coefficients and principal
+subresultant coefficients of the nonzero reducta of the input polynomials.
+Nonzero constant reducta are retained because their leading coefficients
+record the first nonzero last-variable coefficient on a base cell.
+-/
+
 namespace CollinsCAD
 
 open Polynomial
