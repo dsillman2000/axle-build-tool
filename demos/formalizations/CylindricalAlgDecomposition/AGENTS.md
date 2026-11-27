@@ -22,9 +22,9 @@ The PDF and everything under `docs/` are local-only reference material. They are
 - `docs/alphaxiv-summary.md` — a high-level summary of the paper, useful for orientation.
 - `docs/collins-cad-brief.md` — the condensed mathematical brief fed to Neon to obtain the
   blueprint; use it when the full transcription is too large to hand to a model.
-- `axbt_project.yml` — project root. Modules `Algebra`, `Analysis`, `CAD`, and `Logic` live in
-  `CollinsCAD/Algebra/`, `CollinsCAD/Analysis/`, `CollinsCAD/CAD/`, and
-  `CollinsCAD/Logic/`. Environment is pinned to `lean-4.36.0`; API timeout is 600 s
+- `axbt_project.yml` — project root. Modules `Algebra`, `Analysis`, `CAD`, `Logic`, and `Tests` live in
+  `CollinsCAD/Algebra/`, `CollinsCAD/Analysis/`, `CollinsCAD/CAD/`,
+  `CollinsCAD/Logic/`, and `CollinsCAD/Tests/`. Environment is pinned to `lean-4.36.0`; API timeout is 600 s
   (some proofs are expensive).
 - `.axbt/` — axbt's offline cache and failure artifacts (gitignore it). `manifest.json` holds
   declaration stamps; `failed/` holds exact submitted payloads and source maps.

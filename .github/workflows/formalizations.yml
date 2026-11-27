@@ -1,0 +1,121 @@
+name: Formalizations
+
+# On-demand regression testing for all formalizations under demos/formalizations/,
+# plus path-filtered verification of only the changed formalization(s) on PRs or
+# pushes to main that modify demos/formalizations/.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'demos/formalizations/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'demos/formalizations/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Discover formalizations
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine formalizations to verify
+        id: find
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          root = pathlib.Path("demos/formalizations")
+          event = os.environ["EVENT_NAME"]
+
+          if event == "workflow_dispatch":
+              candidates = sorted(
+                  p.parent.name
+                  for p in root.glob("*/axbt_project.yml")
+                  if p.is_file()
+              )
+          else:
+              if event == "pull_request":
+                  base = os.environ["PR_BASE_SHA"]
+                  head = os.environ["PR_HEAD_SHA"]
+                  diff_range = f"{base}...{head}"
+              else:
+                  before = os.environ["PUSH_BEFORE"]
+                  sha = os.environ["PUSH_SHA"]
+                  if before and set(before) != {"0"}:
+                      diff_range = f"{before}..{sha}"
+                  else:
+                      diff_range = f"{sha}~1..{sha}"
+
+              res = subprocess.run(
+                  ["git", "diff", "--name-only", diff_range, "--", "demos/formalizations/"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              )
+              names = set()
+              for line in res.stdout.splitlines():
+                  parts = pathlib.PurePosixPath(line).parts
+                  # demos / formalizations / <name> / ...
+                  if len(parts) >= 3 and parts[0] == "demos" and parts[1] == "formalizations":
+                      name = parts[2]
+                      if (root / name / "axbt_project.yml").is_file():
+                          names.add(name)
+              candidates = sorted(names)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"matrix={json.dumps(candidates)}\n")
+          PY
+
+  verify:
+    needs: discover
+    if: needs.discover.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        formalization: ${{ fromJson(needs.discover.outputs.matrix) }}
+    name: formalization ${{ matrix.formalization }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AXLE_API_KEY: ${{ secrets.AXLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Compile, check, and verify ${{ matrix.formalization }}
+        working-directory: demos/formalizations/${{ matrix.formalization }}
+        run: |
+          uv run --project "${{ github.workspace }}" axbt compile
+          uv run --project "${{ github.workspace }}" axbt check
+          uv run --project "${{ github.workspace }}" axbt verify

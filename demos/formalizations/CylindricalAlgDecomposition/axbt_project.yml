@@ -11,6 +11,8 @@ modules:
     dir: CollinsCAD/CAD
   Logic:
     dir: CollinsCAD/Logic
+  Tests:
+    dir: CollinsCAD/Tests
 
 axle:
   environment: lean-4.36.0
