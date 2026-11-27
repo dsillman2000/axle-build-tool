@@ -1,0 +1,18 @@
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Algebra/GcdDegreeZero.lean
+  h_4cc74772b10fd4 10-11
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Algebra/SubresultantTheorem2.lean
+  h_4cc74772b10fd4 11
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Tests/Linear1D.lean
+  h_4cc74772b10fd4 104-112,117-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "504242c5a683bc03030ba1778cc28e8c87217dec",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
