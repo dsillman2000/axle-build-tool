@@ -1,0 +1,31 @@
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_d72c9cc59b4449 121-122,129-130,138-140
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Decomp.lean
+  s_e7a3924fabe171::t_2d78f8777a8851 166-169,171-173,176
+  s_e7a3924fabe171::t_77148c328a808a 105-151
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/AugmentedDecomp.lean
+  s_e7a3924fabe171::t_7ad19149086bfe 115-121
+  s_e7a3924fabe171::t_b78a3f3c4347b4 129-133
+  s_e7a3924fabe171::t_a113f648759a0b 122-128
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/AugmentedProjection.lean
+  s_e7a3924fabe171::t_eec2bcf9848419 151-153,155
+  s_e7a3924fabe171::t_733291158264b5 148-150,156
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/OrderedRing.lean
+  s_e7a3924fabe171::t_a2f7429856d513 80-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "f9a1e99c30488cf29218e8072dbad8ce22359585",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
