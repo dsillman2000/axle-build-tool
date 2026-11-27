@@ -101,14 +101,21 @@ theorem one_mem_collinsProj_linear1DPoly :
   rw [← hlc]
   exact leadingCoeff_mem_collinsProj hmem
 
+private theorem linear1DRoots_continuous (_i : Fin 1) :
+    ContinuousOn (fun _ : Fin 0 → ℝ => (1 : ℝ)) baseCell0.carrier :=
+  continuousOn_const
+
+private theorem linear1DRoots_ordered (i j : Fin 1) (_a : Fin 0 → ℝ)
+    (_ : _a ∈ baseCell0.carrier) (_hij : i < j) :
+    (1 : ℝ) < 1 := by
+  omega
+
 /-- The root family over `baseCell0` consisting of the single root $x_0 = 1$. -/
 noncomputable def linear1DRoots : RootFamily baseCell0.carrier where
   k := 1
   f := fun _ _ => 1
-  continuous := fun _ => continuousOn_const
-  ordered := by
-    intro i j _ _ hij
-    omega
+  continuous := linear1DRoots_continuous
+  ordered := linear1DRoots_ordered
 
 /-- The explicit list of three 1D cells for $x_0 - 1$:
     $(-\infty, 1)$, $\{1\}$, and $(1, \infty)$. -/
