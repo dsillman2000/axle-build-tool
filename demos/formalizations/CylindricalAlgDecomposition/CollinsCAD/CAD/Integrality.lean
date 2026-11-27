@@ -186,32 +186,28 @@ theorem IsIntPoly.lastReductum {P : MvPolynomial (Fin (r + 1)) ℝ}
   rw [hB]
   exact ⟨reductum k B, reductum_map_int k B⟩
 
-/-- Principal subresultant coefficients preserve integrality when both
-    coefficient polynomials are nonzero. -/
+/-- Principal subresultant coefficients preserve integrality, including zero inputs. -/
+theorem IsIntUPoly.principalSubresultant_of_integral
+    {B C : Polynomial (MvPolynomial (Fin r) ℝ)}
+    (hB : IsIntUPoly B) (hC : IsIntUPoly C) (j : ℕ) : IsIntPoly (psc B C j) := by
+  rcases hB with ⟨B₀, rfl⟩
+  rcases hC with ⟨C₀, rfl⟩
+  have hBdeg : (B₀.map (intCastMv r)).natDegree = B₀.natDegree :=
+    Polynomial.natDegree_map_eq_of_injective intCastMv_injective B₀
+  have hCdeg : (C₀.map (intCastMv r)).natDegree = C₀.natDegree :=
+    Polynomial.natDegree_map_eq_of_injective intCastMv_injective C₀
+  refine ⟨psc B₀ C₀ j, ?_⟩
+  simpa [intCastUP, intCastMv] using
+    (psc_map_of_natDegree_eq (intCastMv r) B₀ C₀ j hBdeg hCdeg).symm
+
+/-- Principal subresultant coefficients preserve integrality when both coefficient polynomials
+    are nonzero. -/
 theorem IsIntUPoly.principalSubresultant {B C : Polynomial (MvPolynomial (Fin r) ℝ)}
     (hB : IsIntUPoly B) (hC : IsIntUPoly C) (hB₀ : B ≠ 0) (hC₀ : C ≠ 0)
     (j : ℕ) : IsIntPoly (psc B C j) := by
-  rcases hB with ⟨B₀, rfl⟩
-  rcases hC with ⟨C₀, rfl⟩
-  have hB₀ne : B₀ ≠ 0 := by
-    intro hz
-    apply hB₀
-    simp [hz, intCastUP]
-  have hC₀ne : C₀ ≠ 0 := by
-    intro hz
-    apply hC₀
-    simp [hz, intCastUP]
-  have hlcB₀ : B₀.leadingCoeff ≠ 0 := Polynomial.leadingCoeff_ne_zero.mpr hB₀ne
-  have hlcC₀ : C₀.leadingCoeff ≠ 0 := Polynomial.leadingCoeff_ne_zero.mpr hC₀ne
-  have hlcB : (intCastMv r) B₀.leadingCoeff ≠ 0 := by
-    intro hz
-    exact hlcB₀ (intCastMv_injective (by simpa [intCastMv] using hz))
-  have hlcC : (intCastMv r) C₀.leadingCoeff ≠ 0 := by
-    intro hz
-    exact hlcC₀ (intCastMv_injective (by simpa [intCastMv] using hz))
-  refine ⟨psc B₀ C₀ j, ?_⟩
-  simpa [intCastUP, intCastMv] using
-    (psc_map (intCastMv r) B₀ C₀ j (Or.inl hlcB) (Or.inl hlcC)).symm
+  have _hB₀ := hB₀
+  have _hC₀ := hC₀
+  exact IsIntUPoly.principalSubresultant_of_integral hB hC j
 
 /-- Integrality of every member of a finite family. -/
 def IsIntPolyFamily (A : Finset (MvPolynomial (Fin r) ℝ)) : Prop :=

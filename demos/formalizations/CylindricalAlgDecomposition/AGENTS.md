@@ -155,7 +155,8 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
   for `projection_effective_reductum`.
 - `CAD/EffectiveReductum.lean` proves the effective-reductum theorem.
   `CAD/GcdDegreeConstancy.lean` transports the PSC zero/nonzero pattern across a
-  projection-invariant base set, including the `j < min(deg B₁, deg B₂)` boundary.
+  projection-invariant base set. Its degree-preserved variant allows one degree to drop at each
+  point, provided both fibres stay nonzero; the both-degrees-preserved API remains a wrapper.
 - `CAD/Theorem4.lean` handles `d = 0` and `d = 1` explicitly and reuses
   `CAD/EffectiveFamily.lean` for the positive-degree family-data argument.
 - `CAD/CommonRoots.lean`, `CAD/LocalRootData.lean`, `CAD/JointRootData.lean`, and
@@ -237,17 +238,24 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
 
 ### Cluster B notes
 
-- Mathlib 4.36 has `Polynomial.resultant` but no subresultants, so `subresultantMatrix` and
-  `psc` are defined locally as determinants of the explicit coefficient matrix.
-- `coeffMap` is the linear map on `Polynomial.degreeLT` spaces sending $(u,v)$ to coefficients
-  of $uA+vB$ in degrees $j,\ldots,m+n-j-1$; `coeffMap_toMatrix` identifies its matrix (in the
-  `degreeLT.basisProd` / `Pi.basisFun` bases) with the transpose of `subresultantMatrix`.
-- `psc_eq_zero_iff_exists_uv` is the kernel-to-Bézout bridge. It uses
-  `Matrix.exists_vecMul_eq_zero_iff` rather than hand-built coefficient expansions.
-- Collins Theorem 2 (`subresultant_deg_gcd_eq_least_nonzero_psc`) is proved from two
-  directional lemmas: `psc_ne_zero_of_gcd_eq` and `psc_eq_zero_of_lt_gcd`. The coprime step
-  uses Bézout (`EuclideanDomain.gcd_eq_gcd_ab`) rather than division APIs, which was much
-  cheaper for the elaborator.
+- Mathlib 4.36 has `Polynomial.resultant` but no subresultants. `Algebra/FixedSubresultant.lean`
+  defines Mathlib-aligned fixed-bound `Polynomial.subresultantMatrix p q m n j` and
+  `Polynomial.psc p q m n j`, including mapping, resultant, commutativity, terminal-coefficient,
+  and matrix-vector lemmas. `Algebra/Subresultant.lean` preserves the legacy CollinsCAD matrix and
+  actual-degree `psc A B j`; the latter is a signed fixed-bound wrapper.
+- `Algebra/GcdPsc.lean` ports the unified kernel-vector/Bézout gcd criterion. A short polynomial
+  relation gives a matrix kernel vector, and a coefficient-window lemma plus the gcd Bézout
+  identity rules out a kernel vector at the gcd degree. `natDegree_gcd_eq_iff_psc` also handles
+  zero inputs uniformly.
+- `coeffMap`, `coeffMap_toMatrix`, `coeffMap_eq_vecMul`, and
+  `psc_eq_zero_iff_exists_uv` remain as compatibility helpers in `SubresultantBezout.lean`; the
+  standalone `Algebra/CoeffMap.lean` module was removed.
+- Collins Theorem 2 (`subresultant_deg_gcd_eq_least_nonzero_psc`) is a thin wrapper around the
+  unified criterion. The old directional lemmas remain available as compatibility wrappers.
+- `Algebra/SubresultantDegreeDrop.lean` proves fixed-bound left/right degree-drop formulas, and
+  `Algebra/SubresultantSpecialization.lean` specializes them to actual-degree PSCs. A single
+  degree drop changes a PSC by a nonzero scalar when the fibres are nonzero; two strict drops
+  force strict PSCs to vanish.
 - Collins Theorem 3 (`roots_card_distinct_eq_sub_deg_gcd_deriv`) is proved over ℂ from root
   multiplicities, then mapped back from ℝ. `Multiset.toFinset_sum_count_eq` gives the sum of
   multiplicities; `Finset.sum_add_distrib` gives the cardinality identity without a brittle
@@ -255,7 +263,8 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
 - The UFD/Gauss node (`subresultant_gauss_content_lift`) uses
   `IsLocalization.integerNormalization` and `IsPrimitive.dvd_iff_fraction_map_dvd_fraction_map`.
   `subresultant_deg_gcd_eq_least_nonzero_psc_ufd` composes this lift with the field-valued
-  Theorem 2 and `psc_map` to export Collins Theorem 2 over a UFD.
+  Theorem 2 and injective fixed-bound PSC mapping to export Collins Theorem 2 over a UFD.
+  Adapted Tau Ceti proofs are attributed in `Algebra/TAUCETI_ATTRIBUTION.md` under Apache 2.0.
 
 ### Mathlib API gotchas encountered
 

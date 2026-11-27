@@ -1,5 +1,12 @@
+/-
+Copyright (c) 2026 The Tau Ceti contributors. All rights reserved.
+Released under Apache 2.0 as described in the file LICENSE.
+Adapted for the Collins CAD demo; modified to use the local import structure.
+-/
+
 import Mathlib
-import Algebra.SubresultantBezout
+import Algebra.Subresultant
+import Algebra.GcdPsc
 
 namespace CollinsCAD
 
@@ -19,6 +26,65 @@ theorem eq_zero_of_mem_degreeLT_zero {K : Type*} [Field K] {p : Polynomial K}
   have := natDegree_lt_of_mem_degreeLT hp hp0
   omega
 
+/-- At the gcd degree, the actual-degree PSC is nonzero whenever the left input is nonzero. -/
+theorem psc_ne_zero_of_natDegree_gcd {K : Type*} [Field K] [DecidableEq K]
+    (A B : Polynomial K) (hA0 : A ≠ 0) :
+    psc A B (EuclideanDomain.gcd A B).natDegree ≠ 0 := by
+  rw [psc_eq_fixed_psc]
+  exact mul_ne_zero
+    (pow_ne_zero _ (neg_ne_zero.mpr one_ne_zero))
+    (Polynomial.psc_natDegree_gcd_ne_zero hA0 rfl le_rfl)
+
+/-- Below the gcd degree, the actual-degree PSC vanishes. -/
+theorem psc_eq_zero_of_lt_natDegree_gcd {K : Type*} [Field K] [DecidableEq K]
+    (A B : Polynomial K) (j : ℕ)
+    (hj : j < (EuclideanDomain.gcd A B).natDegree) :
+    psc A B j = 0 := by
+  rw [psc_eq_fixed_psc,
+    Polynomial.psc_eq_zero_of_lt_natDegree_gcd le_rfl le_rfl hj, mul_zero]
+
+/-- The unified subresultant gcd criterion at actual degrees. -/
+theorem natDegree_gcd_eq_iff_psc {K : Type*} [Field K] [DecidableEq K]
+    (A B : Polynomial K) (j : ℕ) :
+    (EuclideanDomain.gcd A B).natDegree = j ↔
+      psc A B j ≠ 0 ∧ ∀ i < j, psc A B i = 0 := by
+  have hfixed_iff (i : ℕ) : psc A B i = 0 ↔
+      Polynomial.psc A B A.natDegree B.natDegree i = 0 := by
+    rw [psc_eq_fixed_psc, mul_eq_zero]
+    have hs : (-1 : K) ^ ((A.natDegree - i) * (B.natDegree - i)) ≠ 0 :=
+      pow_ne_zero _ (neg_ne_zero.mpr one_ne_zero)
+    simp [hs]
+  constructor
+  · intro h
+    have hf := (Polynomial.natDegree_gcd_eq_iff_psc A B j).mp h
+    refine ⟨?_, ?_⟩
+    · intro hz
+      exact hf.1 ((hfixed_iff j).mp hz)
+    · intro i hi
+      exact (hfixed_iff i).mpr (hf.2 i hi)
+  · rintro ⟨hj, hlt⟩
+    apply (Polynomial.natDegree_gcd_eq_iff_psc A B j).mpr
+    refine ⟨?_, ?_⟩
+    · intro hz
+      exact hj ((hfixed_iff j).mpr hz)
+    · intro i hi
+      exact (hfixed_iff i).mp (hlt i hi)
+
+/-- Equality of actual-degree PSC zero patterns up to the smaller degree determines equality
+of gcd degrees, including for polynomial pairs over different fields. -/
+theorem natDegree_gcd_eq_of_psc_eq_zero_iff {K L : Type*} [Field K] [Field L]
+    [DecidableEq K] [DecidableEq L] {A B : Polynomial K} {A' B' : Polynomial L}
+    (hA'0 : A' ≠ 0) (hB'0 : B' ≠ 0)
+    (h : ∀ j ≤ min A'.natDegree B'.natDegree, psc A B j = 0 ↔ psc A' B' j = 0) :
+    (EuclideanDomain.gcd A B).natDegree = (EuclideanDomain.gcd A' B').natDegree := by
+  set d := (EuclideanDomain.gcd A' B').natDegree
+  have hd : d ≤ min A'.natDegree B'.natDegree :=
+    le_min (Polynomial.natDegree_le_of_dvd (EuclideanDomain.gcd_dvd_left A' B') hA'0)
+      (Polynomial.natDegree_le_of_dvd (EuclideanDomain.gcd_dvd_right A' B') hB'0)
+  obtain ⟨hne, hlt⟩ := (natDegree_gcd_eq_iff_psc A' B' d).1 rfl
+  exact (natDegree_gcd_eq_iff_psc A B d).2
+    ⟨fun h0 => hne ((h d hd).1 h0), fun i hi => (h i (hi.le.trans hd)).2 (hlt i hi)⟩
+
 /-- At the index equal to $\deg\gcd(A,B)$, the principal subresultant coefficient is nonzero. -/
 theorem psc_ne_zero_of_gcd_eq {K : Type*} [Field K] [DecidableEq K]
     (A B : Polynomial K) (hA0 : A ≠ 0) (hB0 : B ≠ 0)
@@ -26,117 +92,9 @@ theorem psc_ne_zero_of_gcd_eq {K : Type*} [Field K] [DecidableEq K]
     (hjB : (EuclideanDomain.gcd A B).natDegree ≤ B.natDegree)
     (hj : (EuclideanDomain.gcd A B).natDegree = j) :
     psc A B j ≠ 0 := by
-  classical
-  let h := EuclideanDomain.gcd A B
-  have hh0 : h ≠ 0 := by
-    intro hz
-    have hz' : EuclideanDomain.gcd A B = 0 := by simpa [h] using hz
-    have hdvd := EuclideanDomain.gcd_dvd_right A B
-    rw [hz'] at hdvd
-    exact hB0 (zero_dvd_iff.mp hdvd)
-  intro hpsc
-  obtain ⟨u, v, huv, hzero⟩ := (psc_eq_zero_iff_exists_uv A B j).mp hpsc
-  let bound := A.natDegree + B.natDegree - j
-  by_cases hbound0 : bound = 0
-  · have hAj : A.natDegree - j = 0 := by omega
-    have hBj : B.natDegree - j = 0 := by omega
-    have uu : u.1 = 0 := by
-      apply eq_zero_of_mem_degreeLT_zero
-      rw [← hBj]
-      exact u.2
-    have vv : v.1 = 0 := by
-      apply eq_zero_of_mem_degreeLT_zero
-      rw [← hAj]
-      exact v.2
-    exact (huv.elim (fun hu => hu (by simpa using uu)) (fun hv => hv (by simpa using vv))).elim
-  have hbound_pos : 0 < bound := Nat.pos_of_ne_zero hbound0
-  have hcoeff_low : ∀ N, j ≤ N → N < bound → (u.1 * A + v.1 * B).coeff N = 0 := by
-    intro N hNj hN
-    have hi : N - j < (B.natDegree - j) + (A.natDegree - j) := by omega
-    have hc := congrFun hzero ⟨N - j, hi⟩
-    simpa [coeffMap, hNj] using hc
-  have huA_lt : (u.1 * A).natDegree < bound := by
-    by_cases hu0 : u.1 = 0
-    · simpa [hu0] using hbound_pos
-    · have hu_nd := natDegree_lt_of_mem_degreeLT u.2 hu0
-      calc
-        (u.1 * A).natDegree ≤ u.1.natDegree + A.natDegree := Polynomial.natDegree_mul_le
-        _ < bound := by omega
-  have hvB_lt : (v.1 * B).natDegree < bound := by
-    by_cases hv0 : v.1 = 0
-    · simpa [hv0] using hbound_pos
-    · have hv_nd := natDegree_lt_of_mem_degreeLT v.2 hv0
-      calc
-        (v.1 * B).natDegree ≤ v.1.natDegree + B.natDegree := Polynomial.natDegree_mul_le
-        _ < bound := by omega
-  let P := u.1 * A + v.1 * B
-  have hP_lt : P.natDegree < bound := by
-    dsimp [P]
-    exact lt_of_le_of_lt (Polynomial.natDegree_add_le _ _) (max_lt huA_lt hvB_lt)
-  have hPzero_or : P = 0 ∨ P.natDegree < j := by
-    by_cases hP0 : P = 0
-    · exact Or.inl hP0
-    · right
-      by_contra hPj
-      have hle : j ≤ P.natDegree := by omega
-      have hcoeff : P.coeff P.natDegree = 0 := by
-        by_cases hNbig : bound ≤ P.natDegree
-        · exact Polynomial.coeff_eq_zero_of_natDegree_lt (lt_of_lt_of_le hP_lt hNbig)
-        · exact hcoeff_low P.natDegree hle (by omega)
-      have hlead : P.coeff P.natDegree ≠ 0 := by
-        simpa only [Polynomial.leadingCoeff] using Polynomial.leadingCoeff_ne_zero.mpr hP0
-      exact hlead hcoeff
-  have hhdvd : h ∣ P := dvd_add (dvd_mul_of_dvd_right (EuclideanDomain.gcd_dvd_left A B) u.1)
-    (dvd_mul_of_dvd_right (EuclideanDomain.gcd_dvd_right A B) v.1)
-  have hP0 : P = 0 := by
-    rcases hPzero_or with hP0 | hPlt
-    · exact hP0
-    · by_contra hPne
-      have hkdeg : h.natDegree ≤ P.natDegree := Polynomial.natDegree_le_of_dvd hhdvd hPne
-      have hkj : h.natDegree = j := by simpa [h] using hj
-      omega
-  obtain ⟨A', hAeq⟩ := EuclideanDomain.gcd_dvd_left A B
-  obtain ⟨B', hBeq⟩ := EuclideanDomain.gcd_dvd_right A B
-  have hA'0 : A' ≠ 0 := by
-    intro hz
-    rw [hz, mul_zero] at hAeq
-    exact hA0 hAeq
-  have hcop : IsCoprime A' B' := by
-    refine ⟨EuclideanDomain.gcdA A B, EuclideanDomain.gcdB A B, ?_⟩
-    apply mul_left_cancel₀ hh0
-    calc
-      h * (EuclideanDomain.gcdA A B * A' + EuclideanDomain.gcdB A B * B') =
-          EuclideanDomain.gcdA A B * (h * A') + EuclideanDomain.gcdB A B * (h * B') := by ring
-      _ = EuclideanDomain.gcdA A B * A + EuclideanDomain.gcdB A B * B := by rw [← hAeq, ← hBeq]
-      _ = h := by simpa [h, mul_comm] using (EuclideanDomain.gcd_eq_gcd_ab A B).symm
-      _ = h * 1 := by simp
-  have hcomb : u.1 * A' + v.1 * B' = 0 := by
-    apply mul_left_cancel₀ hh0
-    calc
-      h * (u.1 * A' + v.1 * B') = u.1 * (h * A') + v.1 * (h * B') := by ring
-      _ = u.1 * A + v.1 * B := by rw [← hAeq, ← hBeq]
-      _ = 0 := by simpa [P] using hP0
-      _ = h * 0 := by simp
-  have hvB' : A' ∣ v.1 * B' := by
-    rw [← neg_eq_iff_add_eq_zero] at hcomb
-    exact ⟨-u.1, by simpa [mul_comm] using hcomb.symm⟩
-  have hvdiv : A' ∣ v.1 := hcop.dvd_of_dvd_mul_right hvB'
-  have hA'deg : A'.natDegree = A.natDegree - h.natDegree := by
-    rw [hAeq, Polynomial.natDegree_mul hh0 hA'0]
-    omega
-  have hv0 : v.1 = 0 := by
-    by_cases hvne : (v.1 : Polynomial K) = 0
-    · exact hvne
-    · have hvnd : v.1.natDegree < A.natDegree - j := by
-        exact natDegree_lt_of_mem_degreeLT v.2 hvne
-      have hA'deg' : A'.natDegree = A.natDegree - j := by
-        rw [hA'deg, hj]
-      have hd := Polynomial.natDegree_le_of_dvd hvdiv hvne
-      rw [hA'deg'] at hd
-      omega
-  have hu0 : u.1 = 0 := by
-    have hmul : u.1 * A' = 0 := by simpa [hv0] using hcomb
-    exact (mul_eq_zero.mp hmul).resolve_right hA'0
-  exact (huv.elim (fun hu => hu (by simpa using hu0)) (fun hv => hv (by simpa using hv0))).elim
+  have _hB0 := hB0
+  have _hjA := hjA
+  have _hjB := hjB
+  simpa [hj] using psc_ne_zero_of_natDegree_gcd A B hA0
 
 end CollinsCAD

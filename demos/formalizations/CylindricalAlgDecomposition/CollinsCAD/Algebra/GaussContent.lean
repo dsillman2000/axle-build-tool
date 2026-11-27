@@ -114,15 +114,9 @@ theorem subresultant_deg_gcd_eq_least_nonzero_psc_ufd
     simpa [AR, BR, φ] using subresultant_gauss_content_lift A B hA0 hB0
   have hpsc : ∀ j, φ (psc A B j) = psc AR BR j := by
     intro j
-    have hAlc : A.leadingCoeff ≠ 0 := Polynomial.leadingCoeff_ne_zero.mpr hA0
-    have hBlc : B.leadingCoeff ≠ 0 := Polynomial.leadingCoeff_ne_zero.mpr hB0
-    have hφAlc : φ A.leadingCoeff ≠ 0 := by
-      intro hz
-      exact hAlc (hinj (by simpa using hz))
-    have hφBlc : φ B.leadingCoeff ≠ 0 := by
-      intro hz
-      exact hBlc (hinj (by simpa using hz))
-    exact psc_map φ A B j (Or.inl hφAlc) (Or.inl hφBlc)
+    exact psc_map_of_natDegree_eq φ A B j
+      (by simpa [AR] using Polynomial.natDegree_map_eq_of_injective hinj A)
+      (by simpa [BR] using Polynomial.natDegree_map_eq_of_injective hinj B)
   constructor
   · intro hdk
     have hdkK : (EuclideanDomain.gcd AR BR).natDegree = k := by

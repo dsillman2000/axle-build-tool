@@ -19,6 +19,12 @@ Cluster E exports `cad_decomp_exists`, `exists_augmented_cad`, `thom_lemma_univa
 
 Cluster F defines the primitive strict-order language `FirstOrder.Language.orderedRing`, realizes it on `ℝ`, and translates ordered-ring terms to and from integer multivariate polynomials with realization preservation. The canonical `CompatibleRing ℝ` instance is scoped under `FirstOrder.Language` and enabled with `open scoped FirstOrder.Language`. `Logic/AtomPolys.lean` and `Logic/Evaluation.lean` extract finite atom support and prove quantifier-free truth is constant on invariant cells. `Logic/QuantifierStep.lean` evaluates `∀` and `∃` as finite conjunctions/disjunctions of child-cell sample truths. `Logic/SignFormula.lean`, `Logic/Prefix.lean`, `Logic/ElimStep.lean`, and `Logic/Elim.lean` translate DEFINE sign formulas, descend augmented CAD provenance through a prenex prefix, construct the accepting-cell disjunction, and prove `logic_elim_prenex`, `rcf_quantifier_elimination`, `rcf_quantifier_elimination_fintype`, `rcf_sentence_quantifier_elimination`, and `logic_elim_main`.
 
+## Subresultant API
+
+`Algebra/FixedSubresultant.lean` provides Mathlib-aligned fixed-bound `Polynomial.subresultantMatrix p q m n j` and `Polynomial.psc p q m n j`. Fixed bounds make coefficient mapping and left/right degree-drop identities unconditional on degree preservation. `Algebra/Subresultant.lean` preserves the original `CollinsCAD.subresultantMatrix` and actual-degree `CollinsCAD.psc A B j` APIs; the latter is an explicit signed wrapper with `psc_eq_det_subresultantMatrix` retaining the original determinant equation.
+
+`Algebra/GcdPsc.lean` ports the unified kernel-vector/Bézout gcd criterion, while `Algebra/SubresultantDegreeDrop.lean` and `Algebra/SubresultantSpecialization.lean` provide fixed-bound and actual-degree specialization formulas. `CAD/GcdDegreeConstancy.lean` uses these to handle specialization when at least one degree is preserved, including vanishing leading coefficients. The adapted Tau Ceti material is attributed in `Algebra/TAUCETI_ATTRIBUTION.md` under Apache 2.0.
+
 ## Development
 
 There is no local Lean toolchain. `axbt` submits self-contained payloads to the Axle API.
