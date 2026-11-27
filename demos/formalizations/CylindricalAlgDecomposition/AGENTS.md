@@ -62,9 +62,8 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
 
 ### Cluster F notes
 
-- `Logic/Basic.lean` exposes Mathlib's bounded-formula complexity, ring-language,
-  and free-commutative-ring APIs.
-- `Logic/OrderedRing.lean` defines `FirstOrder.Language.orderedRing` with a primitive
+- `Logic/OrderedRing.lean` imports Mathlib directly and defines
+  `FirstOrder.Language.orderedRing` with a primitive
   binary `lt` relation, its `ℝ` structure, ring-style term operations, and strict-order
   formula helpers. `compatibleRingReal` is a scoped instance, enabled downstream with
   `open scoped FirstOrder.Language` to avoid imposing a global ring-language structure.
