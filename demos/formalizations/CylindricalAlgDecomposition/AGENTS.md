@@ -22,9 +22,10 @@ The PDF and everything under `docs/` are local-only reference material. They are
 - `docs/alphaxiv-summary.md` — a high-level summary of the paper, useful for orientation.
 - `docs/collins-cad-brief.md` — the condensed mathematical brief fed to Neon to obtain the
   blueprint; use it when the full transcription is too large to hand to a model.
-- `axbt_project.yml` — project root. Modules `Algebra`, `Analysis`, and `CAD` live in
-  `CollinsCAD/Algebra/`, `CollinsCAD/Analysis/`, and `CollinsCAD/CAD/`. Environment is pinned
-  to `lean-4.36.0`; API timeout is 600 s (some proofs are expensive).
+- `axbt_project.yml` — project root. Modules `Algebra`, `Analysis`, `CAD`, and `Logic` live in
+  `CollinsCAD/Algebra/`, `CollinsCAD/Analysis/`, `CollinsCAD/CAD/`, and
+  `CollinsCAD/Logic/`. Environment is pinned to `lean-4.36.0`; API timeout is 600 s
+  (some proofs are expensive).
 - `.axbt/` — axbt's offline cache and failure artifacts (gitignore it). `manifest.json` holds
   declaration stamps; `failed/` holds exact submitted payloads and source maps.
 - `CollinsCAD/Algebra/` — algebraic Lean sources, one file per concept; import siblings by
@@ -33,6 +34,8 @@ The PDF and everything under `docs/` are local-only reference material. They are
   `Algebra.*` for algebraic dependencies. The Lean namespace remains `CollinsCAD`.
 - `CollinsCAD/CAD/` — projection and lifting sources; use `CAD.*` for sibling imports and
   `Analysis.*` / `Algebra.*` for upstream dependencies.
+- `CollinsCAD/Logic/` — first-order language, term translation, EVAL, and ELIM sources;
+  use `Logic.*` for sibling imports and `CAD.*` for decomposition APIs.
 
 ## Development process
 
@@ -51,11 +54,41 @@ The PDF and everything under `docs/` are local-only reference material. They are
 
 ## Status
 
-Clusters A, B, C, D, and E are implemented and verified. `Analysis/Theorem1Mv.lean`
+Clusters A, B, C, D, E, and F are implemented and verified. `Analysis/Theorem1Mv.lean`
 specializes Collins' Theorem 1 to normalized multivariate fibres, `CAD/` implements
-projection, lifting, and List-based cylindrical decompositions, and `Analysis/Thom*.lean`
-provides the derivative-sign classification used by DEFINE. Remaining blueprint work:
-cluster F (logic/EVAL/ELIM), which has not been started.
+projection, lifting, and List-based cylindrical decompositions, `Analysis/Thom*.lean`
+provides the derivative-sign classification used by DEFINE, and `Logic/` implements
+ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination theorem.
+
+### Cluster F notes
+
+- `Logic/Basic.lean` exposes Mathlib's bounded-formula complexity, ring-language,
+  and free-commutative-ring APIs.
+- `Logic/OrderedRing.lean` defines `FirstOrder.Language.orderedRing` with a primitive
+  binary `lt` relation, its `ℝ` structure, ring-style term operations, and strict-order
+  formula helpers. `Logic/TermPoly.lean` defines `termToMvPoly` and `mvPolyToTerm`,
+  proves realization preservation in both directions, and proves the polynomial round
+  trip `termToMvPoly_mvPolyToTerm`; syntactic term round trips are intentionally not
+  claimed.
+- `Logic/AtomPolys.lean` defines concatenated free/bound realization helpers,
+  `atomPolys`, `realAtomPolys`, integrality and monotonicity of atom support, and the
+  equality/strict-order sign-semantics lemmas. `Logic/Evaluation.lean` proves
+  `boundedQF_realize_eq_sample`, `qf_realize_eq_sample`, and
+  `cellConstant_of_qf_invariant`.
+- `Logic/QuantifierStep.lean` evaluates one `∀` or `∃` through the explicit cylinder
+  child map. `eval_quantifier_step` identifies quantified truth with the finite
+  conjunction/disjunction of child-sample truths using fibre coverage and
+  nonemptiness; specialized `eval_exists_iff_children_of_constant` and
+  `eval_forall_iff_children_of_constant` expose the depth-one API.
+- `Logic/SignFormula.lean` translates integral `SignCondition`/`SignFormula` values
+  into quantifier-free ordered-ring syntax and supplies finite `iInf`/`iSup` QF helpers.
+- `Logic/Prefix.lean` defines fixed-matrix-arity `Prefix`, `PrenexView`, CAD descent,
+  augmented-family projection, and preservation of validity, provenance, and
+  integrality.
+- `Logic/ElimStep.lean` constructs the finite disjunction of translated DEFINE formulas
+  for accepting parent cells. `Logic/Elim.lean` proves `Prefix.elim`,
+  `logic_elim_prenex`, `rcf_quantifier_elimination`, and `logic_elim_main` using
+  Mathlib's `toPrenex` and `realize_toPrenex`.
 
 ### Cluster E notes
 
@@ -105,8 +138,8 @@ cluster F (logic/EVAL/ELIM), which has not been started.
   required to translate DEFINE formulas into integer-coefficient first-order
   syntax in Cluster F.
   `CAD/Define.lean` exports `define_lifted_cell_formula`,
-  `cad_define_cell_formula`, and `cad_define_exists`. First-order syntax belongs
-  to Cluster F.
+  `cad_define_cell_formula`, and `cad_define_exists`. `Logic/SignFormula.lean`
+  translates these semantic conditions into first-order syntax.
 
 ### Cluster D notes
 
@@ -183,7 +216,8 @@ cluster F (logic/EVAL/ELIM), which has not been started.
   `isRealDelineable_of_fiber_natDegree_eq_zero` handles nonzero constant fibres.
   `fiberPoly_eq_reductum_map_of_leadingCoeff_eq_zero` provides the reductum/fibre bridge
   needed by effective-reductum arguments.
-- Next step after Cluster E: Cluster F (logic/EVAL/ELIM), pending confirmation.
+- Cluster F completes the blueprint's logic, EVAL, and ELIM nodes. No later cluster
+  has been started.
 
 ### Cluster A notes
 
