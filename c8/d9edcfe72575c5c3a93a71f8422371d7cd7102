@@ -1,0 +1,151 @@
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Basic.lean
+  s_e7a3924fabe171::t_6ed46cbc3c8234 8
+  s_e7a3924fabe171::t_429f973b31a05a 1-7
+  s_e7a3924fabe171::t_10f5750bc64d66 9-11
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/QuantifierStep.lean
+  s_e7a3924fabe171::t_134eb057722d30 126-129
+  s_e7a3924fabe171::t_0faecdfdf838ac 1-8,11,13-15,18,26-49,55-91,94,97-100,103,106-112,118-124,130-144
+  s_e7a3924fabe171::t_846c297d873384 125
+  s_e7a3924fabe171::t_795fa0eadb455f 9-10
+  s_e7a3924fabe171::t_9c0a78bae133b8 50-52
+  s_e7a3924fabe171::t_840fb11cd6d917 113
+  s_e7a3924fabe171::t_c8c470ea413213 16-17
+  s_e7a3924fabe171::t_2fe8c40c90c941 21,23-24
+  s_e7a3924fabe171::t_ac6b47ade60399 19-20,22
+  s_e7a3924fabe171::t_0a2c96d2625c7a 93,96,102,105
+  s_e7a3924fabe171::t_2ed5c66e711254 25,95,101
+  s_e7a3924fabe171::t_e16c8ddc5dfaf0 12
+  s_e7a3924fabe171::t_cf8597248f87b9 114-117
+  s_e7a3924fabe171::t_af76cb1e65c294 92,104
+  s_e7a3924fabe171::t_507b96c4283086 53-54
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/CAD/Structure.lean
+  s_e7a3924fabe171::t_079dc42a533eee 124
+  s_e7a3924fabe171::t_e978622d984779 94,106,116
+  s_e7a3924fabe171::t_95aec35d4a4ff5 95,109,117,131
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Prefix.lean
+  s_e7a3924fabe171::t_79724379f0fe17 81
+  s_e7a3924fabe171::t_771476c8ffef19 85-86
+  s_e7a3924fabe171::t_352f8735284c2b 1-30,32-49,51-74,76-77,79-80,82-84,87-94
+  s_e7a3924fabe171::t_e524e60ac329d8 31,50
+  s_e7a3924fabe171::t_acc1a12158999a 75,78
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/OrderedRing.lean
+  s_e7a3924fabe171::t_a489f322e30932 109-110,114-115
+  s_e7a3924fabe171::t_132c92a7b18f29 68-75
+  s_e7a3924fabe171::t_0bd9f268c714b3 129-132
+  s_e7a3924fabe171::t_bf5286e563c75d 135-136
+  s_e7a3924fabe171::t_a11ca3ad8403a3 1-4,20,37,67,76-77,79-80,82-83,85-86,88-89,91-92,94-95,97-98,100-101,103-104,106-108,111-113,116-118,120-122,124-126,128,133,166-167
+  s_e7a3924fabe171::t_994aaa46fed595 5-6
+  s_e7a3924fabe171::t_eb29e39d7d2d0b 27
+  s_e7a3924fabe171::t_cdb172f68baaef 21
+  s_e7a3924fabe171::t_3355a6958f0f4b 7-19,22-26,28,30-31,33-36,38-66,119,123,127,134,137-165
+  s_e7a3924fabe171::t_53cf8263c092ec 78,81,84,87,90,93,96,99,102,105
+  s_e7a3924fabe171::t_76416783b416a1 29,32
+demos/formalizations/CylindricalAlgDecomposition/axbt_project.yml
+  s_e7a3924fabe171::t_f979f0795f4112 12-13
+demos/formalizations/CylindricalAlgDecomposition/README.md
+  s_e7a3924fabe171::t_a85a7a5f05d77d 16,18-20,31
+  s_e7a3924fabe171::t_0d3db5e3dd81e2 10,12
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/SignFormula.lean
+  s_e7a3924fabe171::t_6c93c625681df0 37-40,42-50
+  s_e7a3924fabe171::t_6b54da8ea27c73 78,100
+  s_e7a3924fabe171::t_a7fc3b16c2002d 157-162
+  s_e7a3924fabe171::t_6fcdfd9272f120 41
+  s_e7a3924fabe171::t_36337e144305b1 54,57-59,64-65,68,72,86-87,90,94,114,146,148
+  s_e7a3924fabe171::t_77c5e9a05fb6ee 17-21,28-30,69,91
+  s_e7a3924fabe171::t_5f2cdabd76d86b 61-62,66,70-71,73-77,81-84,88,92-93,95-99,103-104,156
+  s_e7a3924fabe171::t_ec8266132761d8 22
+  s_e7a3924fabe171::t_a5105240fd51b1 63,67,79-80,85,89,101-102
+  s_e7a3924fabe171::t_07528426b4d729 1-16,23-27,31-36,51-53,55-56,60,105-113,115-145,147,149-155,163-164
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/ElimStep.lean
+  s_e7a3924fabe171::t_23c16ff991402c 48-49,55-56,103-105
+  s_e7a3924fabe171::t_459a42fcf1a68e 20-21
+  s_e7a3924fabe171::t_d64d4225f03327 43-44,80-81
+  s_e7a3924fabe171::t_77841482cd5759 83-85,100-101
+  s_e7a3924fabe171::t_a74c7eb51f2a28 1-19,22-42,45-47,50-54,57-79,82,86-99,102,106-107
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/AtomPolys.lean
+  s_e7a3924fabe171::t_512bcd49ce8800 68
+  s_e7a3924fabe171::t_77a0deb30eec70 78-83
+  s_e7a3924fabe171::t_900d5dc62864f4 95,99-100,102-106
+  s_e7a3924fabe171::t_3e6a31ac23c6f4 96
+  s_e7a3924fabe171::t_3e488c31031389 168
+  s_e7a3924fabe171::t_ae46e4f9fcce69 175
+  s_e7a3924fabe171::t_7fca2b7306273a 34-35
+  s_e7a3924fabe171::t_d9f62fc4d8f579 144-149,151,161-167,169
+  s_e7a3924fabe171::t_26c20f89277fd2 85-87
+  s_e7a3924fabe171::t_bae92029d809d5 101
+  s_e7a3924fabe171::t_255ebbcc6ed9e5 70-72
+  s_e7a3924fabe171::t_1efa3c2b71f7ac 150
+  s_e7a3924fabe171::t_91275a20f34e17 47,51
+  s_e7a3924fabe171::t_3a52162c25e696 157
+  s_e7a3924fabe171::t_aa0e55d7b03113 43-46,48-50
+  s_e7a3924fabe171::t_e233828140af3e 93-94,97-98
+  s_e7a3924fabe171::t_ef46f7c4c74012 39-42,52-64
+  s_e7a3924fabe171::t_1cd4f075bbd3b1 24
+  s_e7a3924fabe171::t_8e51a56c9137f5 11
+  s_e7a3924fabe171::t_b1f4bd2aeeb23b 1-10,12-23,25-33,36,38,65-67,69,73-77,88-92,107-143,152-156,158-160,170-174,176-177
+  s_e7a3924fabe171::t_015403bb72ab2f 37
+  s_e7a3924fabe171::t_81285b5ed61013 84
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  s_e7a3924fabe171::t_694c1d73bc50f1 219-220
+  s_e7a3924fabe171::t_2176e8db4c077b 37-38
+  s_e7a3924fabe171::t_f1066d0765e4c8 25-28,57,59-91,141-142
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Elim.lean
+  s_e7a3924fabe171::t_366f4c474b7277 21-22,31,33-34,48,50-51
+  s_e7a3924fabe171::t_7d54764eb12d00 29,46
+  s_e7a3924fabe171::t_0f43b8697714e0 38,53,55,72
+  s_e7a3924fabe171::t_046c1c8543c5b6 32,36,49
+  s_e7a3924fabe171::t_d12d7a76d3c3fc 90
+  s_e7a3924fabe171::t_2f7510ddf7c08a 1-20,23-27,30,35,37,39-44,47,52,54,56-67,69-71,73-89,91-102
+  s_e7a3924fabe171::t_b8183c1be383b1 28,45,68
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/TermPoly.lean
+  s_e7a3924fabe171::t_805ffac220592a 234-235
+  s_e7a3924fabe171::t_f94fe7ad4b1695 72
+  s_e7a3924fabe171::t_881da2affe5679 29
+  s_e7a3924fabe171::t_061f66a5788599 92-115
+  s_e7a3924fabe171::t_2020491293ba71 91
+  s_e7a3924fabe171::t_b5bb404bf1efac 213
+  s_e7a3924fabe171::t_3eb35b9dc613e0 236
+  s_e7a3924fabe171::t_a7482e8c73fc25 17-18
+  s_e7a3924fabe171::t_530543590ca4e6 145
+  s_e7a3924fabe171::t_69d8bebd99525b 24-25,28,30-36
+  s_e7a3924fabe171::t_0822ba816090fd 203
+  s_e7a3924fabe171::t_ba9f0799a49a98 1-16,22-23,37,64,66-71,73-88,116-135,137-144,146-153,155,160-161,163-164,167-193,195-201,206-212,214-219,221-225,229-233,237-238
+  s_e7a3924fabe171::t_5c5c7ec4f7093c 65
+  s_e7a3924fabe171::t_6caced20f3ee30 136
+  s_e7a3924fabe171::t_41116a6e53f42d 154,156-159,162,165-166
+  s_e7a3924fabe171::t_884b84a4d3a6b6 26-27
+  s_e7a3924fabe171::t_500658b03b60ff 194
+  s_e7a3924fabe171::t_36b8b5c4d5347e 38-63
+  s_e7a3924fabe171::t_e5b29e4480aa65 220
+  s_e7a3924fabe171::t_712f36d2191750 19-21
+  s_e7a3924fabe171::t_e38e28f79444d2 89-90
+  s_e7a3924fabe171::t_a11ab5255023e8 202,204-205
+  s_e7a3924fabe171::t_16488569a1fad7 226-228
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Logic/Evaluation.lean
+  s_e7a3924fabe171::t_86d9d414c611b7 66
+  s_e7a3924fabe171::t_ecf8e1fcacb3a9 53
+  s_e7a3924fabe171::t_d8410302533b98 35-36,38-39
+  s_e7a3924fabe171::t_190aedd11b231f 56
+  s_e7a3924fabe171::t_b8432a7d54188b 40
+  s_e7a3924fabe171::t_3610c5302c1d3a 51-52,54-55
+  s_e7a3924fabe171::t_dba89c32c111b5 37
+  s_e7a3924fabe171::t_a17851cb2af1ed 1-34,41-50,57-58,65,67,73-92
+  s_e7a3924fabe171::t_63473df873e314 68-72
+  s_e7a3924fabe171::t_50116089ca43c5 59-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "c8d9edcfe72575c5c3a93a71f8422371d7cd7102",
+  "prompts": {},
+  "sessions": {
+    "s_e7a3924fabe171": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_de7e64e5effeFWaKRGw7T7j1U1",
+        "model": "hungerg-free"
+      },
+      "human_author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
