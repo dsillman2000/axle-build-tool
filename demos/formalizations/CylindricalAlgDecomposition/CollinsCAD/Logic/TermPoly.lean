@@ -1,5 +1,7 @@
 import Logic.OrderedRing
 
+open scoped FirstOrder.Language
+
 namespace FirstOrder.Language
 
 open FirstOrder.Ring
@@ -53,13 +55,13 @@ noncomputable def ringTermToMvPoly {σ : Type*}
     ringTermToMvPoly (Term.func FirstOrder.ringFunc.neg ts) =
       -ringTermToMvPoly (ts 0) := rfl
 
-@[simp] theorem ringTermToMvPoly_zero {σ : Type*} :
-    ringTermToMvPoly (Term.func FirstOrder.ringFunc.zero
-      (default : Fin 0 → Language.ring.Term σ)) = 0 := rfl
+@[simp] theorem ringTermToMvPoly_zero {σ : Type*}
+    (ts : Fin 0 → Language.ring.Term σ) :
+    ringTermToMvPoly (Term.func FirstOrder.ringFunc.zero ts) = 0 := rfl
 
-@[simp] theorem ringTermToMvPoly_one {σ : Type*} :
-    ringTermToMvPoly (Term.func FirstOrder.ringFunc.one
-      (default : Fin 0 → Language.ring.Term σ)) = 1 := rfl
+@[simp] theorem ringTermToMvPoly_one {σ : Type*}
+    (ts : Fin 0 → Language.ring.Term σ) :
+    ringTermToMvPoly (Term.func FirstOrder.ringFunc.one ts) = 1 := rfl
 
 /-- Interpret an ordered-ring term as an integer multivariate polynomial. -/
 noncomputable def termToMvPoly {σ : Type*} (t : orderedRing.Term σ) : MvPolynomial σ ℤ :=

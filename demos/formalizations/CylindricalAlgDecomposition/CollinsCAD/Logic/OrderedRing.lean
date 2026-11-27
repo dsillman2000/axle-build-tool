@@ -1,5 +1,7 @@
 import Logic.Basic
 
+open scoped FirstOrder.Language
+
 namespace FirstOrder.Language
 
 open Structure
@@ -126,8 +128,9 @@ instance (α : Type*) : Neg (orderedRing.Term α) :=
     Term.realize v (-t) = -Term.realize v t := by
   simp [neg_def]
 
-/-- The canonical ring-language structure on `ℝ`. -/
-instance compatibleRingReal : FirstOrder.Ring.CompatibleRing ℝ :=
+/-- The canonical ring-language structure on `ℝ`, enabled explicitly by
+    opening the `FirstOrder.Language` scope. -/
+scoped instance compatibleRingReal : FirstOrder.Ring.CompatibleRing ℝ :=
   FirstOrder.Ring.compatibleRingOfRing ℝ
 
 /-- The inclusion of the ring language into the ordered-ring language. -/

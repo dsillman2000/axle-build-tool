@@ -66,7 +66,9 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
   and free-commutative-ring APIs.
 - `Logic/OrderedRing.lean` defines `FirstOrder.Language.orderedRing` with a primitive
   binary `lt` relation, its `ℝ` structure, ring-style term operations, and strict-order
-  formula helpers. `Logic/TermPoly.lean` defines `termToMvPoly` and `mvPolyToTerm`,
+  formula helpers. `compatibleRingReal` is a scoped instance, enabled downstream with
+  `open scoped FirstOrder.Language` to avoid imposing a global ring-language structure.
+  `Logic/TermPoly.lean` defines `termToMvPoly` and `mvPolyToTerm`,
   proves realization preservation in both directions, and proves the polynomial round
   trip `termToMvPoly_mvPolyToTerm`; syntactic term round trips are intentionally not
   claimed.
@@ -88,7 +90,9 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
 - `Logic/ElimStep.lean` constructs the finite disjunction of translated DEFINE formulas
   for accepting parent cells. `Logic/Elim.lean` proves `Prefix.elim`,
   `logic_elim_prenex`, `rcf_quantifier_elimination`, and `logic_elim_main` using
-  Mathlib's `toPrenex` and `realize_toPrenex`.
+  Mathlib's `toPrenex` and `realize_toPrenex`. It also exports
+  `rcf_quantifier_elimination_fintype` for arbitrary finite variable types and
+  `rcf_sentence_quantifier_elimination` for sentences.
 
 ### Cluster E notes
 

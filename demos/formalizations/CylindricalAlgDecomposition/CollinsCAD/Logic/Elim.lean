@@ -92,6 +92,37 @@ theorem rcf_quantifier_elimination {n : ℕ} (φ : orderedRing.Formula (Fin n)) 
     Formula.boundedFormula_realize_eq_realize] at hp
   exact hp.symm.trans (hψ v)
 
+/-- Quantifier elimination for formulas over any finite variable type. -/
+theorem rcf_quantifier_elimination_fintype {α : Type*} [Fintype α]
+    (φ : orderedRing.Formula α) :
+    ∃ ψ : orderedRing.Formula α,
+      ψ.IsQF ∧ ∀ v : α → ℝ, φ.Realize v ↔ ψ.Realize v := by
+  let e : α ≃ Fin (Fintype.card α) := Fintype.equivFin α
+  rcases rcf_quantifier_elimination (φ.relabel e) with
+    ⟨ψ, hψQF, hψ⟩
+  refine ⟨ψ.relabel e.symm,
+    BoundedFormula.IsQF.relabel hψQF (Sum.inl ∘ e.symm), ?_⟩
+  intro v
+  have hcomp : (v ∘ e.symm) ∘ e = v := by
+    funext a
+    simp
+  calc
+    φ.Realize v ↔ (φ.relabel e).Realize (v ∘ e.symm) := by
+      rw [Formula.realize_relabel, hcomp]
+    _ ↔ ψ.Realize (v ∘ e.symm) := hψ (v ∘ e.symm)
+    _ ↔ (ψ.relabel e.symm).Realize v := by
+      rw [Formula.realize_relabel]
+
+/-- Quantifier elimination for ordered-ring sentences. -/
+theorem rcf_sentence_quantifier_elimination (φ : orderedRing.Sentence) :
+    ∃ ψ : orderedRing.Sentence,
+      ψ.IsQF ∧ (Sentence.Realize (L := orderedRing) (M := ℝ) φ ↔
+        Sentence.Realize (L := orderedRing) (M := ℝ) ψ) := by
+  rcases rcf_quantifier_elimination_fintype φ with ⟨ψ, hψQF, hψ⟩
+  refine ⟨ψ, hψQF, ?_⟩
+  simpa only [Sentence.Realize] using
+    hψ (@default (Empty → ℝ) Unique.instInhabited)
+
 /-- Blueprint name for the main real-closed-field quantifier-elimination
     theorem. -/
 theorem logic_elim_main {n : ℕ} (φ : orderedRing.Formula (Fin n)) :
