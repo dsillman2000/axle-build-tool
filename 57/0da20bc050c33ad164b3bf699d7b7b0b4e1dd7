@@ -1,0 +1,24 @@
+demos/formalizations/CylindricalAlgDecomposition/AGENTS.md
+  h_4cc74772b10fd4 25-27
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Tests/Circle2D.lean
+  h_4cc74772b10fd4 1-360
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Tests/Linear1D.lean
+  h_4cc74772b10fd4 1-257
+demos/formalizations/CylindricalAlgDecomposition/CollinsCAD/Tests/Parabola2D.lean
+  h_4cc74772b10fd4 1-232
+demos/formalizations/CylindricalAlgDecomposition/README.md
+  h_4cc74772b10fd4 11,13
+demos/formalizations/CylindricalAlgDecomposition/axbt_project.yml
+  h_4cc74772b10fd4 14-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "570da20bc050c33ad164b3bf699d7b7b0b4e1dd7",
+  "prompts": {},
+  "humans": {
+    "h_4cc74772b10fd4": {
+      "author": "dsillman2000 <dsillman2000@yahoo.com>"
+    }
+  }
+}
