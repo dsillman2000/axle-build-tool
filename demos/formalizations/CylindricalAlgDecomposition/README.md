@@ -8,8 +8,9 @@ Lean 4 / Mathlib formalization of George E. Collins' cylindrical algebraic decom
 - `Analysis` → `CollinsCAD/Analysis/`
 - `CAD` → `CollinsCAD/CAD/`
 - `Logic` → `CollinsCAD/Logic/`
+- `Tests` → `CollinsCAD/Tests/`
 
-Imports use `Algebra.*`, `Analysis.*`, `CAD.*`, and `Logic.*`; the Lean namespace remains `CollinsCAD` for CAD-specific declarations, with first-order language declarations in `FirstOrder.Language`.
+Imports use `Algebra.*`, `Analysis.*`, `CAD.*`, `Logic.*`, and `Tests.*`; the Lean namespace remains `CollinsCAD` for CAD-specific declarations, with first-order language declarations in `FirstOrder.Language`.
 
 ## Current coverage
 
