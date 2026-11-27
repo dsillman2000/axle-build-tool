@@ -145,14 +145,15 @@ theorem symm_derivative_mem_augPolySet
         derivativeIter j B := by simp
     rw [hfin] at hD
     rcases mem_derivativeTower.mp hD with ⟨l, hl, hDl, hDne⟩
+    have hDmem : derivativeIter l (derivativeIter j B) ∈ derivativeTower B :=
+      derivative_iterate_mem_tower B j l hj hl (by simpa only [hDl] using hDne)
+    rcases mem_derivativeTower.mp hDmem with ⟨t, ht, hDt, hDtne⟩
+    have hDtne' : derivativeIter t B ≠ 0 := by
+      rw [hDt]
+      exact hDtne
     apply mem_augPolySet.mpr
-    refine Or.inr ⟨B, hB, j + l, ?_, ?_, ?_⟩
-    · have hdeg : (derivativeIter j B).natDegree ≤ B.natDegree - j := by
-        simpa [derivativeIter] using Polynomial.natDegree_iterate_derivative B j
-      omega
-    · rw [derivativeIter_add, hDl]
-      exact hDne
-    · rw [derivativeIter_add, hDl]
+    refine Or.inr ⟨B, hB, t, ht, hDtne', ?_⟩
+    rw [hDt, hDl]
 
 /-- The cell-local augmented family. -/
 noncomputable def localAugPolySet (A : Finset (MvPolynomial (Fin (r + 1)) ℝ))

@@ -77,7 +77,9 @@ instance orderedRingStructure : orderedRing.Structure ℝ where
 @[simp] theorem orderedRing_relMap_lt (x : Fin 2 → ℝ) :
     @Structure.RelMap orderedRing ℝ _ 2 ltSymb x = (x 0 < x 1) := rfl
 
-/-- Ring-style operations on ordered-ring terms. -/
+/-- Public ring-style term-building API. The current DEFINE translation only
+    needs zero, but the full operation set and realization lemmas make the
+    ordered-ring language convenient for downstream examples and clients. -/
 instance (α : Type*) : Zero (orderedRing.Term α) :=
   ⟨Constants.term zeroFunc⟩
 

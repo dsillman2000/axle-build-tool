@@ -65,29 +65,6 @@ theorem IsCylinderPartition.fiber_unique (L : Cylinder r)
   by_contra hne
   exact (Set.disjoint_left.mp (hL.2.2.1 c hc d hd (Ne.symm hne))) hxc hxd
 
-/-- Two points in the same lifted child have equal fibre signs. -/
-theorem Cylinder.sign_fiber_eq_of_mem (L : Cylinder r) {d : Cell (r + 1)}
-    (hd : d ∈ L.children) {Q : MvPolynomial (Fin (r + 1)) ℝ} (hQ : Q ∈ L.family)
-    {z w : Fin (r + 1) → ℝ} (hz : z ∈ d.carrier) (hw : w ∈ d.carrier) :
-    SignType.sign (Polynomial.eval (z (Fin.last r))
-      (fiberPoly r Q (Fin.init z))) =
-    SignType.sign (Polynomial.eval (w (Fin.last r))
-      (fiberPoly r Q (Fin.init w))) := by
-  rcases L.invariant d hd Q hQ with ⟨s, hs⟩
-  simpa only [fiberPoly_eval, Fin.snoc_init_self] using
-    (hs z hz).trans (hs w hw).symm
-
-/-- Two points over the same base point in one lifted child have equal
-    fibre signs. -/
-theorem Cylinder.sign_fiber_eq_of_snoc_mem (L : Cylinder r) {d : Cell (r + 1)}
-    (hd : d ∈ L.children) {Q : MvPolynomial (Fin (r + 1)) ℝ} (hQ : Q ∈ L.family)
-    {a : Fin r → ℝ} {x y : ℝ}
-    (hx : Fin.snoc a x ∈ d.carrier) (hy : Fin.snoc a y ∈ d.carrier) :
-    SignType.sign (Polynomial.eval x (fiberPoly r Q a)) =
-      SignType.sign (Polynomial.eval y (fiberPoly r Q a)) := by
-  rcases L.invariant d hd Q hQ with ⟨s, hs⟩
-  simpa only [fiberPoly_eval] using (hs _ hx).trans (hs _ hy).symm
-
 /-- Fibre signs agree at two points of the same lifted child, even when their
     base coordinates differ. -/
 theorem Cylinder.sign_fiber_eq_of_snoc_mem_general (L : Cylinder r) {d : Cell (r + 1)}

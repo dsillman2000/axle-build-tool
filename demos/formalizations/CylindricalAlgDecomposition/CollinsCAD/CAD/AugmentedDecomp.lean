@@ -112,52 +112,24 @@ theorem exists_augmented_cad (r : ℕ) (A : Finset (MvPolynomial (Fin r) ℝ)) :
           IsAugmentedCylinder A L ∧ ∀ d ∈ L.children, SignInvariant A d.carrier := by
       intro c
       exact exists_augmented_cylinder (A := A) c.1 (hinv c.1 c.2)
-    choose L hparent hpart haug hinvL using hcyl
-    let edges : List (Cylinder r) := Tprev.cells.attach.map L
-    have hLinj : Function.Injective L := by
-      intro c d heq
-      apply Subtype.ext
-      have hp := congrArg Cylinder.parent heq
-      simpa [hparent c, hparent d] using hp
-    have hedges_nodup : edges.Nodup :=
-      (List.nodup_attach.mpr Tprev.decomposition.cells_nodup).map hLinj
-    have hparent_mem : ∀ M ∈ edges, M.parent ∈ Tprev.cells := by
-      intro M hM
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      rw [hparent c]
-      exact c.2
-    have hcomplete : ∀ c ∈ Tprev.cells, ∃ M ∈ edges, M.parent = c := by
-      intro c hc
-      let cs : {c : Cell r // c ∈ Tprev.cells} := ⟨c, hc⟩
-      refine ⟨L cs, ?_, hparent cs⟩
-      exact List.mem_map.mpr ⟨cs, List.mem_attach _ _, rfl⟩
-    have hunique : ∀ M ∈ edges, ∀ N ∈ edges, M.parent = N.parent → M = N := by
-      intro M hM N hN hparentEq
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      rcases List.mem_map.mp hN with ⟨d, hd, rfl⟩
-      apply congrArg L
-      apply Subtype.ext
-      simpa [hparent c, hparent d] using hparentEq
-    have hpart_edges : ∀ M ∈ edges, IsCylinderPartition M := by
-      intro M hM
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      exact hpart c
-    have haug_edges : ∀ M ∈ edges, IsAugmentedCylinder A M := by
-      intro M hM
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      exact haug c
-    rcases exists_decomposition_lift Tprev.decomposition edges hedges_nodup
-      hparent_mem hcomplete hunique hpart_edges with ⟨E, hmap⟩
-    let T : CAD (r + 1) := .succ Tprev E edges
-    refine ⟨T, ⟨hprev, hmap⟩, ?_, ⟨hprov, hmap, haug_edges⟩⟩
-    intro d hd
-    have hcells : E.cells = edges.flatMap (fun M => M.children) :=
-      hmap.2.2.2.2.1
-    have hd' : d ∈ edges.flatMap (fun M => M.children) := by
-      rw [← hcells]
-      exact hd
-    rcases List.mem_flatMap.mp hd' with ⟨M, hM, hdM⟩
-    rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-    exact hinvL c d hdM
+    rcases exists_cad_succ_of_cylinder_builder Tprev hprev
+        (fun L => IsAugmentedCylinder A L ∧
+          ∀ d ∈ L.children, SignInvariant A d.carrier) hcyl with
+      ⟨T, hT, hTprev, hP⟩
+    have hmap := IsCAD.parentChildMap hT
+    have haug : ∀ L ∈ T.parentChildren, IsAugmentedCylinder A L :=
+      fun L hL => (hP L hL).1
+    refine ⟨T, hT, ?_, ?_⟩
+    · intro d hd
+      have hd' : d ∈ T.parentChildren.flatMap (fun M => M.children) := by
+        rw [← hmap.2.2.2.2.1]
+        exact hd
+      rcases List.mem_flatMap.mp hd' with ⟨M, hM, hdM⟩
+      exact (hP M hM).2 d hdM
+    · cases T with
+      | succ previous next edges =>
+        have hprevEq : previous = Tprev := hTprev
+        subst previous
+        exact ⟨hprov, hmap, haug⟩
 
 end CollinsCAD

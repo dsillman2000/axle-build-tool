@@ -118,14 +118,16 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
   plus nonvanishing gives sign invariance. Excluded factors vanish identically.
 - `CAD/Decomp.lean` proves `exists_decomposition_lift`, `cad_decomp_exists`, and
   `cad_base_r1`. The induction is uniform from `r = 0`; there is no separate
-  univariate base construction.
+  univariate base construction. `exists_cad_succ_of_cylinder_builder` centralizes
+  the parent-to-child list assembly shared with augmented decomposition.
 - `Analysis/ThomCells.lean` and `Analysis/ThomLemma.lean` classify derivative-sign
   cells as empty, singleton, or nonempty open order-connected sets.
   `Analysis/ThomFamily.lean` extends this to finite families and proves that equal
   derivative signs cannot cross a family root.
 - `CAD/AugmentedProjection.lean` builds `derivativeTower`, `augPolySet`, and
   `augProj` directly from effective reducta and iterated last-variable derivatives.
-  `localAugPolySet` filters the global envelope at a cell sample. Derivatives
+  `derivative_iterate_mem_tower` is reused by `symm_derivative_mem_augPolySet`, so
+  derivative-tower closure has one proof. `localAugPolySet` filters the global envelope at a cell sample. Derivatives
   omitted by the filter are handled by an explicit identically-zero dichotomy;
   no commutation between differentiation and `eraseLead` is assumed.
 - `CAD/AugmentedDecomp.lean` records `HasAugmentedProvenance` on the existing CAD
@@ -133,7 +135,9 @@ ordered-ring first-order logic, EVAL, ELIM, and the main quantifier-elimination 
   augmented family, nonvanishing fibres, derivative dichotomy, and original-family
   invariance.
 - `CAD/LiftRootSeparation.lean` and `CAD/LiftSignVector.lean` prove fixed-fibre
-  sign-vector uniqueness from root separation and the family Thom theorem.
+  sign-vector uniqueness from root separation and the family Thom theorem. The
+  general `Cylinder.sign_fiber_eq_of_snoc_mem_general` lemma subsumes the older
+  same-base and arbitrary-point fibre-sign variants.
 - `CAD/SignFormula.lean` defines semantic `SignCondition`/`SignFormula`, prefixing,
   sample sign vectors, and the finite `definePolys` support envelope.
   `CAD/Integrality.lean` defines `IsIntPoly`/`IsIntUPoly` and proves closure through

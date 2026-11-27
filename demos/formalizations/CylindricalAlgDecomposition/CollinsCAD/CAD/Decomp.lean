@@ -102,6 +102,53 @@ theorem exists_decomposition_lift (D : Decomposition r)
   refine ⟨E, ?_⟩
   exact ⟨hedges_nodup, hparent_mem, hcomplete, hunique, rfl, hpart⟩
 
+/-- Assemble a successor CAD from one certified cylinder over every parent
+    cell, retaining an arbitrary additional predicate on the cylinders. -/
+theorem exists_cad_succ_of_cylinder_builder {r : ℕ}
+    (Tprev : CAD r) (hprev : IsCAD Tprev) (P : Cylinder r → Prop)
+    (hcyl : ∀ c : {c : Cell r // c ∈ Tprev.cells},
+      ∃ L : Cylinder r, L.parent = c.1 ∧ IsCylinderPartition L ∧ P L) :
+    ∃ T : CAD (r + 1), IsCAD T ∧ T.previous = Tprev ∧
+      ∀ L ∈ T.parentChildren, P L := by
+  classical
+  choose L hparent hpart hP using hcyl
+  let edges : List (Cylinder r) := Tprev.cells.attach.map L
+  have hLinj : Function.Injective L := by
+    intro c d heq
+    apply Subtype.ext
+    have hp := congrArg Cylinder.parent heq
+    simpa [hparent c, hparent d] using hp
+  have hedges_nodup : edges.Nodup :=
+    (List.nodup_attach.mpr Tprev.decomposition.cells_nodup).map hLinj
+  have hparent_mem : ∀ M ∈ edges, M.parent ∈ Tprev.cells := by
+    intro M hM
+    rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
+    rw [hparent c]
+    exact c.2
+  have hcomplete : ∀ c ∈ Tprev.cells, ∃ M ∈ edges, M.parent = c := by
+    intro c hc
+    let cs : {c : Cell r // c ∈ Tprev.cells} := ⟨c, hc⟩
+    refine ⟨L cs, ?_, hparent cs⟩
+    exact List.mem_map.mpr ⟨cs, List.mem_attach _ _, rfl⟩
+  have hunique : ∀ M ∈ edges, ∀ N ∈ edges, M.parent = N.parent → M = N := by
+    intro M hM N hN hparentEq
+    rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
+    rcases List.mem_map.mp hN with ⟨d, hd, rfl⟩
+    apply congrArg L
+    apply Subtype.ext
+    simpa [hparent c, hparent d] using hparentEq
+  have hpart_edges : ∀ M ∈ edges, IsCylinderPartition M := by
+    intro M hM
+    rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
+    exact hpart c
+  rcases exists_decomposition_lift Tprev.decomposition edges hedges_nodup
+    hparent_mem hcomplete hunique hpart_edges with ⟨E, hmap⟩
+  let T : CAD (r + 1) := .succ Tprev E edges
+  refine ⟨T, ⟨hprev, hmap⟩, rfl, ?_⟩
+  intro M hM
+  rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
+  exact hP c
+
 /-- Collins' DECOMP existence theorem, with uniform induction from dimension
     zero. -/
 theorem cad_decomp_exists (r : ℕ) (A : Finset (MvPolynomial (Fin r) ℝ)) :
@@ -116,49 +163,17 @@ theorem cad_decomp_exists (r : ℕ) (A : Finset (MvPolynomial (Fin r) ℝ)) :
           ∀ d ∈ L.children, SignInvariant A d.carrier := by
       intro c
       exact exists_cylinder_of_signInvariant_proj c.1 (hinv c.1 c.2)
-    choose L hparent hpart hinvL using hcyl
-    let edges : List (Cylinder r) := Tprev.cells.attach.map L
-    have hLinj : Function.Injective L := by
-      intro c d heq
-      apply Subtype.ext
-      have hp := congrArg Cylinder.parent heq
-      simpa [hparent c, hparent d] using hp
-    have hedges_nodup : edges.Nodup := by
-      exact (List.nodup_attach.mpr Tprev.decomposition.cells_nodup).map hLinj
-    have hparent_mem : ∀ M ∈ edges, M.parent ∈ Tprev.cells := by
-      intro M hM
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      rw [hparent c]
-      exact c.2
-    have hcomplete : ∀ c ∈ Tprev.cells, ∃ M ∈ edges, M.parent = c := by
-      intro c hc
-      let cs : {c : Cell r // c ∈ Tprev.cells} := ⟨c, hc⟩
-      refine ⟨L cs, ?_, hparent cs⟩
-      exact List.mem_map.mpr ⟨cs, List.mem_attach _ _, rfl⟩
-    have hunique : ∀ M ∈ edges, ∀ N ∈ edges, M.parent = N.parent → M = N := by
-      intro M hM N hN hparentEq
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      rcases List.mem_map.mp hN with ⟨d, hd, rfl⟩
-      apply congrArg L
-      apply Subtype.ext
-      simpa [hparent c, hparent d] using hparentEq
-    have hpart_edges : ∀ M ∈ edges, IsCylinderPartition M := by
-      intro M hM
-      rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-      exact hpart c
-    rcases exists_decomposition_lift Tprev.decomposition edges hedges_nodup
-      hparent_mem hcomplete hunique hpart_edges with ⟨E, hmap⟩
-    let T : CAD (r + 1) := .succ Tprev E edges
-    refine ⟨T, ⟨hprev, hmap⟩, ?_⟩
+    rcases exists_cad_succ_of_cylinder_builder Tprev hprev
+        (fun L => ∀ d ∈ L.children, SignInvariant A d.carrier) hcyl with
+      ⟨T, hT, _hTprev, hinvL⟩
+    refine ⟨T, hT, ?_⟩
     intro d hd
-    have hcells : E.cells = edges.flatMap (fun M => M.children) :=
-      hmap.2.2.2.2.1
-    have hd' : d ∈ edges.flatMap (fun M => M.children) := by
-      rw [← hcells]
+    have hmap := IsCAD.parentChildMap hT
+    have hd' : d ∈ T.parentChildren.flatMap (fun M => M.children) := by
+      rw [← hmap.2.2.2.2.1]
       exact hd
     rcases List.mem_flatMap.mp hd' with ⟨M, hM, hdM⟩
-    rcases List.mem_map.mp hM with ⟨c, hc, rfl⟩
-    exact hinvL c d hdM
+    exact hinvL M hM d hdM
 
 /-- The one-dimensional base case is the uniform DECOMP construction at
     `r = 1`. -/
